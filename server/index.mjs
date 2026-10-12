@@ -31,6 +31,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, createReadStream, s
 import { dirname, join, extname, resolve, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { inferReplayPositions } from './gc/infer-replay-positions.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const DATA = join(ROOT, 'data')
@@ -72,6 +73,37 @@ function writeJson(path, value) {
 /** Матч неизменяем → храним навсегда. */
 function matchPath(id) {
   return join(DATA, 'matches', `${id}.json`)
+}
+
+function replayPositions(match) {
+  const replay = readJson(join(DATA, 'replays', `${match.id}.json`), null)
+  return Array.isArray(replay?.players) ? inferReplayPositions(match.players, replay.players) : new Map()
+}
+
+function replayPositionFor(match, player) {
+  const team = match.players.filter((p) => p.isRadiant === player.isRadiant)
+  const slot = (player.isRadiant ? 0 : 128) + team.indexOf(player)
+  const role = replayPositions(match).get(slot)
+  return role ?? { position: 0 }
+}
+
+function replayPhaseStats(match, player) {
+  const replay = readJson(join(DATA, 'replays', `${match.id}.json`), null)
+  const team = match.players.filter((p) => p.isRadiant === player.isRadiant)
+  const slot = (player.isRadiant ? 0 : 128) + team.indexOf(player)
+  const parsed = replay?.players?.find((p) => Number(p.player_slot) === slot)
+  if (!parsed) return undefined
+  const at = (series, seconds) => {
+    let i = 0
+    while (i + 1 < (parsed.times?.length ?? 0) && parsed.times[i + 1] <= seconds) i++
+    return Number(series?.[i]) || 0
+  }
+  const count = (events, from, to) => (events ?? []).filter((e) => Number(e.time) >= from && Number(e.time) < to).length
+  return [[0,600,'Начало · 0–10 мин'],[600,1500,'Середина · 10–25 мин'],[1500,match.durationSeconds,'Конец · 25+ мин']]
+    .filter(([from]) => from < match.durationSeconds).map(([from, rawTo, label]) => {
+      const to = Math.min(rawTo, match.durationSeconds)
+      return { label, kills: count(parsed.kills_log, from, to), deaths: count(parsed.deaths_log, from, to), gold: Math.max(0, at(parsed.gold_t, to) - at(parsed.gold_t, from)), networth: Math.max(0, at(parsed.networth_t, to) - at(parsed.networth_t, from)), lastHits: Math.max(0, at(parsed.lh_t, to) - at(parsed.lh_t, from)), experience: Math.max(0, at(parsed.xp_t, to) - at(parsed.xp_t, from)), heroDamage: Math.max(0, at(parsed.hero_damage_t, to) - at(parsed.hero_damage_t, from)), towerDamage: Math.max(0, at(parsed.tower_damage_t, to) - at(parsed.tower_damage_t, from)) }
+    })
 }
 
 /**
@@ -519,6 +551,7 @@ const handlers = {
       if (!m) return null
       const me = m.players.find((p) => p.steamAccountId === id)
       if (!me) return null
+      const role = replayPositionFor(m, me)
       return {
         id: m.id,
         startDateTime: m.startDateTime,
@@ -540,7 +573,8 @@ const handlers = {
           heroDamage: me.heroDamage,
           towerDamage: me.towerDamage,
           heroHealing: me.heroHealing,
-          position: me.position,
+          ...role,
+          positionSource: role.positionSource,
           seasonRank: me.seasonRank,
           isVictory: me.isVictory,
           imp: null,
@@ -556,10 +590,17 @@ const handlers = {
     if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный ID матча')
     const match = await ensureMatch(id)
     const profiles = await resolveProfiles(match.players.map((p) => p.steamAccountId))
+    const positions = replayPositions(match)
+    const slotByPlayer = new Map()
+    for (const radiant of [true, false]) {
+      match.players.filter((p) => p.isRadiant === radiant).forEach((p, i) => slotByPlayer.set(p, (radiant ? 0 : 128) + i))
+    }
     return {
       ...match,
       players: match.players.map((p) => ({
         ...p,
+        ...(positions.get(slotByPlayer.get(p)) ?? { position: 0 }),
+        impactPhases: replayPhaseStats(match, p),
         name: profiles.get(p.steamAccountId)?.name ?? null,
       })),
     }

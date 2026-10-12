@@ -8,7 +8,33 @@ import { DEMO_MODE } from './api/client'
 import { apiHealth } from './api'
 
 function HomePage() {
-  return <div className="setup-banner">Введите Steam ID в поиске выше, чтобы открыть профиль и матчи.</div>
+  return (
+    <div className="home-page">
+      <section className="home-hero">
+        <div className="home-copy">
+          <h1>Смотри не только счёт.<br /><span>Разбирай сам матч.</span></h1>
+          <p>Профиль игрока, ход игры и решения по ходу матча — в одном месте.</p>
+          <button className="home-search-cta" type="button" onClick={() => document.querySelector<HTMLInputElement>('.search input')?.focus()}>
+            Найти игрока
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h13m-5-5 5 5-5 5" /></svg>
+          </button>
+        </div>
+        <div className="home-board" aria-label="Что можно изучить: счёт, героев и покупки">
+          <div className="board-line board-top"><span>ИГРА</span><span>РАЗБОР</span></div>
+          <div className="board-matchup"><div><i />Radiant</div><span>VS</span><div><i />Dire</div></div>
+          <div className="board-details">
+            <span>Счёт и драфт</span><span>Раскачка по уровням</span><span>Покупки по времени</span>
+          </div>
+          <svg className="board-route" viewBox="0 0 480 90" preserveAspectRatio="none" aria-hidden="true"><path d="M4 70 C95 70 92 18 180 18 S270 72 345 54 405 16 476 18" /><circle cx="4" cy="70" r="4" /><circle cx="180" cy="18" r="4" /><circle cx="345" cy="54" r="4" /><circle cx="476" cy="18" r="4" /></svg>
+        </div>
+      </section>
+      <section className="home-index" aria-label="Разделы сайта">
+        <div><span>01</span><strong>Профиль</strong><small>Результаты, герои и друзья</small></div>
+        <div><span>02</span><strong>Матчи</strong><small>Счёт, драфт и вклад игроков</small></div>
+        <div><span>03</span><strong>Сборка</strong><small>Покупки и раскачка по ходу игры</small></div>
+      </section>
+    </div>
+  )
 }
 
 export default function App() {

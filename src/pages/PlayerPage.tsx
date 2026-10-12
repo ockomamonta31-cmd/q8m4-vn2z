@@ -169,130 +169,74 @@ export default function PlayerPage() {
   if (!profile) return null
 
   return (
-    <div>
+    <div className="player-page">
       <PlayerHeader profile={profile} lastMatchTime={matches[0]?.startDateTime ?? null} />
 
-      <nav className="tabs" role="tablist">
+      <nav className="tabs" role="tablist" aria-label="Разделы профиля">
         {TABS.map((t) => (
-          <button
-            key={t}
-            role="tab"
-            aria-selected={t === tab}
-            className={`tab ${t === tab ? 'active' : ''}`}
-            onClick={() => setTab(t)}
-          >
+          <button key={t} role="tab" aria-selected={t === tab} className={`tab ${t === tab ? 'active' : ''}`} onClick={() => setTab(t)}>
             {t}
           </button>
         ))}
       </nav>
 
       {tab === 'Обзор' && (
-        <>
-          {averages ? (
-            <div className="stat-grid">
-              <div className="stat-tile">
-                <div className="tile-label">Винрейт (посл. {averages.n})</div>
-                <div className="tile-value">{fmtWinrate(averages.wins, averages.n)}</div>
-                <div className="tile-sub">
-                  {averages.wins} побед / {averages.n - averages.wins} поражений
-                </div>
-              </div>
-              <div className="stat-tile">
-                <div className="tile-label">Средний KDA</div>
-                <div className="tile-value">{averages.kda.toFixed(2)}</div>
-                <div className="tile-sub">
-                  {averages.avgK.toFixed(1)} / {averages.avgD.toFixed(1)} / {averages.avgA.toFixed(1)}
-                </div>
-              </div>
-              <div className="stat-tile">
-                <div className="tile-label">GPM</div>
-                <div className="tile-value">{Math.round(averages.gpm)}</div>
-                <div className="tile-sub">золото в минуту</div>
-              </div>
-              <div className="stat-tile">
-                <div className="tile-label">XPM</div>
-                <div className="tile-value">{Math.round(averages.xpm)}</div>
-                <div className="tile-sub">опыт в минуту</div>
-              </div>
-              <div className="stat-tile">
-                <div className="tile-label">Убийств за матч</div>
-                <div className="tile-value">{averages.avgK.toFixed(1)}</div>
-                <div className="tile-sub">среднее по {averages.n} матчам</div>
-              </div>
-              <div className="stat-tile">
-                <div className="tile-label">Смертей за матч</div>
-                <div className="tile-value">{averages.avgD.toFixed(1)}</div>
-                <div className="tile-sub">среднее по {averages.n} матчам</div>
-              </div>
-            </div>
-          ) : (
-            <div className="inline-note">Нет загруженных матчей для статистики.</div>
-          )}
+        <div className="overview-grid">
+          <div className="overview-main">
+            {averages ? (
+              <section className="stat-band" aria-label="Средняя статистика по загруженным матчам">
+                <div className="stat-cell stat-primary"><span>Винрейт · последние {averages.n}</span><strong>{fmtWinrate(averages.wins, averages.n)}</strong><small>{averages.wins} побед / {averages.n - averages.wins} поражений</small></div>
+                <div className="stat-cell"><span>Средний KDA</span><strong>{averages.kda.toFixed(2)}</strong><small>{averages.avgK.toFixed(1)} / {averages.avgD.toFixed(1)} / {averages.avgA.toFixed(1)}</small></div>
+                <div className="stat-cell"><span>Золото в минуту</span><strong>{Math.round(averages.gpm)}</strong><small>GPM</small></div>
+                <div className="stat-cell"><span>Опыт в минуту</span><strong>{Math.round(averages.xpm)}</strong><small>XPM</small></div>
+                <div className="stat-cell"><span>Убийства / матч</span><strong>{averages.avgK.toFixed(1)}</strong><small>в среднем</small></div>
+                <div className="stat-cell"><span>Смерти / матч</span><strong>{averages.avgD.toFixed(1)}</strong><small>в среднем</small></div>
+              </section>
+            ) : <div className="inline-note">Нет загруженных матчей для статистики.</div>}
 
-          <div className="panel">
-            <h2 className="section-title">Последние матчи</h2>
-            <MatchesTable matches={matches.slice(0, 10)} heroMap={heroMap} seasonRank={profile.rank} />
+            <section className="content-section">
+              <header className="section-heading"><h2>Последние матчи</h2><span>10 последних</span></header>
+              <MatchesTable matches={matches.slice(0, 10)} heroMap={heroMap} seasonRank={profile.rank} />
+            </section>
           </div>
 
-          <div className="panel">
-            <h2 className="section-title">Чаще всего играет</h2>
-            {heroStats ? (
-              <HeroesTable stats={heroStats.slice(0, 5)} heroMap={heroMap} />
-            ) : (
-              <div className="inline-note">Статистика по героям недоступна.</div>
-            )}
-          </div>
-        </>
+          <aside className="overview-aside">
+            <section className="content-section heroes-preview">
+              <header className="section-heading"><h2>Чаще всего играет</h2><span>Герои</span></header>
+              {heroStats ? <HeroesTable stats={heroStats.slice(0, 5)} heroMap={heroMap} /> : <div className="inline-note">Статистика по героям недоступна.</div>}
+            </section>
+            <div className="data-note"><strong>Что попало в обзор</strong><span>Сводка рассчитана по загруженным матчам. История и активность догружаются отдельно.</span></div>
+          </aside>
+        </div>
       )}
 
       {tab === 'Матчи' && (
-        <div className="panel">
-          <h2 className="section-title">История матчей</h2>
+        <section className="content-section">
+          <header className="section-heading"><h2>История матчей</h2><span>{matches.length} загружено</span></header>
           <MatchesTable matches={matches} heroMap={heroMap} seasonRank={profile.rank} />
-          <button className="btn" onClick={loadMore} disabled={loadingMore}>
-            {loadingMore ? 'Загрузка…' : 'Показать ещё'}
-          </button>
-        </div>
+          <button className="btn load-more" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Загрузка…' : 'Показать ещё матчи'}</button>
+        </section>
       )}
 
       {tab === 'Герои' && (
-        <div className="panel">
-          <h2 className="section-title">Герои</h2>
-          {heroStats ? (
-            <>
-              <HeroesTable stats={heroStats} heroMap={heroMap} />
-              {heroStatsSource === 'matches' && (
-                <div className="inline-note">
-                  Агрегировано из последних {recent.length} матчей (точные счётчики из API героев недоступны).
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="inline-note">Статистика по героям недоступна.</div>
-          )}
-        </div>
+        <section className="content-section">
+          <header className="section-heading"><h2>Герои</h2>{heroStats && <span>{heroStats.length} героев</span>}</header>
+          {heroStats ? <><HeroesTable stats={heroStats} heroMap={heroMap} />{heroStatsSource === 'matches' && <div className="inline-note">Агрегировано из последних {recent.length} матчей: точные счётчики из API героев недоступны.</div>}</> : <div className="inline-note">Статистика по героям недоступна.</div>}
+        </section>
       )}
 
       {tab === 'Друзья' && (
-        <div className="panel">
-          <h2 className="section-title">Друзья, с которыми играл</h2>
-          {peers ? (
-            <PeersList peers={peers} />
-          ) : (
-            <div className="inline-note">{peersError ?? 'Друзья недоступны.'}</div>
-          )}
-        </div>
+        <section className="content-section">
+          <header className="section-heading"><h2>Друзья, с которыми играл</h2>{peers && <span>{peers.length} игроков</span>}</header>
+          {peers ? <PeersList peers={peers} /> : <div className="inline-note">{peersError ?? 'Друзья недоступны.'}</div>}
+        </section>
       )}
 
       {tab === 'Активность' && (
-        <div className="panel">
-          <h2 className="section-title">Активность</h2>
-          {activityLoading || !activityMatches ? (
-            <div className="spinner" />
-          ) : (
-            <ActivityHeatmap matches={activityMatches} />
-          )}
-        </div>
+        <section className="content-section">
+          <header className="section-heading"><h2>Активность</h2><span>По дням</span></header>
+          {activityLoading || !activityMatches ? <div className="loading-line" aria-label="Загружаем активность" /> : <ActivityHeatmap matches={activityMatches} />}
+        </section>
       )}
     </div>
   )

@@ -1,0 +1,21 @@
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "stratz-personal",
+	"main": "cloudflare/worker.ts",
+	"compatibility_date": "2026-10-12",
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "single-page-application",
+		"binding": "ASSETS",
+		"run_worker_first": [
+			"/api/*"
+		]
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "stratz-cache",
+			"database_id": "da55d3db-c275-4596-b53b-46f6076f9936"
+		}
+	]
+}

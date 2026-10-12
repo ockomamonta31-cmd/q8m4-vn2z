@@ -7,8 +7,9 @@ import { fetchMatch, getItemMap, itemImageUrl } from '../api'
 import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails, type MatchPlayer } from '../api/types'
 import { getHeroMap, heroImageUrl } from '../api/heroes'
 import { fantasyPoints, globalModelInfo, predictImpGlobal, scoreClass } from '../api/performance'
-import { IMPACT_MODEL_READY, impactClass, personalImpact } from '../api/impact'
+import { IMPACT_MODEL_READY, impactClass, personalImpact, personalImpactBreakdown } from '../api/impact'
 import { fmtDuration, gameModeName, lobbyName, steamProfileUrl } from '../api/formats'
+import PositionIcon from '../components/PositionIcon'
 
 type AbilityInfo = { name: string; img: string | null; key: string }
 function useAbilityLookup() {
@@ -62,6 +63,39 @@ function ImpBadge({
     <span className="muted" title={`IMP не рассчитан. Valve-фэнтези: ${fantasyPoints(m).toFixed(1)} баллов`}>
       —
     </span>
+  )
+}
+
+function ImpactDetails({ player, durationSec, score }: { player: MatchPlayer; durationSec: number; score: number }) {
+  const details = personalImpactBreakdown({ ...player, position: 0 }, durationSec, null)
+  const groups = ['Бой', 'Фарм', 'Урон и объекты']
+  const phases = player.impactPhases ?? []
+  const number = (n: number) => n.toLocaleString('ru-RU')
+  return (
+    <section className="impact-breakdown" aria-label="Разбор импакта">
+      <div>
+        <strong>Почему {score > 0 ? '+' : ''}{score}</strong>
+        <p>Та же модель и те же веса. Вклад фактора усреднён по разным порядкам подстановки реальных показателей вместо среднего игрока этого ранга; взаимодействия делятся между факторами. Сумма даёт итог.</p>
+      </div>
+      <div className="impact-factors">
+        {groups.map((group) => {
+          const factors = details?.factors.filter((factor) => factor.section === group) ?? []
+          if (!factors.length) return null
+          const groupScore = factors.reduce((sum, factor) => sum + factor.contribution, 0)
+          return <div key={group}><b className="impact-group-title">{group}<strong className={groupScore >= 0 ? 'impact-plus' : 'impact-minus'}>{groupScore > 0 ? '+' : ''}{groupScore}</strong></b><ul>{factors.map((factor) => <li key={factor.label}>
+            <span>{factor.label}<small>факт {number(factor.actual)} · обычно {number(factor.baseline)}</small></span>
+            <strong className={factor.contribution >= 0 ? 'impact-plus' : 'impact-minus'}>{factor.contribution > 0 ? '+' : ''}{factor.contribution}</strong>
+          </li>)}</ul></div>
+        })}
+      </div>
+      <div className="impact-phase-list">
+        <strong>Что происходило по ходу матча</strong>
+        {phases.length ? phases.map((phase) => <div className="impact-phase" key={phase.label}>
+          <b>{phase.label}</b><span>K/D {phase.kills}/{phase.deaths}</span><span>LH +{number(phase.lastHits)}</span><span>XP +{number(phase.experience)}</span><span>нетворт +{number(phase.networth)}</span><span>урон героям +{number(phase.heroDamage)}</span><span>башням +{number(phase.towerDamage)}</span><span>золото +{number(phase.gold)}</span>
+        </div>) : <p>События реплея для разбивки по времени ещё не загружены.</p>}
+        <small>Периоды показывают динамику из реплея; сама оценка рассчитана по итоговым показателям матча и не пересчитывается отдельно по минутам.</small>
+      </div>
+    </section>
   )
 }
 
@@ -181,6 +215,7 @@ function PlayerRow({
 }) {
   const hero = heroMap.get(p.heroId)
   const [open, setOpen] = useState(false)
+  const [impactOpen, setImpactOpen] = useState(false)
   const hasBuild = p.abilityUpgrades.length > 0 || p.purchaseEvents !== undefined
   const { book: abilityBook } = useAbilityLookup()
   const buildPreview = p.abilityUpgrades.slice(0, 8)
@@ -205,7 +240,10 @@ function PlayerRow({
       >
         <td>
           <div className="hero-cell">
-            {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
+            <span className="hero-portrait">
+              {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
+              <PositionIcon position={p.position} source={p.positionSource} />
+            </span>
             <div className="match-player">
               <span className="player-line">
                 {p.steamAccountId ? (
@@ -225,7 +263,6 @@ function PlayerRow({
               </span>
               <span className="hero-sub muted">
                 {hero?.name ?? `hero #${p.heroId}`}
-                <img className={`position-icon${p.positionSource === 'replay' && p.position > 0 ? '' : ' position-icon-unknown'}`} src={`/positions/position-${p.positionSource === 'replay' && p.position > 0 ? p.position : 'unknown'}.svg`} alt={p.positionSource === 'replay' && p.position > 0 ? `Позиция ${p.position}` : 'Позиция ещё не определена по реплею'} title={p.positionSource === 'replay' && p.position > 0 ? `Позиция ${p.position} · определена по передвижениям в реплее` : 'Позиция появится после обработки реплея'} />
               </span>
               {buildPreview.length > 0 && <span className="row-build-preview" aria-label="Первые уровни раскачки">{buildPreview.map((u, i) => {
                 const info = abilityBook[String(u.ability)]
@@ -235,7 +272,12 @@ function PlayerRow({
           </div>
         </td>
         <td className="num">
-          <ImpBadge imp={p.imp} our={ourImp} m={p} durationSec={durationSec} />
+          <span className="impact-explainer">
+            <ImpBadge imp={p.imp} our={ourImp} m={p} durationSec={durationSec} />
+            {ourImp !== null && <button type="button" aria-expanded={impactOpen} onClick={(e) => { e.stopPropagation(); setImpactOpen((v) => !v) }} onKeyDown={(e) => e.stopPropagation()}>
+              {impactOpen ? 'Скрыть разбор' : 'Подробно'}
+            </button>}
+          </span>
         </td>
         <td className="num">
           <span className="green">{p.kills}</span>
@@ -275,6 +317,7 @@ function PlayerRow({
           </div>
         </td>
       </tr>
+      {impactOpen && ourImp !== null && <tr className="impact-details-row"><td colSpan={11}><ImpactDetails player={p} durationSec={durationSec} score={ourImp} /></td></tr>}
       {open && (
         <tr className="build-row">
           <td colSpan={11}>
@@ -304,7 +347,7 @@ function TeamPanel({
 }) {
   // Одна и та же функция с одной и той же seasonRank=null даёт то же число,
   // что и в списке матчей: seasonRank там тоже null (Steam его не отдаёт).
-  const our = (p: MatchPlayer) => (IMPACT_MODEL_READY ? personalImpact(p.positionSource === 'replay' ? p : { ...p, position: 0 }, durationSec, null) : null)
+  const our = (p: MatchPlayer) => (IMPACT_MODEL_READY ? personalImpact({ ...p, position: 0 }, durationSec, null) : null)
   const scores = players.map(our)
   const totalOur = IMPACT_MODEL_READY ? scores.reduce<number>((s, v) => s + (v ?? 0), 0) : null
   const totalImp = players.reduce((s, p) => s + (p.imp ?? 0), 0)

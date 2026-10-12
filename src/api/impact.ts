@@ -248,6 +248,65 @@ export function personalImpact(
   durationSec: number,
   seasonRank: number | null,
 ): number | null {
+  const context = impactContext(p, durationSec, seasonRank)
+  if (!context) return null
+  return impactFor(context, context.actual)
+}
+
+export interface ImpactBreakdown {
+  score: number
+  factors: { label: string; section: string; contribution: number; actual: number; baseline: number }[]
+}
+
+const impactLabels: Record<string, [string, string]> = {
+  k: ['Убийства', 'Бой'], d: ['Смерти', 'Бой'], a: ['Ассисты', 'Бой'],
+  kpm: ['Убийств/мин', 'Бой'], dpm: ['Смертей/мин', 'Бой'], apm: ['Ассистов/мин', 'Бой'],
+  gpm: ['Золото/мин', 'Фарм'], xpm: ['Опыт/мин', 'Фарм'],
+  lh: ['Добивания', 'Фарм'], denies: ['Денаи', 'Фарм'], networth: ['Нетворт', 'Фарм'], level: ['Уровень', 'Фарм'],
+  heroDmg: ['Урон героям', 'Урон и объекты'], heroDmgPerMin: ['Урон/мин', 'Урон и объекты'], towerDmg: ['Урон башням', 'Урон и объекты'], heroHeal: ['Лечение', 'Урон и объекты'],
+  killShare: ['Доля убийств команды', 'Бой'],
+}
+
+/** Permutation-averaged marginal contributions; inference weights remain untouched. */
+export function personalImpactBreakdown(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactBreakdown | null {
+  const context = impactContext(p, durationSec, seasonRank)
+  if (!context) return null
+  const totals = new Array(context.level.features.length).fill(0)
+  let seed = 0x51f15e
+  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 0x100000000 }
+  for (let sample = 0; sample < 64; sample++) {
+    const order = context.level.features.map((_, i) => i)
+    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]] }
+    const current = context.base.slice()
+    let before = impactFor(context, current)
+    for (const i of order) {
+      current[i] = context.actual[i]
+      const after = impactFor(context, current)
+      totals[i] += after - before
+      before = after
+    }
+  }
+  const score = impactFor(context, context.actual)
+  const rows: ImpactBreakdown['factors'] = context.level.features.flatMap((key, i) => {
+    const meta = impactLabels[key]
+    return meta && Math.abs(context.actual[i] - context.base[i]) > 1e-9
+      ? [{ label: meta[0], section: meta[1], contribution: Math.round(totals[i] / 64), actual: context.actual[i], baseline: context.base[i] }]
+      : []
+  })
+  if (rows.length) rows[rows.length - 1].contribution += score - rows.reduce((sum, row) => sum + row.contribution, 0)
+  return { score, factors: rows }
+}
+
+function impactFor(context: ImpactContext, player: number[]): number {
+  const meanR = meanVec([player, context.lobby, context.lobby, context.lobby, context.lobby])
+  const baseTeam = meanVec([context.base, context.lobby, context.lobby, context.lobby, context.lobby])
+  const impact = winProb(context.level, diffVec(meanR, context.lobby)) - winProb(context.level, diffVec(baseTeam, context.lobby))
+  return Math.max(-100, Math.min(100, Math.round(impact * context.level.scale)))
+}
+
+interface ImpactContext { level: ImpactLevel; lobby: number[]; base: number[]; actual: number[] }
+
+function impactContext(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactContext | null {
   if (!IMPACT_MODEL_READY) return null
   const level = model.base
   const durationMin = Math.max(durationSec / 60, 1)
@@ -289,10 +348,7 @@ export function personalImpact(
   set('towerDmg', p.towerDamage)
   set('heroHeal', p.heroHealing)
 
-  const meanR = meanVec([myVec, lobby, lobby, lobby, lobby])
-  const newTeamMean = meanVec([base, lobby, lobby, lobby, lobby])
-  const impact = winProb(level, diffVec(meanR, lobby)) - winProb(level, diffVec(newTeamMean, lobby))
-  return Math.max(-100, Math.min(100, Math.round(impact * level.scale)))
+  return { level, lobby, base, actual: myVec }
 }
 
 export function impactClass(score: number): string {

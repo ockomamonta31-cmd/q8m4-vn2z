@@ -141,5 +141,7 @@ export function getItemMap(): Promise<Map<number, ItemInfo>> {
 }
 
 export function itemImageUrl(shortName: string): string {
-  return `https://cdn.steamstatic.com/apps/dota2/images/dota_react/items/${shortName}.png`
+  // Valve provides one shared scroll icon; individual recipe_* files do not exist.
+  const imageName = shortName.startsWith('recipe_') ? 'recipe' : shortName
+  return `https://cdn.steamstatic.com/apps/dota2/images/dota_react/items/${imageName}.png`
 }

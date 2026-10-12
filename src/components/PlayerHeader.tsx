@@ -15,54 +15,44 @@ export default function PlayerHeader({
 
   return (
     <section className="player-header">
-      <img className="ph-avatar" src={avatarImageUrl(profile.avatar)} alt={profile.name} />
-      <div className="ph-main">
-        <h1 className="ph-name">{profile.name}</h1>
-        <div className="ph-sub">
-          Steam ID <a href={steamProfileUrl(profile.steamAccountId)} target="_blank" rel="noreferrer">
-            {profile.steamAccountId}
-          </a>
-          {lastMatchTime ? <> · последний матч {timeAgo(lastMatchTime)}</> : null}
-        </div>
-        <div className="ph-chips">
-          {profile.rank != null && (
-            <span className="chip chip-rank">
-              Ранг <strong>{profile.rank}</strong>
-              {profile.rankIsCore === true ? ' · core' : profile.rankIsCore === false ? ' · support' : ''}
-            </span>
-          )}
-          {matchCount != null && (
-            <span className="chip" title="Valve отдаёт только окно последних 500 публичных матчей, а не всю историю аккаунта">
-              Матчей <strong>{matchCount.toLocaleString('ru-RU')}</strong>
-            </span>
-          )}
-          {wr != null && (
-            <span className="chip">
-              Винрейт <strong>{wr.toFixed(1)}%</strong>
-            </span>
-          )}
+      <div className="ph-identity">
+        <div className="ph-avatar-frame"><img className="ph-avatar" src={avatarImageUrl(profile.avatar)} alt={profile.name} /></div>
+        <div className="ph-main">
+          <div className="ph-kicker">Профиль игрока</div>
+          <h1 className="ph-name">{profile.name}</h1>
+          <div className="ph-sub">
+            <a href={steamProfileUrl(profile.steamAccountId)} target="_blank" rel="noreferrer" aria-label={`Открыть Steam-профиль ${profile.steamAccountId}`}>
+              {profile.steamAccountId}
+            </a>
+            {lastMatchTime ? <span>Последний матч {timeAgo(lastMatchTime)}</span> : null}
+          </div>
+          <div className="ph-chips">
+            {profile.rank != null && (
+              <span className="chip chip-rank">Ранг <strong>{profile.rank}</strong>{profile.rankIsCore === true ? ' · core' : profile.rankIsCore === false ? ' · support' : ''}</span>
+            )}
+            {matchCount != null && (
+              <span className="chip" title="Valve отдаёт окно последних 500 публичных матчей, не всю историю аккаунта">
+                Матчей <strong>{matchCount.toLocaleString('ru-RU')}</strong>
+              </span>
+            )}
+          </div>
         </div>
       </div>
-      {winCount != null && losses != null && matchCount ? (
-        <div className="ph-record">
-          <div className="big">
-            <span className="w">{winCount.toLocaleString('ru-RU')}</span>
-            <span className="sep">—</span>
-            <span className="l">{losses.toLocaleString('ru-RU')}</span>
-          </div>
-          <div className="winrate-bar" role="img" aria-label={`Винрейт ${winrate(winCount, matchCount).toFixed(1)}%`}>
-            <div className="fill-win" style={{ width: `${winrate(winCount, matchCount)}%` }} />
-          </div>
-          <div className="wr-label">побед — поражений за всю историю</div>
-        </div>
-      ) : (
-        <div className="ph-record">
-          <div className="wr-label">
-            Steam отдаёт только окно последних матчей и не считает победы за всю историю — вся
-            статистика ниже построена на загруженных матчах.
-          </div>
-        </div>
-      )}
+      <div className="ph-record">
+        {winCount != null && losses != null && matchCount ? (
+          <>
+            <div className="ph-record-head"><span>Общий результат</span><strong>{wr!.toFixed(1)}%</strong></div>
+            <div className="big"><span className="w">{winCount.toLocaleString('ru-RU')}</span><span className="sep">—</span><span className="l">{losses.toLocaleString('ru-RU')}</span></div>
+            <div className="winrate-bar" role="img" aria-label={`Винрейт ${winrate(winCount, matchCount).toFixed(1)}%`}><div className="fill-win" style={{ width: `${winrate(winCount, matchCount)}%` }} /></div>
+            <div className="wr-label">побед <span>—</span> поражений</div>
+          </>
+        ) : (
+          <>
+            <div className="ph-record-head"><span>Данные профиля</span>{matchCount != null && <strong>{matchCount.toLocaleString('ru-RU')}</strong>}</div>
+            <p className="wr-label">Победы за всю историю Steam не отдаёт. Статистика разбора строится по доступным матчам.</p>
+          </>
+        )}
+      </div>
     </section>
   )
 }

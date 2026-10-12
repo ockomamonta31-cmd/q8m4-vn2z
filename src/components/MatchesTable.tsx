@@ -12,6 +12,7 @@ import {
   globalModelInfo,
 } from '../api/performance'
 import { IMPACT_MODEL_READY, impactClass, impactModelInfo, personalImpact } from '../api/impact'
+import PositionIcon from './PositionIcon'
 
 export default function MatchesTable({
   matches,
@@ -49,14 +50,17 @@ export default function MatchesTable({
               >
                 <span className="match-result-mark" aria-label={p.isVictory ? 'Победа' : 'Поражение'}><i /><b>{p.isVictory ? 'Победа' : 'Поражение'}</b></span>
                 <span className="match-hero-cell">
-                  {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+                  <span className="hero-portrait">
+                    {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+                    <PositionIcon position={p.position} source={p.positionSource} />
+                  </span>
                   <span><strong>{hero ? hero.name : `Герой #${p.heroId}`}</strong><small>{gameModeName(m.gameMode)} · {lobbyName(m.lobbyType)}</small></span>
                 </span>
                 <span className="match-kda"><strong><i>{p.kills}</i><em>{p.deaths}</em>{p.assists}</strong><small>K / D / A</small></span>
                 <span className="match-kda-value"><strong>{fmtKda(p.kills, p.deaths, p.assists)}</strong><small>KDA</small></span>
                 <span className="match-impact">
                   {IMPACT_MODEL_READY ? (() => {
-                    const our = personalImpact(p.positionSource === 'replay' ? p : { ...p, position: 0 }, m.durationSeconds, seasonRank ?? null)
+                    const our = personalImpact({ ...p, position: 0 }, m.durationSeconds, seasonRank ?? null)
                     if (our === null) {
                       return <span className="muted" title="Оценка недоступна для этой строки">—</span>
                     }

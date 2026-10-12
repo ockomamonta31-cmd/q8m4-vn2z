@@ -27,6 +27,8 @@ export interface PlayerMatch {
     heroHealing: number
     /** позиция 1–5 (0 — Steam не отдаёт позицию) */
     position: number
+    /** replay — detected from map movement; stats — estimate from match economy */
+    positionSource?: 'replay' | 'stats'
     /** сезонный ранг игрока НА МОМЕНТ матча (0 — нет данных) */
     seasonRank: number
     isVictory: boolean
@@ -132,8 +134,12 @@ export interface MatchPlayer {
   abilityUpgrades: { ability: number; time: number; level: number }[]
   /** Parsed replay item purchase events; null when no timeline is available. */
   purchaseEvents?: { time: number; itemId: number }[] | null
+  /** Replay-derived phase totals; do not feed these into the impact model. */
+  impactPhases?: { label: string; kills: number; deaths: number; gold: number; networth: number; lastHits: number; experience: number; heroDamage: number; towerDamage: number }[]
   /** позиция 1–5 (0 — неизвестно) */
   position: number
+  /** replay — detected from map movement; stats — estimate from match economy */
+  positionSource?: 'replay' | 'stats'
   /** текущий сезонный ранг игрока, 0 — нет данных */
   seasonRank: number
   /** rich-stats для модели импакта (всегда null в своём API — Steam не отдаёт события; модель честно считает на base-признаках) */
