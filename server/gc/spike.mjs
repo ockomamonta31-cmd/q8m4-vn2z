@@ -180,6 +180,10 @@ function reportHistory(payload) {
 
 let responses = 0
 function report(payload) {
+  // Сырые байты важнее декода: если ответ длинный, матч в нём есть, а значит
+  // виновата наша схема, а не отказ Valve.
+  const bytes = payload?.length ?? 0
+  console.log(`[gc] ← сырой ответ: ${bytes} байт, первые ${Math.min(bytes, 48)}: ${Buffer.from(payload ?? []).subarray(0, 48).toString('hex')}`)
   const msg = Res.decode(payload)
   responses++
   const which = responses === 1 ? 'чужой' : `#${responses}`
