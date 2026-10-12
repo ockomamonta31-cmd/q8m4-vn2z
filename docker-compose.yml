@@ -1,0 +1,26 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      STEAM_WEB_API_KEY: ${STEAM_WEB_API_KEY}
+      OWN_API_PORT: 8787
+    volumes:
+      - dota-data:/app/server/data
+    ports:
+      - "80:8787"
+  replay-parser:
+    image: odota/parser:latest
+    restart: unless-stopped
+  replay-ingest:
+    build: .
+    command: ["node", "server/gc/auto-ingest.mjs"]
+    restart: unless-stopped
+    environment:
+      DOTA_PARSER_URL: http://replay-parser:5600
+      REPLAY_INGEST_URL: ${REPLAY_INGEST_URL:-}
+      REPLAY_INGEST_TOKEN: ${REPLAY_INGEST_TOKEN:-}
+    volumes:
+      - dota-data:/app/server/data
+volumes:
+  dota-data:

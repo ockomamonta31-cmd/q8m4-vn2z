@@ -1,0 +1,87 @@
+syntax = "proto2";
+
+// Минимальный срез CMsgDOTAMatch, достаточный для спайка: имена всех игроков и
+// replay_salt. Номера полей взяты 1:1 из
+// SteamTracking/GameTracking-Dota2/Protobufs/dota_gcmessages_common.proto —
+// лишние поля протобак просто сохранит как unknown, это не ломает декодирование.
+
+message CMsgGCMatchDetailsRequest {
+  optional uint64 match_id = 1;
+}
+
+message CMsgDOTAMatchPlayer {
+  optional uint32 account_id = 1;
+  optional uint32 player_slot = 2;
+  optional int32 hero_id = 3;
+  optional uint32 kills = 14;
+  optional uint32 deaths = 15;
+  optional uint32 assists = 16;
+  optional uint32 leaver_status = 17;
+  optional uint32 last_hits = 19;
+  optional uint32 denies = 20;
+  optional uint32 gold_per_min = 21;
+  optional uint32 xp_per_min = 22;
+  optional uint32 hero_damage = 24;
+  optional uint32 tower_damage = 25;
+  optional uint32 hero_healing = 26;
+  optional uint32 level = 27;
+  optional uint32 net_worth = 52;
+  optional uint32 scaled_hero_damage = 54;
+  optional uint32 scaled_tower_damage = 55;
+  optional uint32 scaled_hero_healing = 56;
+}
+
+message CMsgDOTAMatch {
+  optional uint32 duration = 3;
+  repeated CMsgDOTAMatchPlayer players = 5;
+  optional uint32 cluster = 10;
+  optional uint32 first_blood_time = 12;
+  optional fixed32 replay_salt = 13;
+  optional uint32 lobby_type = 16;
+  optional uint32 human_players = 17;
+  optional uint32 game_mode = 31;
+}
+
+message CMsgGCMatchDetailsResponse {
+  optional uint32 result = 1;
+  optional CMsgDOTAMatch match = 2;
+}
+
+// 7408/7409 — история игрока через GC. Отличается от Web API тем, что знает
+// previous_rank и rank_change: ранг на момент каждого матча.
+message CMsgDOTAGetPlayerMatchHistory {
+  optional uint32 account_id = 1;
+  optional uint64 start_at_match_id = 2;
+  optional uint32 matches_requested = 3;
+  optional uint32 request_id = 5;
+  optional bool include_practice_matches = 7;
+  optional bool include_custom_games = 8;
+  optional bool include_event_games = 9;
+}
+
+message CMsgDOTAGetPlayerMatchHistoryResponse {
+  message Match {
+    optional uint64 match_id = 1;
+    optional uint32 start_time = 2;
+    optional int32 hero_id = 3;
+    optional bool winner = 4;
+    optional uint32 game_mode = 5;
+    optional int32 rank_change = 6;
+    optional uint32 previous_rank = 7;
+    optional uint32 lobby_type = 8;
+    optional bool solo_rank = 9;
+    optional bool abandon = 10;
+    optional uint32 duration = 11;
+    optional uint32 engine = 12;
+    optional bool seasonal_rank = 14;
+    optional uint32 selected_facet = 22;
+  }
+  repeated Match matches = 1;
+  optional uint32 request_id = 2;
+}
+
+// Общий базовый hello (EGCBaseClientMsg). Поле version — номер сборки клиента:
+// без него GC соединяется, но данные не отдаёт.
+message CMsgClientHello {
+  optional uint32 version = 1;
+}

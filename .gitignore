@@ -17,3 +17,10 @@ server/data/constants/*
 !/package-lock.json
 !/tsconfig.json
 deploy/
+
+# local artifacts
+.verification/
+.agents/
+__pycache__/
+scripts/*.jsonl
+server/gc/steam-data/

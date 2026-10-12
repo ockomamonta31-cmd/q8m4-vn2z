@@ -15,16 +15,18 @@ export default function PlayerHeader({
 
   return (
     <section className="player-header">
-      <div className="ph-identity">
-        <div className="ph-avatar-frame"><img className="ph-avatar" src={avatarImageUrl(profile.avatar)} alt={profile.name} /></div>
-        <div className="ph-main">
+      <div className="ph-top">
+        <div className={`ph-frame${profile.rankIsCore === true ? ' rank-1' : ''}`}>
+          <img className="ph-avatar" src={avatarImageUrl(profile.avatar)} alt={profile.name} />
+        </div>
+        <div className="ph-id">
           <div className="ph-kicker">Профиль игрока</div>
           <h1 className="ph-name">{profile.name}</h1>
-          <div className="ph-sub">
-            <a href={steamProfileUrl(profile.steamAccountId)} target="_blank" rel="noreferrer" aria-label={`Открыть Steam-профиль ${profile.steamAccountId}`}>
-              {profile.steamAccountId}
+          <div className="ph-meta">
+            <a href={steamProfileUrl(profile.steamAccountId)} target="_blank" rel="noreferrer">
+              Steam ID {profile.steamAccountId}
             </a>
-            {lastMatchTime ? <span>Последний матч {timeAgo(lastMatchTime)}</span> : null}
+            {lastMatchTime ? <span>последний матч {timeAgo(lastMatchTime)}</span> : null}
           </div>
           <div className="ph-chips">
             {profile.rank != null && (
@@ -38,18 +40,26 @@ export default function PlayerHeader({
           </div>
         </div>
       </div>
+
       <div className="ph-record">
-        {winCount != null && losses != null && matchCount ? (
+        {winCount != null && losses != null && matchCount && wr != null ? (
           <>
-            <div className="ph-record-head"><span>Общий результат</span><strong>{wr!.toFixed(1)}%</strong></div>
-            <div className="big"><span className="w">{winCount.toLocaleString('ru-RU')}</span><span className="sep">—</span><span className="l">{losses.toLocaleString('ru-RU')}</span></div>
-            <div className="winrate-bar" role="img" aria-label={`Винрейт ${winrate(winCount, matchCount).toFixed(1)}%`}><div className="fill-win" style={{ width: `${winrate(winCount, matchCount)}%` }} /></div>
-            <div className="wr-label">побед <span>—</span> поражений</div>
+            <div className="record-head"><span>Общий результат</span><strong>{wr!.toFixed(1)}%</strong></div>
+            <div className="record-nums">
+              <span className="w">{winCount.toLocaleString('ru-RU')}</span>
+              <span className="sep">—</span>
+              <span className="l">{losses.toLocaleString('ru-RU')}</span>
+            </div>
+            <div className="split-bar" role="img" aria-label={`Винрейт ${wr!.toFixed(1)}%`}>
+              <i className="f-win" style={{ width: `${wr}%` }} />
+              <i className="f-loss" style={{ width: `${100 - wr}%` }} />
+            </div>
+            <div className="record-foot"><span>победы</span><span>поражения</span></div>
           </>
         ) : (
           <>
-            <div className="ph-record-head"><span>Данные профиля</span>{matchCount != null && <strong>{matchCount.toLocaleString('ru-RU')}</strong>}</div>
-            <p className="wr-label">Победы за всю историю Steam не отдаёт. Статистика разбора строится по доступным матчам.</p>
+            <div className="record-head"><span>Данные профиля</span>{matchCount != null && <strong>{matchCount.toLocaleString('ru-RU')}</strong>}</div>
+            <p className="cell-sub">Steam не отдаёт победы за всю историю. Сводку считает по доступным матчам.</p>
           </>
         )}
       </div>

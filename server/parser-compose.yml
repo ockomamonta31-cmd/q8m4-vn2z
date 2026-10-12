@@ -1,0 +1,6 @@
+services:
+  replay-parser:
+    image: odota/parser:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5600:5600"
