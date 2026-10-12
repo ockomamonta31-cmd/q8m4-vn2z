@@ -1,0 +1,692 @@
+// Собственный API-сервер аналитики Dota 2.
+// (Запуск: node server/index.mjs — shebang намеренно нет, файл импортируется
+// vite.config.ts и esbuild не умеет shebang в середине бандла.)
+//
+// Источник данных — официальный Steam Web API (Valve напрямую):
+//   - GetMatchHistory(account_id)          — список матчей игрока: match_id +
+//     match_seq_num (свежие матчи появляются через минуты, а не часы — в
+//     отличие от парсеров вроде STRATZ)
+//   - GetMatchHistoryBySequenceNum(seq, 1) — ПОЛНЫЕ данные матча: все 10
+//     игроков K/D/A, GPM/XPM, LH/DN, net_worth, урон по героям/башням/лечение,
+//     шмотки, ability_upgrades, duration, исход
+//   - GetPlayerSummaries                   — имена/аватары
+//
+// ВАЖНО: GetMatchDetails у Valve мёртв — стабильный HTTP 500 на любом match_id
+// (проверено и на вчерашнем матче, и на TI7). Единственный способ получить
+// статистику — фид по match_seq_num, поэтому match_id → seq обязательно
+// индексируется на диск (data/seq-index.json): обратно из одного только id
+// он не разворачивается (ошибка линейной оценки — до 90k записей фида).
+//
+// Своё хранилище (server/data/): матчи неизменяемы → кэш навсегда на диске.
+// Мы ничем не зависим: никаких сторонних парсеров, только Valve и диск.
+//
+// Запуск:  node server/index.mjs          (порт 8787, свой API_BASE)
+// Или:    npm run dev                     (встроится в Vite как middleware,
+//                                          тот же origin — без CORS)
+//
+// Ключ:   STEAM_WEB_API_KEY в stratz/.env (бесплатно: steamcommunity.com/dev/apikey)
+
+import { createServer } from 'node:http'
+import { readFileSync, writeFileSync, mkdirSync, existsSync, createReadStream, statSync } from 'node:fs'
+import { dirname, join, extname, resolve, relative, isAbsolute } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const ROOT = dirname(fileURLToPath(import.meta.url))
+const DATA = join(ROOT, 'data')
+const PORT = Number(process.env.PORT || process.env.OWN_API_PORT || 8787)
+
+// --- Конфиг (.env рядом с package.json) ---
+
+function loadEnv() {
+  try {
+    const raw = readFileSync(join(ROOT, '..', '.env'), 'utf8')
+    for (const line of raw.split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
+      if (m && !(m[1] in process.env)) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '')
+    }
+  } catch {
+    /* .env не обязателен — ключ может быть в системном окружении */
+  }
+}
+loadEnv()
+
+const STEAM_KEY = process.env.STEAM_WEB_API_KEY || ''
+
+// --- Хранилище (своя БД: JSON-файлы на диске) ---
+
+function readJson(path, fallback) {
+  try {
+    return JSON.parse(readFileSync(path, 'utf8'))
+  } catch {
+    return fallback
+  }
+}
+
+function writeJson(path, value) {
+  mkdirSync(dirname(path), { recursive: true })
+  writeFileSync(path, JSON.stringify(value))
+}
+
+/** Матч неизменяем → храним навсегда. */
+function matchPath(id) {
+  return join(DATA, 'matches', `${id}.json`)
+}
+
+/**
+ * Версия формы матча на диске. Меняется, когда в normalizeSteamMatch добавляются
+ * поля: старый кэш тогда просто пересобирается, а не отдаёт объект без значений.
+ */
+const MATCH_SCHEMA = 2
+
+function getCachedMatch(id) {
+  const m = readJson(matchPath(id), null)
+  return m && m.schema === MATCH_SCHEMA ? m : null
+}
+
+function saveMatch(id, match) {
+  writeJson(matchPath(id), match)
+}
+
+/** Профиль — TTL 10 минут (имя/аватар меняются). */
+function profilePath(id) {
+  return join(DATA, 'players', `${id}.json`)
+}
+
+function getCachedProfile(id) {
+  const p = readJson(profilePath(id), null)
+  if (p && Date.now() - p.ts <= 10 * 60 * 1000) return p.v
+  return null
+}
+
+function saveProfile(id, v) {
+  writeJson(profilePath(id), { ts: Date.now(), v })
+}
+
+/** История матчей игрока — TTL 5 минут (пополняется новыми). */
+function historyPath(id) {
+  return join(DATA, 'history', `${id}.json`)
+}
+
+function getCachedHistory(id) {
+  const h = readJson(historyPath(id), null)
+  if (h && Date.now() - h.ts <= 5 * 60 * 1000) return h.v
+  return null
+}
+
+function saveHistory(id, v) {
+  writeJson(historyPath(id), { ts: Date.now(), v })
+}
+
+/**
+ * Индекс match_id → match_seq_num. Нужен потому, что полный матч достаётся
+ * только по seq, а GetMatchDetails (поиск по id) Valve сломал.
+ */
+const SEQ_INDEX_PATH = join(DATA, 'seq-index.json')
+const seqIndex = readJson(SEQ_INDEX_PATH, {})
+let seqIndexDirty = false
+
+function rememberSeq(matchId, seq) {
+  if (!matchId || !seq || seqIndex[matchId] === seq) return
+  seqIndex[matchId] = seq
+  seqIndexDirty = true
+}
+
+function flushSeqIndex() {
+  if (!seqIndexDirty) return
+  seqIndexDirty = false
+  writeJson(SEQ_INDEX_PATH, seqIndex)
+}
+
+setInterval(flushSeqIndex, 5000).unref()
+process.on('exit', flushSeqIndex)
+
+// --- Ограничитель к Steam: окно параллельных запросов ---
+// Замерено на этом же ключе: окно 2 → 5.3 req/s, окно 4 → 10.8, окно 8 → 15.9
+// (все 200). Больше восьми Valve не наказывает 429, а просто задерживает
+// ответы: 24 запроса окном 12 вместо 1.5 с идут 31 с. Поэтому окно строго 8.
+
+const MAX_INFLIGHT = 8
+const TIMEOUT_MS = 15000
+
+let inflight = 0
+const waiters = []
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+async function acquire() {
+  if (inflight < MAX_INFLIGHT) {
+    inflight++
+    return
+  }
+  await new Promise((res) => waiters.push(res))
+}
+
+function release() {
+  inflight--
+  const next = waiters.shift()
+  if (!next) return
+  inflight++
+  next()
+}
+
+async function steamFetch(path, params) {
+  if (!STEAM_KEY) {
+    const err = new Error('STEAM_WEB_API_KEY не задан — создай ключ на steamcommunity.com/dev/apikey и впиши в stratz/.env')
+    err.status = 503
+    throw err
+  }
+  const url = new URL(`https://api.steampowered.com/${path}`)
+  url.searchParams.set('key', STEAM_KEY)
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v))
+
+  await acquire()
+  try {
+    let lastErr = null
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) await sleep(1500 * 2 ** (attempt - 1))
+      let res
+      try {
+        res = await fetch(url, { signal: AbortSignal.timeout(TIMEOUT_MS) })
+      } catch (e) {
+        lastErr = e
+        continue
+      }
+      if (res.status === 429 || res.status >= 500) {
+        lastErr = new Error(`Steam API HTTP ${res.status}`)
+        continue
+      }
+      if (!res.ok) {
+        const err = new Error(`Steam API вернул HTTP ${res.status}`)
+        err.status = 502
+        throw err
+      }
+      const json = await res.json().catch(() => null)
+      if (!json) {
+        lastErr = new Error('Steam API: пустой ответ')
+        continue
+      }
+      return json
+    }
+    throw lastErr ?? new Error('Steam API недоступен')
+  } finally {
+    release()
+  }
+}
+
+// --- Маппинг режимов Valve → строковые enum'ы, которые понимает UI ---
+// Номера взяты из актуального EDOTAGAMEMODE_TYPE (odota/dotaconstants) и
+// сверены с живыми данными: id 22 = рейтинговые ~40 мин (All Draft),
+// id 23 = публичные ~24 мин (Turbo).
+
+const STEAM_GAME_MODES = {
+  1: 'ALL_PICK', 2: 'CAPTAINS_MODE', 3: 'RANDOM_DRAFT', 4: 'SINGLE_DRAFT',
+  5: 'ALL_RANDOM', 11: 'MID_ONLY', 12: 'LEAST_PICKED', 13: 'LIMITED_HEROES',
+  16: 'CAPTAINS_DRAFT', 17: 'BALANCED_DRAFT', 18: 'ABILITY_DRAFT', 19: 'EVENT',
+  20: 'ARDM', 21: 'ONE_VS_ONE_MID', 22: 'ALL_DRAFT', 23: 'TURBO',
+  24: 'MUTATION', 25: 'COACHES_CHALLENGE',
+}
+const STEAM_LOBBY_TYPES = {
+  0: 'PUBLIC_MATCH', 1: 'PRACTICE', 7: 'RANKED', 8: 'MID_ONE', 9: 'COMPETITIVE',
+}
+
+function mapMode(lobbyType, gameMode) {
+  const lobby = STEAM_LOBBY_TYPES[lobbyType] ?? 'PUBLIC_MATCH'
+  let mode = STEAM_GAME_MODES[gameMode] ?? `MODE_${gameMode}`
+  // ренжед-эллпик → тот же enum, что раньше отдавал STRATZ
+  if (lobby === 'RANKED' && mode === 'ALL_PICK') mode = 'ALL_PICK_RANKED'
+  return { lobby, mode }
+}
+
+// --- Нормализация матчей Steam → наши типы (см. src/api/types.ts) ---
+
+const PRIVATE_ACCOUNT_ID = 0xffffffff
+
+function toAccountId(steamId64) {
+  return Number(BigInt(steamId64) - 76561197960265728n)
+}
+
+function normalizeSteamMatch(raw) {
+  const durMin = Math.max((raw.duration ?? 0) / 60, 1)
+  // net_worth в этом фиде у ~0.7% строк нулевой или обрезанный (0, 1, 101).
+  // Живые значения лежат в 0.64–1.08 от gpm×мин, поэтому ниже 0.5 — считаем оценку.
+  const networthOf = (gpm, nw) => (nw > gpm * durMin * 0.5 ? nw : Math.round(gpm * durMin))
+  const players = (raw.players ?? []).map((p) => ({
+    // 0xFFFFFFFF = INVALID_ACCOUNT_ID: игрок скрыл историю
+    steamAccountId: p.account_id === PRIVATE_ACCOUNT_ID ? 0 : (p.account_id ?? 0),
+    // player_slot < 128 → Radiant
+    isRadiant: (p.player_slot ?? 0) < 128,
+    isVictory: ((p.player_slot ?? 0) < 128) === Boolean(raw.radiant_win),
+    heroId: p.hero_id ?? 0,
+    kills: p.kills ?? 0,
+    deaths: p.deaths ?? 0,
+    assists: p.assists ?? 0,
+    goldPerMinute: p.gold_per_min ?? 0,
+    experiencePerMinute: p.xp_per_min ?? 0,
+    numLastHits: p.last_hits ?? 0,
+    numDenies: p.denies ?? 0,
+    networth: networthOf(p.gold_per_min ?? 0, p.net_worth ?? 0),
+    level: p.level ?? 0,
+    heroDamage: p.hero_damage ?? 0,
+    towerDamage: p.tower_damage ?? 0,
+    heroHealing: p.hero_healing ?? 0,
+    // позиция/ранг/IMP Steam не отдаёт — модель честно работает без них
+    position: 0,
+    seasonRank: 0,
+    imp: null,
+    items: [p.item_0, p.item_1, p.item_2, p.item_3, p.item_4, p.item_5].map((v) => v || null),
+    backpack: [p.backpack_0, p.backpack_1, p.backpack_2].map((v) => v || null),
+    neutralItem: p.item_neutral || null,
+    neutralItem2: p.item_neutral2 || null,
+    aghanimsScepter: Boolean(p.aghanims_scepter),
+    aghanimsShard: Boolean(p.aghanims_shard),
+    moonshard: Boolean(p.moonshard),
+    leaverStatus: p.leaver_status ?? 0,
+    // Урон с поправкой на время матча — честнее сырого: сравнивает 20- и 60-минутки
+    scaledHeroDamage: p.scaled_hero_damage ?? 0,
+    scaledTowerDamage: p.scaled_tower_damage ?? 0,
+    scaledHeroHealing: p.scaled_hero_healing ?? 0,
+    // Таймлайн прокачки: Valve отдаёт ability+время+уровень. Таймингов покупок
+    // предметов в этом API нет в принципе — только финальные слоты.
+    abilityUpgrades: (p.ability_upgrades ?? []).map((a) => ({
+      ability: a.ability,
+      time: a.time,
+      level: a.level,
+    })),
+    stats: null,
+  }))
+  const { lobby, mode } = mapMode(raw.lobby_type ?? 0, raw.game_mode ?? 1)
+  return {
+    schema: MATCH_SCHEMA,
+    id: raw.match_id ?? 0,
+    didRadiantWin: raw.radiant_win ?? null,
+    durationSeconds: raw.duration ?? 0,
+    startDateTime: raw.start_time ?? 0,
+    gameMode: mode,
+    lobbyType: lobby,
+    numHumanPlayers: raw.human_players ?? players.length,
+    actualRank: 0,
+    firstBloodSeconds: raw.first_blood_time ?? null,
+    radiantScore: raw.radiant_score ?? null,
+    direScore: raw.dire_score ?? null,
+    towerStatusRadiant: raw.tower_status_radiant ?? null,
+    towerStatusDire: raw.tower_status_dire ?? null,
+    barracksStatusRadiant: raw.barracks_status_radiant ?? null,
+    barracksStatusDire: raw.barracks_status_dire ?? null,
+    picksBans: (raw.picks_bans ?? [])
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .map((b) => ({
+        isPick: Boolean(b.is_pick),
+        isRadiant: b.team === 0,
+        heroId: b.hero_id,
+        order: b.order,
+      })),
+    players,
+  }
+}
+
+// --- Работа с данными (кэш → Steam) ---
+
+/**
+ * Полный матч по match_seq_num (GetMatchDetails у Valve мёртв). Если seq не
+ * передан — берём из накопленного индекса; без него матч недостижим.
+ * pending: один и тот же матч из разных хендлеров качается один раз.
+ */
+const pendingMatches = new Map()
+
+function ensureMatch(matchId, seq) {
+  const cached = getCachedMatch(matchId)
+  if (cached) return Promise.resolve(cached)
+  const running = pendingMatches.get(matchId)
+  if (running) return running
+
+  const job = (async () => {
+    const seqNum = seq ?? seqIndex[matchId] ?? null
+    if (!seqNum) {
+      const err = new Error(`Матч ${matchId}: нет match_seq_num — открой его из списка матчей игрока`)
+      err.status = 404
+      throw err
+    }
+    const json = await steamFetch('IDOTA2Match_570/GetMatchHistoryBySequenceNum/v1/', {
+      start_at_match_seq_num: seqNum,
+      matches_requested: 1,
+    })
+    // Приватные/удалённые матчи фид пропускает, поэтому сверяем id
+    const raw = (json.result?.matches ?? []).find((m) => Number(m.match_id) === Number(matchId))
+    if (!raw) {
+      const err = new Error(`Матч ${matchId} недоступен в Steam (приватный или удалён)`)
+      err.status = 404
+      throw err
+    }
+    const match = normalizeSteamMatch(raw)
+    saveMatch(matchId, match)
+    return match
+  })()
+
+  job.catch(() => undefined)
+  pendingMatches.set(matchId, job)
+  job.finally(() => pendingMatches.delete(matchId)).catch(() => undefined)
+  return job
+}
+
+/**
+ * История матчей. Valve отдаёт окно последних ~500 публичных матчей и листает
+ * его курсором start_at_match_id; за раз — не больше 100. Раньше брали только
+ * первую сотню, из-за чего «Активность» и一半 статистик жили по 100 матчам.
+ */
+async function ensureHistory(accountId) {
+  const cached = getCachedHistory(accountId)
+  if (cached) return cached
+
+  const rows = []
+  const seen = new Set()
+  let total = null
+  let cursor = null
+
+  for (let page = 0; page < 5; page++) {
+    const params = { account_id: accountId, matches_requested: 100 }
+    if (cursor) params.start_at_match_id = cursor
+    const json = await steamFetch('IDOTA2Match_570/GetMatchHistory/v1/', params)
+    const raw = json.result ?? {}
+    const batch = raw.matches ?? []
+    if (total === null) total = raw.total_results ?? null
+    let fresh = 0
+    for (const m of batch) {
+      if (seen.has(m.match_id)) continue
+      seen.add(m.match_id)
+      rememberSeq(m.match_id, m.match_seq_num)
+      rows.push({ id: m.match_id, seq: m.match_seq_num })
+      fresh++
+    }
+    if (!batch.length || fresh === 0) break
+    cursor = batch[batch.length - 1].match_id
+    if (total !== null && rows.length >= total) break
+  }
+
+  const v = { rows, total: total ?? rows.length }
+  saveHistory(accountId, v)
+  flushSeqIndex()
+  return v
+}
+
+/**
+ * Матчи игрока из истории, качаются параллельно (окно держит steamFetch).
+ * Ограничение по умолчанию — 100: агрегаты по 500 матчам были бы точнее, но
+ * это 30 секунд ожидания, а «последние 100» и есть тот смысл, который показан
+ * в UI на вкладках «Герои» и «Пиры».
+ */
+async function loadAllMatches(history, accountId, limit = 100) {
+  const settled = await Promise.all(
+    history.rows.slice(0, limit).map((row) =>
+      ensureMatch(row.id, row.seq).catch((e) => {
+        if (e.status !== 404) throw e
+        return null
+      }),
+    ),
+  )
+  return settled.filter((m) => m && m.players.some((p) => p.steamAccountId === accountId))
+}
+
+/** Батч имён/аватаров (кэш 10 минут на игрока). */
+async function resolveProfiles(accountIds) {
+  const out = new Map()
+  const missing = []
+  for (const id of accountIds) {
+    if (!id) continue
+    const hit = getCachedProfile(id)
+    if (hit) out.set(id, hit)
+    else missing.push(id)
+  }
+  for (let i = 0; i < missing.length; i += 100) {
+    const chunk = missing.slice(i, i + 100)
+    const json = await steamFetch('ISteamUser/GetPlayerSummaries/v2/', {
+      steamids: chunk.map((id) => String(BigInt(id) + 76561197960265728n)).join(','),
+    })
+    for (const p of json.response?.players ?? []) {
+      const id32 = toAccountId(p.steamid)
+      const v = { name: p.personaname ?? null, avatar: p.avatarfull ?? p.avatarmedium ?? p.avatar ?? null }
+      saveProfile(id32, v)
+      out.set(id32, v)
+    }
+  }
+  return out
+}
+
+// --- Хендлеры API ---
+
+class HttpError extends Error {
+  constructor(status, message) {
+    super(message)
+    this.status = status
+  }
+}
+
+const handlers = {
+  /** GET /api/health — статус ключа (без него показываем понятную панель). */
+  'GET /api/health': async () => ({ ok: true, steamKey: Boolean(STEAM_KEY) }),
+
+  /** GET /api/profile/:id */
+  async profile(params) {
+    const id = Number(params.id)
+    if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный Steam ID')
+    const [names, history] = await Promise.all([resolveProfiles([id]), ensureHistory(id)])
+    const info = names.get(id) ?? {}
+    return {
+      steamAccountId: id,
+      name: info.name ?? `#${id}`,
+      avatar: info.avatar ?? null,
+      // Valve отдаёт окно последних 500 публичных матчей, а не всю историю
+      matchCount: history.total ?? null,
+      winCount: null,
+      rank: null,
+      rankIsCore: null,
+    }
+  },
+
+  /** GET /api/player/:id/matches?take=&skip= — список матчей игрока. */
+  async matches(params) {
+    const id = Number(params.id)
+    const take = Math.min(Number(params.take) || 25, 100)
+    const skip = Math.max(Number(params.skip) || 0, 0)
+    if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный Steam ID')
+
+    const history = await ensureHistory(id)
+    // Детали качаются параллельно (окно держит steamFetch), битые пропускаем
+    const settled = await Promise.all(
+      history.rows.slice(skip, skip + take).map((row) => ensureMatch(row.id, row.seq).catch(() => null)),
+    )
+    // Строка списка: только наш игрок. Состав команд не отдаём — единственная
+    // модель оценки работает по линии статов самого игрока.
+    const rows = settled.map((m) => {
+      if (!m) return null
+      const me = m.players.find((p) => p.steamAccountId === id)
+      if (!me) return null
+      return {
+        id: m.id,
+        startDateTime: m.startDateTime,
+        durationSeconds: m.durationSeconds,
+        gameMode: m.gameMode,
+        lobbyType: m.lobbyType,
+        player: {
+          steamAccountId: id,
+          heroId: me.heroId,
+          kills: me.kills,
+          deaths: me.deaths,
+          assists: me.assists,
+          goldPerMinute: me.goldPerMinute,
+          experiencePerMinute: me.experiencePerMinute,
+          numLastHits: me.numLastHits,
+          numDenies: me.numDenies,
+          networth: me.networth,
+          level: me.level,
+          heroDamage: me.heroDamage,
+          towerDamage: me.towerDamage,
+          heroHealing: me.heroHealing,
+          position: me.position,
+          seasonRank: me.seasonRank,
+          isVictory: me.isVictory,
+          imp: null,
+        },
+      }
+    })
+    return rows.filter(Boolean)
+  },
+
+  /** GET /api/matches/:id — полный матч (все 10 игроков с именами). */
+  async match(params) {
+    const id = Number(params.id)
+    if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный ID матча')
+    const match = await ensureMatch(id)
+    const profiles = await resolveProfiles(match.players.map((p) => p.steamAccountId))
+    return {
+      ...match,
+      players: match.players.map((p) => ({
+        ...p,
+        name: profiles.get(p.steamAccountId)?.name ?? null,
+      })),
+    }
+  },
+
+  /** GET /api/player/:id/heroes — агрегация по героям из своей базы матчей. */
+  async heroes(params) {
+    const id = Number(params.id)
+    const take = Math.min(Number(params.take) || 100, 100)
+    const history = await ensureHistory(id)
+    const matches = await loadAllMatches(history, id)
+    const byHero = new Map()
+    for (const m of matches) {
+      const me = m.players.find((p) => p.steamAccountId === id)
+      if (!me) continue
+      const cur = byHero.get(me.heroId) ?? { heroId: me.heroId, matchCount: 0, winCount: 0 }
+      cur.matchCount++
+      if (me.isVictory) cur.winCount++
+      byHero.set(me.heroId, cur)
+    }
+    return [...byHero.values()].sort((a, b) => b.matchCount - a.matchCount).slice(0, take)
+  },
+
+  /** GET /api/player/:id/peers — из своей базы (загруженные матчи). */
+  async peers(params) {
+    const id = Number(params.id)
+    const history = await ensureHistory(id)
+    const matches = await loadAllMatches(history, id)
+    const acc = new Map()
+    for (const m of matches) {
+      const me = m.players.find((p) => p.steamAccountId === id)
+      if (!me) continue
+      for (const p of m.players) {
+        // 0 — игрок скрыл историю, считать его «пиром» нельзя
+        if (!p.steamAccountId || p.steamAccountId === id) continue
+        let peer = acc.get(p.steamAccountId)
+        if (!peer) {
+          peer = { steamAccountId: p.steamAccountId, withMatchCount: 0, withWinCount: 0, againstMatchCount: 0, againstWinCount: 0 }
+          acc.set(p.steamAccountId, peer)
+        }
+        if (p.isVictory === me.isVictory) {
+          peer.withMatchCount++
+          if (me.isVictory) peer.withWinCount++
+        } else {
+          peer.againstMatchCount++
+          if (me.isVictory) peer.againstWinCount++
+        }
+      }
+    }
+    const top = [...acc.values()]
+      .sort((a, b) => b.withMatchCount + b.againstMatchCount - (a.withMatchCount + a.againstMatchCount))
+      .slice(0, 14)
+    const profiles = await resolveProfiles(top.map((p) => p.steamAccountId))
+    return top.map((p) => ({
+      steamAccountId: p.steamAccountId,
+      name: profiles.get(p.steamAccountId)?.name ?? `#${p.steamAccountId}`,
+      avatar: profiles.get(p.steamAccountId)?.avatar ?? null,
+      withMatchCount: p.withMatchCount,
+      withWinCount: p.withWinCount,
+      againstMatchCount: p.againstMatchCount,
+      againstWinCount: p.againstWinCount,
+    }))
+  },
+}
+
+// --- Статичные константы (свои файлы, generated scripts/gen-constants.mjs) ---
+
+const CONSTANTS = {
+  heroes: readJson(join(DATA, 'constants', 'heroes.json'), []),
+  items: readJson(join(DATA, 'constants', 'items.json'), []),
+}
+
+// --- Роутер ---
+
+function matchRoute(method, path) {
+  if (method !== 'GET') return null
+  let m = path.match(/^\/api\/(health)$/)
+  if (m) return { handler: handlers['GET /api/health'], params: {} }
+  m = path.match(/^\/api\/profile\/(\d+)$/)
+  if (m) return { handler: handlers.profile, params: { id: m[1] } }
+  m = path.match(/^\/api\/player\/(\d+)\/matches$/)
+  if (m) return { handler: handlers.matches, params: { id: m[1] } }
+  m = path.match(/^\/api\/player\/(\d+)\/heroes$/)
+  if (m) return { handler: handlers.heroes, params: { id: m[1] } }
+  m = path.match(/^\/api\/player\/(\d+)\/peers$/)
+  if (m) return { handler: handlers.peers, params: { id: m[1] } }
+  m = path.match(/^\/api\/matches\/(\d+)$/)
+  if (m) return { handler: handlers.match, params: { id: m[1] } }
+  if (path === '/api/constants/heroes') return { handler: async () => CONSTANTS.heroes, params: {} }
+  if (path === '/api/constants/items') return { handler: async () => CONSTANTS.items, params: {} }
+  return null
+}
+
+/** Connect-подобный middleware: используется и Vite-плагином, и standalone-сервером. */
+export function apiMiddleware(req, res) {
+  const url = new URL(req.url ?? '/', 'http://localhost')
+  if (!url.pathname.startsWith('/api/')) return false
+
+  const route = matchRoute(req.method ?? 'GET', url.pathname)
+  const respond = (status, body) => {
+    res.statusCode = status
+    res.setHeader('Content-Type', 'application/json; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-store')
+    res.end(JSON.stringify(body))
+  }
+  if (!route) {
+    respond(404, { error: 'Неизвестный эндпоинт' })
+    return true
+  }
+  for (const [k, v] of url.searchParams) route.params[k] = v
+  route.handler(route.params)
+    .then((data) => respond(200, data))
+    .catch((e) => {
+      const status = e.status ?? 500
+      if (status >= 500) console.error(`[api] ${url.pathname}:`, e.message)
+      respond(status, { error: e.message })
+    })
+  return true
+}
+
+// --- Standalone-режим (node server/index.mjs) ---
+
+const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]
+if (isMain) {
+  if (!STEAM_KEY) {
+    console.warn('⚠️  STEAM_WEB_API_KEY не задан — эндпоинты данных ответят 503.')
+    console.warn('   Бесплатный ключ: https://steamcommunity.com/dev/apikey → впиши в stratz/.env')
+  }
+  createServer((req, res) => {
+    if (apiMiddleware(req, res)) return
+    const dist = resolve(ROOT, '..', 'dist')
+    const requested = decodeURIComponent(new URL(req.url ?? '/', 'http://localhost').pathname)
+    const candidate = resolve(dist, `.${requested}`)
+    const rel = relative(dist, candidate)
+    const insideDist = rel !== '..' && !rel.startsWith(`..${process.platform === 'win32' ? '\\' : '/'}`) && !isAbsolute(rel)
+    const file = insideDist && existsSync(candidate) && statSync(candidate).isFile() ? candidate : join(dist, 'index.html')
+    if (!existsSync(file)) {
+      res.statusCode = 404
+      res.end('Build frontend first: npm run build')
+      return
+    }
+    const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon' }
+    res.setHeader('Content-Type', types[extname(file)] ?? 'application/octet-stream')
+    createReadStream(file).pipe(res)
+  }).listen(PORT, () => {
+    console.log(`own-dota: http://localhost:${PORT} (API /api/health)`)
+  })
+}

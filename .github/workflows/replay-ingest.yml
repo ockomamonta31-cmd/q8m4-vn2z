@@ -1,0 +1,40 @@
+name: Replay timelines
+
+on:
+  schedule:
+    - cron: '2/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: replay-ingest
+  cancel-in-progress: false
+
+jobs:
+  parse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      REPLAY_INGEST_URL: ${{ secrets.REPLAY_INGEST_URL }}
+      REPLAY_INGEST_TOKEN: ${{ secrets.REPLAY_INGEST_TOKEN }}
+      REPLAY_MATCHES_PER_RUN: 5
+      DOTA_PARSER_URL: http://127.0.0.1:5600
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Start replay parser
+        run: |
+          docker run -d --name replay-parser -p 5600:5600 odota/parser:latest
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:5600/healthz; then exit 0; fi
+            sleep 2
+          done
+          docker logs replay-parser
+          exit 1
+      - run: npm run replay:github

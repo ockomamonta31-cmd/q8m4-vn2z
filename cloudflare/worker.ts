@@ -1,0 +1,169 @@
+/// <reference types="@cloudflare/workers-types" />
+import heroes from '../server/data/constants/heroes.json'
+import items from '../server/data/constants/items.json'
+
+interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string }
+const PRIVATE_ID = 0xffffffff
+const modes: Record<number, string> = { 1:'ALL_PICK',2:'CAPTAINS_MODE',3:'RANDOM_DRAFT',4:'SINGLE_DRAFT',5:'ALL_RANDOM',11:'MID_ONLY',12:'LEAST_PICKED',13:'LIMITED_HEROES',16:'CAPTAINS_DRAFT',17:'BALANCED_DRAFT',18:'ABILITY_DRAFT',19:'EVENT',20:'ARDM',21:'ONE_VS_ONE_MID',22:'ALL_DRAFT',23:'TURBO',24:'MUTATION',25:'COACHES_CHALLENGE' }
+const lobbies: Record<number, string> = { 0:'PUBLIC_MATCH',1:'PRACTICE',7:'RANKED',8:'MID_ONE',9:'COMPETITIVE' }
+
+async function cached<T>(env: Env, key: string, ttl = Infinity): Promise<T | null> {
+  const row = await env.DB.prepare('SELECT value, updated_at FROM cache WHERE key=?').bind(key).first<{value:string;updated_at:number}>()
+  if (!row || Date.now() - row.updated_at > ttl) return null
+  try { return JSON.parse(row.value) as T } catch { return null }
+}
+async function cachedPrevious<T>(env: Env, key: string): Promise<T | null> {
+  const row = await env.DB.prepare('SELECT value FROM cache WHERE key=?').bind(key).first<{value:string}>()
+  try { return row ? JSON.parse(row.value) as T : null } catch { return null }
+}
+async function save(env: Env, key: string, value: unknown) {
+  await env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(key, JSON.stringify(value), Date.now()).run()
+}
+async function steam(env: Env, endpoint: string, params: Record<string, string | number>) {
+  if (!env.STEAM_WEB_API_KEY) throw new Response(JSON.stringify({error:'Добавь STEAM_WEB_API_KEY в Worker secrets'}), {status:503})
+  const url = new URL(`https://api.steampowered.com/${endpoint}`)
+  url.searchParams.set('key', env.STEAM_WEB_API_KEY)
+  for (const [k,v] of Object.entries(params)) url.searchParams.set(k, String(v))
+  const res = await fetch(url)
+  if (!res.ok) throw new Response(JSON.stringify({error:`Steam API HTTP ${res.status}`}), {status:502})
+  return res.json<any>()
+}
+async function history(env: Env, account: number) {
+  const key=`history:${account}`
+  const hit = await cached<{rows:{id:number;seq:number}[];total:number}>(env,key,300_000)
+  if (hit) return hit
+  const previous=await cachedPrevious<{rows:{id:number;seq:number}[]}>(env,key)
+  const known=new Set(previous?.rows.map(x=>x.id)??[])
+  const rows:{id:number;seq:number}[]=[]; let cursor=0; let total=0
+  for(let page=0;page<5;page++) {
+    const p:Record<string,string|number>={account_id:account,matches_requested:100}
+    if(cursor) p.start_at_match_id=cursor
+    const data=await steam(env,'IDOTA2Match_570/GetMatchHistory/v1/',p)
+    const result=data.result??{}; total=result.total_results??rows.length
+    const batch=result.matches??[]
+    for(const m of batch) rows.push({id:m.match_id,seq:m.match_seq_num})
+    if(batch.length<100 || !batch.length) break
+    cursor=batch[batch.length-1].match_id
+  }
+  // Histories overlap almost completely between refreshes. Keep the stable
+  // sequence index, but only insert newly-seen IDs; REPLACE rewrote ~500 D1
+  // rows on every five-minute cache expiry.
+  const fresh=rows.filter(x=>x.seq&&!known.has(x.id))
+  if(fresh.length) await env.DB.batch(fresh.map(x=>env.DB.prepare('INSERT OR IGNORE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(`seq:${x.id}`,JSON.stringify(x.seq),Date.now())))
+  const out={rows,total:total||rows.length}; await save(env,key,out); return out
+}
+function normalize(raw:any) {
+  const dur=Math.max((raw.duration??0)/60,1)
+  const players=(raw.players??[]).map((p:any)=>{
+    const radiant=(p.player_slot??0)<128, gpm=p.gold_per_min??0, nw=p.net_worth??0
+    return {steamAccountId:p.account_id===PRIVATE_ID?0:(p.account_id??0),isRadiant:radiant,isVictory:radiant===Boolean(raw.radiant_win),heroId:p.hero_id??0,kills:p.kills??0,deaths:p.deaths??0,assists:p.assists??0,goldPerMinute:gpm,experiencePerMinute:p.xp_per_min??0,numLastHits:p.last_hits??0,numDenies:p.denies??0,networth:nw>gpm*dur*.5?nw:Math.round(gpm*dur),level:p.level??0,heroDamage:p.hero_damage??0,towerDamage:p.tower_damage??0,heroHealing:p.hero_healing??0,position:0,seasonRank:0,imp:null,items:[p.item_0,p.item_1,p.item_2,p.item_3,p.item_4,p.item_5].map((x:number)=>x||null),backpack:[p.backpack_0,p.backpack_1,p.backpack_2].map((x:number)=>x||null),neutralItem:p.item_neutral||null,neutralItem2:p.item_neutral2||null,aghanimsScepter:Boolean(p.aghanims_scepter),aghanimsShard:Boolean(p.aghanims_shard),moonshard:Boolean(p.moonshard),leaverStatus:p.leaver_status??0,scaledHeroDamage:p.scaled_hero_damage??0,scaledTowerDamage:p.scaled_tower_damage??0,scaledHeroHealing:p.scaled_hero_healing??0,abilityUpgrades:(p.ability_upgrades??[]).map((a:any)=>({ability:a.ability,time:a.time,level:a.level})),stats:null}
+  })
+  const lobby=lobbies[raw.lobby_type]??'PUBLIC_MATCH'; let mode=modes[raw.game_mode]??`MODE_${raw.game_mode}`
+  if(lobby==='RANKED'&&mode==='ALL_PICK') mode='ALL_PICK_RANKED'
+  return {schema:2,id:raw.match_id??0,didRadiantWin:raw.radiant_win??null,durationSeconds:raw.duration??0,startDateTime:raw.start_time??0,gameMode:mode,lobbyType:lobby,numHumanPlayers:raw.human_players??players.length,actualRank:0,firstBloodSeconds:raw.first_blood_time??null,radiantScore:raw.radiant_score??null,direScore:raw.dire_score??null,towerStatusRadiant:raw.tower_status_radiant??null,towerStatusDire:raw.tower_status_dire??null,barracksStatusRadiant:raw.barracks_status_radiant??null,barracksStatusDire:raw.barracks_status_dire??null,picksBans:(raw.picks_bans??[]).slice().sort((a:any,b:any)=>a.order-b.order).map((b:any)=>({isPick:Boolean(b.is_pick),isRadiant:b.team===0,heroId:b.hero_id,order:b.order})),players}
+}
+async function match(env:Env,id:number,seq?:number) {
+  const hit=await cached<any>(env,`match:${id}`); if(hit) return hit
+  const matchSeq=seq??await cached<number>(env,`seq:${id}`)
+  if(!matchSeq) throw new Response(JSON.stringify({error:`Матч ${id}: сначала открой его из истории игрока`}),{status:404})
+  const data=await steam(env,'IDOTA2Match_570/GetMatchHistoryBySequenceNum/v1/',{start_at_match_seq_num:matchSeq,matches_requested:1})
+  const raw=(data.result?.matches??[]).find((m:any)=>Number(m.match_id)===id)
+  if(!raw) throw new Response(JSON.stringify({error:`Матч ${id} недоступен в Steam`}),{status:404})
+  const out=normalize(raw); await save(env,`match:${id}`,out); return out
+}
+async function purchaseEvents(env:Env,id:number):Promise<Record<string,{time:number;itemId:number}[]>|null> {
+  if (!env.STRATZ_API_TOKEN) return null
+  const key=`purchase-events:v2:${id}`
+  const hit=await cached<Record<string,{time:number;itemId:number}[]>>(env,key)
+  if(hit) return hit
+  try {
+    const res=await fetch('https://api.stratz.com/graphql',{method:'POST',headers:{Authorization:`Bearer ${env.STRATZ_API_TOKEN}`,'Content-Type':'application/json','User-Agent':'STRATZ_API'},body:JSON.stringify({query:`query { match(id: ${id}) { players { isRadiant heroId playbackData { purchaseEvents { time itemId } } } } }`})})
+    if(!res.ok) { console.error('STRATZ purchase query HTTP',res.status); return null }
+    const data=await res.json<any>()
+    const players=data.data?.match?.players
+    if(!players) { console.error('STRATZ purchase query returned no parsed player timeline',JSON.stringify(data.errors??[])); return null }
+    const out:Record<string,{time:number;itemId:number}[]>={}
+    for(const p of players) out[`${p.isRadiant?'r':'d'}:${p.heroId}`]=p.playbackData?.purchaseEvents??[]
+    await save(env,key,out)
+    return out
+  } catch(e) { console.error('STRATZ purchase query failed',e instanceof Error?e.message:'unknown error'); return null }
+}
+async function replayData(env:Env,id:number) {
+  return cached<Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[]}>>(env,`replay-data:v1:${id}`)
+}
+async function profiles(env:Env,ids:number[]) {
+  const out=new Map<number,{name:string|null;avatar:string|null}>(), missing:number[]=[]
+  for(const id of [...new Set(ids)].filter(Boolean)) { const hit=await cached<any>(env,`profile:${id}`,600_000); if(hit) out.set(id,hit); else missing.push(id) }
+  for(let i=0;i<missing.length;i+=100) {
+    const data=await steam(env,'ISteamUser/GetPlayerSummaries/v2/',{steamids:missing.slice(i,i+100).map(id=>String(BigInt(id)+76561197960265728n)).join(',')})
+    for(const p of data.response?.players??[]) { const id=Number(BigInt(p.steamid)-76561197960265728n), v={name:p.personaname??null,avatar:p.avatarfull??p.avatarmedium??p.avatar??null};out.set(id,v);await save(env,`profile:${id}`,v) }
+  }
+  return out
+}
+async function getMatches(env:Env,account:number,rows:{id:number;seq:number}[],skip:number,take:number) {
+  const all=[]
+  for(const r of rows.slice(skip,skip+take)) { try { const m=await match(env,r.id,r.seq); if(m.players.some((p:any)=>p.steamAccountId===account)) all.push(m) } catch(e) { if(!(e instanceof Response)&&e instanceof Error) throw e } }
+  return all
+}
+const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}})
+
+export default { async fetch(request:Request,env:Env):Promise<Response> {
+  const url=new URL(request.url), p=url.pathname
+  if(!p.startsWith('/api/')) return env.ASSETS.fetch(request)
+  try {
+    const ingest=p.match(/^\/api\/internal\/replay\/(\d+)$/)
+    if(ingest) {
+      if(request.method!=='POST') return json({error:'Method not allowed'},405)
+      if(!env.REPLAY_INGEST_TOKEN || request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}`) return json({error:'Unauthorized'},401)
+      const id=Number(ingest[1]), raw=await request.text()
+      if(raw.length>1_000_000) return json({error:'Payload too large'},413)
+      let data:any; try { data=JSON.parse(raw) } catch { return json({error:'Invalid JSON'},400) }
+      if(!Array.isArray(data.players) || data.players.length>10) return json({error:'Expected player timeline array'},400)
+      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[]}>= {}
+      for(const row of data.players) {
+        const slot=Number(row.playerSlot)
+        if(!Number.isInteger(slot)||slot<0||slot>255) return json({error:'Invalid player slot'},400)
+        const purchases=Array.isArray(row.purchaseEvents)?row.purchaseEvents:[], upgrades=Array.isArray(row.abilityUpgrades)?row.abilityUpgrades:[]
+        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100)}
+      }
+      await save(env,`replay-data:v1:${id}`,bySlot)
+      return json({ok:true,matchId:id,players:Object.keys(bySlot).length})
+    }
+    if(p==='/api/internal/replay/pending') {
+      if(request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}` || !env.REPLAY_INGEST_TOKEN) return json({error:'Unauthorized'},401)
+      if(request.method!=='GET') return json({error:'Method not allowed'},405)
+      const histories=await env.DB.prepare("SELECT value FROM cache WHERE key GLOB 'history:*'").all<{value:string}>()
+      const ids=[...new Set(histories.results.flatMap(row=>{try{return (JSON.parse(row.value).rows??[]).map((x:any)=>Number(x.id)).filter((id:number)=>Number.isSafeInteger(id)&&id>0)}catch{return []}}))].sort((a,b)=>b-a)
+      const parsed=new Set<string>()
+      for(let i=0;i<ids.length;i+=100) {
+        const batch=ids.slice(i,i+100)
+        if(!batch.length) continue
+        const found=await env.DB.prepare(`SELECT key FROM cache WHERE key IN (${batch.map(()=>'?').join(',')})`).bind(...batch.map(id=>`replay-data:v1:${id}`)).all<{key:string}>()
+        for(const row of found.results) parsed.add(row.key)
+      }
+      const limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit'))||25))
+      return json({matchIds:ids.filter(id=>!parsed.has(`replay-data:v1:${id}`)).slice(0,limit)})
+    }
+    const replayMatch=p.match(/^\/api\/internal\/replay\/match\/(\d+)$/)
+    if(replayMatch) {
+      if(request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}` || !env.REPLAY_INGEST_TOKEN) return json({error:'Unauthorized'},401)
+      if(request.method!=='GET') return json({error:'Method not allowed'},405)
+      return json(await match(env,Number(replayMatch[1])))
+    }
+    if(request.method!=='GET') return json({error:'Method not allowed'},405)
+    if(p==='/api/health') return json({ok:true,steamKey:Boolean(env.STEAM_WEB_API_KEY)})
+    if(p==='/api/constants/heroes') return json(heroes)
+    if(p==='/api/constants/items') return json(items)
+    let m=p.match(/^\/api\/profile\/(\d+)$/)
+    if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h]=await Promise.all([profiles(env,[id]),history(env,id)]); const info=ps.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:null,rankIsCore:null}) }
+    m=p.match(/^\/api\/player\/(\d+)\/matches$/)
+    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take);return json(list.map((x:any)=>{const me=x.players.find((x:any)=>x.steamAccountId===id);return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:0,seasonRank:0,isVictory:me.isVictory,imp:null}}})) }
+    m=p.match(/^\/api\/matches\/(\d+)$/)
+    if(m) {const id=Number(m[1]),x=await match(env,id),[ps,replay]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id)]),purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0};return json({...x,players:x.players.map((p:any)=>{const team=p.isRadiant?'r':'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)];return {...p,name:ps.get(p.steamAccountId)?.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades}})})}
+    m=p.match(/^\/api\/player\/(\d+)\/heroes$/)
+    if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,{heroId:number;matchCount:number;winCount:number}>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id),a=agg.get(me.heroId)??{heroId:me.heroId,matchCount:0,winCount:0};a.matchCount++;if(me.isVictory)a.winCount++;agg.set(me.heroId,a)}return json([...agg.values()].sort((a,b)=>b.matchCount-a.matchCount).slice(0,Math.min(Number(url.searchParams.get('take'))||100,100)))}
+    m=p.match(/^\/api\/player\/(\d+)\/peers$/)
+    if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,any>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id);for(const q of x.players){if(!q.steamAccountId||q.steamAccountId===id)continue;const a=agg.get(q.steamAccountId)??{steamAccountId:q.steamAccountId,withMatchCount:0,withWinCount:0,againstMatchCount:0,againstWinCount:0};if(q.isVictory===me.isVictory){a.withMatchCount++;if(me.isVictory)a.withWinCount++}else{a.againstMatchCount++;if(me.isVictory)a.againstWinCount++}agg.set(q.steamAccountId,a)}}const top=[...agg.values()].sort((a,b)=>b.withMatchCount+b.againstMatchCount-a.withMatchCount-a.againstMatchCount).slice(0,14),ps=await profiles(env,top.map(x=>x.steamAccountId));return json(top.map(x=>({...x,name:ps.get(x.steamAccountId)?.name??`#${x.steamAccountId}`,avatar:ps.get(x.steamAccountId)?.avatar??null})))}
+    return json({error:'Неизвестный эндпоинт'},404)
+  } catch(e) { if(e instanceof Response)return e; return json({error:e instanceof Error?e.message:'Internal error'},500) }
+} }

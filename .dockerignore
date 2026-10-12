@@ -1,0 +1,9 @@
+node_modules
+.venv-parse
+.env
+.env.*
+!.env.example
+dist
+.git
+server/data
+scripts/*.jsonl
