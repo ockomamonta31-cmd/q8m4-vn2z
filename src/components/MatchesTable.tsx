@@ -56,7 +56,7 @@ export default function MatchesTable({
                 <span className="match-kda-value"><strong>{fmtKda(p.kills, p.deaths, p.assists)}</strong><small>KDA</small></span>
                 <span className="match-impact">
                   {IMPACT_MODEL_READY ? (() => {
-                    const our = personalImpact(p, m.durationSeconds, seasonRank ?? null)
+                    const our = personalImpact(p.positionSource === 'replay' ? p : { ...p, position: 0 }, m.durationSeconds, seasonRank ?? null)
                     if (our === null) {
                       return <span className="muted" title="Оценка недоступна для этой строки">—</span>
                     }
