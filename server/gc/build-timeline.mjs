@@ -48,6 +48,9 @@ export function buildMatchTimeline(replay, match, heroes) {
 
   const times = replay.radiant_gold_adv ?? []
   const xpSeries = replay.radiant_xp_adv ?? []
+  // Полная поминутная раскладка нужна для свинга: series прореживается раз в
+  // две минуты на длинных матчах, и индекс в нём — уже не номер минуты.
+  const advByMinute = times.map((gold) => Number(gold) || 0)
   const step = times.length > 45 ? 2 : 1
   const series = times.map((gold, i) => ({
     t: Math.min(i * 60, duration),
@@ -94,8 +97,8 @@ export function buildMatchTimeline(replay, match, heroes) {
 
   // teamfights[].players is aligned with replay.players order, so slot lookup is positional
   const advAt = (minute) => {
-    const index = Math.max(0, Math.min(minute, series.length - 1))
-    return series[index]?.gold ?? 0
+    const index = Math.max(0, Math.min(minute, advByMinute.length - 1))
+    return advByMinute[index] ?? 0
   }
   const teamfights = (replay.teamfights ?? []).map((fight, index) => {
     const t = Number(fight.start) || 0
