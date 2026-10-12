@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import type { HeroInfo, PlayerMatch } from '../api/types'
 import { fetchMatch } from '../api'
 import { heroImageUrl } from '../api/heroes'
@@ -31,70 +31,30 @@ export default function MatchesTable({
     [hasGlobal, matches],
   )
   const modelInfo = IMPACT_MODEL_READY ? impactModelInfo() : null
-  const navigate = useNavigate()
 
   if (matches.length === 0) {
     return <div className="inline-note">Матчи не найдены. Возможно, профиль скрыт или ID неверный.</div>
   }
   return (
-    <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Результат</th>
-            <th>Герой</th>
-            <th className="num">K / D / A</th>
-            <th className="num">KDA</th>
-            <th className="num" title="Наша честная оценка: насколько игрок сдвигал шанс победы команды относительно типичного игрока своего ранга и позиции (−100…+100). Считается нашей моделью, обученной на реальных исходах матчей.">Импакт ★</th>
-            <th className="num col-md">GPM</th>
-            <th className="num col-md">Урон</th>
-            <th className="num col-md">XPM</th>
-            <th className="num col-sm">LH</th>
-            <th className="col-sm">Длит.</th>
-            <th className="col-md">Режим</th>
-            <th>Дата</th>
-            <th className="col-sm">Матч</th>
-          </tr>
-        </thead>
-        <tbody>
-          {matches.map((m) => {
+    <div className="match-list" role="list">
+      {matches.map((m) => {
             const hero = heroMap.get(m.player.heroId)
             const p = m.player
             return (
-              <tr
+              <Link
                 key={m.id}
-                className={`row-clickable ${p.isVictory ? 'result-win' : 'result-loss'}`}
-                tabIndex={0}
-                role="link"
-                aria-label={`Матч ${m.id} · ${hero ? hero.name : `герой ${m.player.heroId}`}`}
+                to={`/match/${m.id}`}
+                className={`match-row ${p.isVictory ? 'result-win' : 'result-loss'}`}
                 onMouseEnter={() => void fetchMatch(m.id)}
-                onClick={() => navigate(`/match/${m.id}`)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    navigate(`/match/${m.id}`)
-                  }
-                }}
               >
-                <td>
-                  <span className={`res-tag ${p.isVictory ? 'win' : 'loss'}`}>
-                    {p.isVictory ? 'Победа' : 'Поражение'}
-                  </span>
-                </td>
-                <td>
-                  <div className="hero-cell">
-                    {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
-                    <span className="hero-name">{hero ? hero.name : `hero #${m.player.heroId}`}</span>
-                  </div>
-                </td>
-                <td className="num">
-                  <span className="green">{p.kills}</span>
-                  <span className="muted"> / </span>
-                  <span className="red">{p.deaths}</span>
-                  <span className="muted"> / {p.assists}</span>
-                </td>
-                <td className="num">{fmtKda(p.kills, p.deaths, p.assists)}</td>
-                <td className="num">
+                <span className="match-result-mark" aria-label={p.isVictory ? 'Победа' : 'Поражение'}><i /><b>{p.isVictory ? 'Победа' : 'Поражение'}</b></span>
+                <span className="match-hero-cell">
+                  {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+                  <span><strong>{hero ? hero.name : `Герой #${p.heroId}`}</strong><small>{gameModeName(m.gameMode)} · {lobbyName(m.lobbyType)}</small></span>
+                </span>
+                <span className="match-kda"><strong><i>{p.kills}</i><em>{p.deaths}</em>{p.assists}</strong><small>K / D / A</small></span>
+                <span className="match-kda-value"><strong>{fmtKda(p.kills, p.deaths, p.assists)}</strong><small>KDA</small></span>
+                <span className="match-impact">
                   {IMPACT_MODEL_READY ? (() => {
                     const our = personalImpact(p, m.durationSeconds, seasonRank ?? null)
                     if (our === null) {
@@ -132,30 +92,13 @@ export default function MatchesTable({
                       </span>
                     )
                   })()}
-                </td>
-                <td className="num col-md">{p.goldPerMinute}</td>
-                <td className="num col-md" title={`Урон по героям за матч${p.towerDamage > 0 ? `, по башням: ${p.towerDamage}` : ''}${p.heroHealing > 0 ? `, лечение: ${p.heroHealing}` : ''}`}>
-                  {p.heroDamage > 0 ? p.heroDamage.toLocaleString('ru-RU') : '—'}
-                </td>
-                <td className="num col-md">{p.experiencePerMinute}</td>
-                <td className="num col-sm">{p.numLastHits}</td>
-                <td className="col-sm muted">{fmtDuration(m.durationSeconds)}</td>
-                <td className="col-md muted">
-                  {gameModeName(m.gameMode)}
-                  {m.lobbyType === 'RANKED' ? ' · ranked' : ''}
-                  {m.gameMode.includes('ONE_VS_ONE') ? ' · 1v1' : ''}
-                </td>
-                <td className="muted">{fmtDate(m.startDateTime)}</td>
-                <td className="col-sm">
-                  <Link to={`/match/${m.id}`} onClick={(e) => e.stopPropagation()} title="Открыть матч">
-                    {m.id}
-                  </Link>
-                </td>
-              </tr>
+                </span>
+                <span className="match-gold"><strong>{p.goldPerMinute}</strong><small>GPM</small></span>
+                <span className="match-date"><strong>{fmtDate(m.startDateTime)}</strong><small>{fmtDuration(m.durationSeconds)} · #{m.id}</small></span>
+                <svg className="match-row-open" viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6" /></svg>
+              </Link>
             )
-          })}
-        </tbody>
-      </table>
+      })}
       <div className="inline-note">
         {lobbyName(matches[0]?.lobbyType ?? '')} · показано {matches.length} матчей
         {IMPACT_MODEL_READY && modelInfo

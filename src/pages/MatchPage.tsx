@@ -7,7 +7,7 @@ import { fetchMatch, getItemMap, itemImageUrl } from '../api'
 import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails, type MatchPlayer } from '../api/types'
 import { getHeroMap, heroImageUrl } from '../api/heroes'
 import { fantasyPoints, globalModelInfo, predictImpGlobal, scoreClass } from '../api/performance'
-import { IMPACT_MODEL_READY, impactClass, impactModelInfo, personalImpact } from '../api/impact'
+import { IMPACT_MODEL_READY, impactClass, personalImpact } from '../api/impact'
 import { fmtDuration, gameModeName, lobbyName, steamProfileUrl } from '../api/formats'
 
 type AbilityInfo = { name: string; img: string | null; key: string }
@@ -20,7 +20,6 @@ function useAbilityLookup() {
 function fmtNum(n: number): string {
   return n.toLocaleString('ru-RU')
 }
-
 function ImpBadge({
   imp,
   our,
@@ -34,12 +33,8 @@ function ImpBadge({
   durationSec: number
 }) {
   if (our !== null) {
-    const info = impactModelInfo()
     return (
-      <span
-        className={`score-badge ${impactClass(our)}`}
-        title={`Наша оценка: вклад в шанс победы относительно типичного игрока своего ранга и позиции. Учтены урон и качество килов (в т.ч. «стил» килы), смерти и что ты за них получил, саппорт-работа (варды, деворды, стаки, руны, курьеры, смоки/дасты), передвижение по карте и активность.${info ? `\nМодель: ${info.matches.toLocaleString('ru-RU')} реальных матчей, обучена ${new Date(info.trainedAt).toLocaleDateString('ru-RU')}` : ''}`}
-      >
+      <span className={`score-badge ${impactClass(our)}`} title="Модель импакта: сравнение с базовыми показателями игрока">
         {our > 0 ? `+${our}` : our}
       </span>
     )
@@ -228,7 +223,10 @@ function PlayerRow({
                   </span>
                 )}
               </span>
-              <span className="hero-sub muted">{hero?.name ?? `hero #${p.heroId}`}</span>
+              <span className="hero-sub muted">
+                {hero?.name ?? `hero #${p.heroId}`}
+                <img className={`position-icon${p.positionSource === 'replay' && p.position > 0 ? '' : ' position-icon-unknown'}`} src={`/positions/position-${p.positionSource === 'replay' && p.position > 0 ? p.position : 'unknown'}.svg`} alt={p.positionSource === 'replay' && p.position > 0 ? `Позиция ${p.position}` : 'Позиция ещё не определена по реплею'} title={p.positionSource === 'replay' && p.position > 0 ? `Позиция ${p.position} · определена по передвижениям в реплее` : 'Позиция появится после обработки реплея'} />
+              </span>
               {buildPreview.length > 0 && <span className="row-build-preview" aria-label="Первые уровни раскачки">{buildPreview.map((u, i) => {
                 const info = abilityBook[String(u.ability)]
                 return <span key={`${u.ability}-${i}`} title={`Ур. ${u.level} · ${info?.name ?? `Ability ${u.ability}`} · ${fmtDuration(u.time)}`}>{info?.img ? <img src={`https://cdn.steamstatic.com${info.img}`} alt="" loading="lazy" /> : <i>+</i>}</span>
@@ -306,7 +304,7 @@ function TeamPanel({
 }) {
   // Одна и та же функция с одной и той же seasonRank=null даёт то же число,
   // что и в списке матчей: seasonRank там тоже null (Steam его не отдаёт).
-  const our = (p: MatchPlayer) => (IMPACT_MODEL_READY ? personalImpact(p, durationSec, null) : null)
+  const our = (p: MatchPlayer) => (IMPACT_MODEL_READY ? personalImpact(p.positionSource === 'replay' ? p : { ...p, position: 0 }, durationSec, null) : null)
   const scores = players.map(our)
   const totalOur = IMPACT_MODEL_READY ? scores.reduce<number>((s, v) => s + (v ?? 0), 0) : null
   const totalImp = players.reduce((s, p) => s + (p.imp ?? 0), 0)
@@ -331,7 +329,7 @@ function TeamPanel({
           <thead>
             <tr>
               <th>Игрок</th>
-              <th className="num" title="Наша честная оценка (−100…+100): вклад в шанс победы команды относительно типичного игрока своего ранга и позиции. Учтены урон/качество килов, смерти, саппорт-работа, движение.">Импакт ★</th>
+              <th className="num" title="Оценка модели по K/D/A, фарму, уровню, урону и лечению относительно базовых показателей той же позиции и ранга.">Импакт ★</th>
               <th className="num">K / D / A</th>
               <th className="num col-sm">Ур.</th>
               <th className="num col-md">Нетворт</th>
@@ -415,44 +413,33 @@ export default function MatchPage() {
   const radiantWon = Boolean(match.didRadiantWin)
 
   return (
-    <div>
-      <div className={`match-hero panel ${radiantWon ? 'radiant' : 'dire'}`}>
-        <div className="match-hero-main">
-          <div className="match-id-line">
-            <span className={`match-outcome ${radiantWon ? 'win' : 'loss'}`}>
-              {radiantWon ? 'Radiant победил' : 'Dire победил'}
-            </span>
-            <span className="muted">матч #{match.id}</span>
+    <div className="match-page">
+      <header className="match-report">
+        <div className="match-report-meta">
+          <strong>Матч #{match.id}</strong>
+          <span>{gameModeName(match.gameMode)}</span>
+          <span>{lobbyName(match.lobbyType)}</span>
+          <span>{new Date(match.startDateTime * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
+          {match.numHumanPlayers !== null && <span>{match.numHumanPlayers} игроков</span>}
+        </div>
+        <div className={`match-scoreboard ${radiantWon ? 'radiant' : 'dire'}`}>
+          <div className="score-team score-radiant">
+            <span className="score-side-name">Radiant</span>
+            <strong>{match.radiantScore ?? '—'}</strong>
+            {radiantWon && <small>Победитель</small>}
           </div>
-          <div className="match-summary">
-            {match.radiantScore !== null && match.direScore !== null && (
-              <div className="ms-item">
-                <span className="ms-value">
-                  <span className={radiantWon ? 'green' : 'red'}>{match.radiantScore}</span>
-                  <span className="muted"> : </span>
-                  <span className={radiantWon ? 'red' : 'green'}>{match.direScore}</span>
-                </span>
-                <span className="ms-key">убийств</span>
-              </div>
-            )}
-            <div className="ms-item">
-              <span className="ms-value">{fmtDuration(match.durationSeconds)}</span>
-              <span className="ms-key">длительность</span>
-            </div>
-            {match.firstBloodSeconds !== null && match.firstBloodSeconds >= 0 && (
-              <div className="ms-item">
-                <span className="ms-value">{fmtDuration(match.firstBloodSeconds)}</span>
-                <span className="ms-key">первая кровь</span>
-              </div>
-            )}
+          <div className="score-middle">
+            <span className={`match-outcome ${radiantWon ? 'win' : 'loss'}`}>{radiantWon ? 'Победа Radiant' : 'Победа Dire'}</span>
+            <strong>{fmtDuration(match.durationSeconds)}</strong>
+            <small>{match.firstBloodSeconds !== null && match.firstBloodSeconds >= 0 ? `Первая кровь · ${fmtDuration(match.firstBloodSeconds)}` : 'Длительность матча'}</small>
           </div>
-          <div className="match-meta muted">
-            {gameModeName(match.gameMode)}, {lobbyName(match.lobbyType)},{' '}
-            {new Date(match.startDateTime * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })}
-            {match.numHumanPlayers !== null ? `, ${match.numHumanPlayers} игроков` : ''}
+          <div className="score-team score-dire">
+            <span className="score-side-name">Dire</span>
+            <strong>{match.direScore ?? '—'}</strong>
+            {!radiantWon && <small>Победитель</small>}
           </div>
         </div>
-      </div>
+      </header>
 
       <DraftStrip picks={match.picksBans} heroMap={heroMap} />
 

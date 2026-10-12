@@ -64,18 +64,7 @@ function normalize(raw:any) {
   return {schema:2,id:raw.match_id??0,didRadiantWin:raw.radiant_win??null,durationSeconds:raw.duration??0,startDateTime:raw.start_time??0,gameMode:mode,lobbyType:lobby,numHumanPlayers:raw.human_players??positioned.length,actualRank:0,firstBloodSeconds:raw.first_blood_time??null,radiantScore:raw.radiant_score??null,direScore:raw.dire_score??null,towerStatusRadiant:raw.tower_status_radiant??null,towerStatusDire:raw.tower_status_dire??null,barracksStatusRadiant:raw.barracks_status_radiant??null,barracksStatusDire:raw.barracks_status_dire??null,picksBans:(raw.picks_bans??[]).slice().sort((a:any,b:any)=>a.order-b.order).map((b:any)=>({isPick:Boolean(b.is_pick),isRadiant:b.team===0,heroId:b.hero_id,order:b.order})),players:positioned}
 }
 function withPositionEstimates(players:any[]) {
-  const estimate=new Map<any,{position:number;positionSource:'stats'}>()
-  for(const radiant of [true,false]) {
-    const team=players.filter((p:any)=>p.isRadiant===radiant)
-    if(team.length!==5) continue
-    const score=new Map(team.map((p:any)=>[p,0]))
-    for(const [key,weight] of [['goldPerMinute',.35],['networth',.3],['numLastHits',.2],['experiencePerMinute',.15]] as const) {
-      const ranked=[...team].sort((a:any,b:any)=>(b[key]??0)-(a[key]??0))
-      ranked.forEach((p:any,i:number)=>score.set(p,score.get(p)!+(team.length-i)*weight))
-    }
-    ;[...team].sort((a:any,b:any)=>score.get(b)!-score.get(a)!).forEach((p:any,i:number)=>estimate.set(p,{position:i+1,positionSource:'stats'}))
-  }
-  return players.map((p:any)=>p.position>0?p:{...p,...estimate.get(p)})
+  return players.map((p:any)=>p.positionSource==='replay'?p:{...p,position:0,positionSource:undefined})
 }
 async function match(env:Env,id:number,seq?:number) {
   const hit=await cached<any>(env,`match:${id}`); if(hit) return {...hit,players:withPositionEstimates(hit.players??[])}

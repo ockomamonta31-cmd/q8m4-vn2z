@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-label="Позиция 1">
+ <path d="M12 1.8 22.2 12 12 22.2 1.8 12 12 1.8Z" fill="#141b21" stroke="#73818a" stroke-width=".8"/>
+ <path d="M5 19 19 5M5 5l14 14" stroke="#3a454d" stroke-width=".65"/>
+ <path d="M14 19L19 14" fill="none" stroke="#e5ad65" stroke-width="2.4" stroke-linecap="round"/>
+ <circle cx="12" cy="12" r="1.25" fill="#d8e0e2"/>
+ <text x="12" y="22.5" text-anchor="middle" font-family="Arial,sans-serif" font-size="6" font-weight="700" fill="#e5ad65">1</text>
+</svg>

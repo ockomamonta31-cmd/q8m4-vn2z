@@ -22,7 +22,8 @@ const run=(file,...args)=>new Promise((resolve,reject)=>{
   child.once('exit',code=>code===0?resolve():reject(new Error(`${file} exited ${code}`)))
 })
 
-const {matchIds=[]}=await get('/api/internal/replay/pending?limit=100')
+const requestedId=process.env.REPLAY_MATCH_ID
+const {matchIds=[]}=requestedId?{matchIds:[requestedId]}:await get('/api/internal/replay/pending?limit=100')
 const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
 let completed=0
 for(const id of matchIds) {
