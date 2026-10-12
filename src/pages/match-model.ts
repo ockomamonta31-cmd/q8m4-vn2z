@@ -163,16 +163,17 @@ export function buildInsights(match: MatchDetails, board: MatchBoard, timeline: 
 
   const ranked = rankTeamfights(timeline)
   const decisive = ranked[0]
-  if (decisive && (decisive.swing == null || Math.abs(decisive.swing) >= 800)) {
-    const side = decisive.winner === 'even' ? null : decisive.winner === 'radiant' ? board.radiant : board.dire
+  if (decisive && Math.abs(decisive.weight) >= 800) {
+    const gained = decisive.fightGold >= 0
+    const side = decisive.fightGold === 0 ? null : gained ? board.radiant : board.dire
     out.push({
       tone: side ? (side.radiant ? 'r' : 'd') : '',
       icon: 'flame',
       label: 'Решающий тимфайт',
       value: fmtDuration(decisive.t),
       note: side
-        ? `${side.label} выиграл драку ${decisive.radiantKills}:${decisive.direKills} и забрал ${fmtK(Math.abs(decisive.swing ?? decisive.deaths * 900))} золота — после неё игра пошла по-другому.`
-        : `Драка ${decisive.radiantKills}:${decisive.direKills} при ${decisive.deaths} смертях — размен, но именно в ней преимущество перешло из рук в руки.`,
+        ? `${side.label} выиграл драку ${decisive.radiantKills}:${decisive.direKills} и унёс ${fmtK(Math.abs(decisive.fightGold))} золота против ${fmtK(Math.abs(gained ? decisive.direGold : decisive.radiantGold))} у соперника.`
+        : `Размен ${decisive.radiantKills}:${decisive.direKills} при ${decisive.deaths} смертях — обе стороны остались примерно при своём.`,
     })
   }
 

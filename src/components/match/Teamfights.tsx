@@ -50,7 +50,7 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
   const who = useSlotMap(match)
   if (!fights.length) return null
 
-  const hasSwing = fights.some((f) => f.swing != null)
+  const hasLines = fights.some((f) => f.lines?.length)
 
   return (
     <section className="panel fights">
@@ -58,8 +58,8 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
         <div>
           <div className="chart-title">Тимфайты по важности</div>
           <div className="chart-sub">
-            {hasSwing
-              ? 'Отсортированы по сдвигу преимущества в золоте, а не по числу смертей. Нажми на драку — покажет вклад каждого.'
+            {hasLines
+              ? 'Отсортированы по золоту, которое стороны унесли из возни, — оно сходится со строками игроков. Нажми на драку — покажет вклад каждого.'
               : `${fights.length} драк от трёх смертей. Пересобери реплей, чтобы добавить вклад каждого игрока.`}
           </div>
         </div>
@@ -97,10 +97,15 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
                   {fight.buybacks ? ` · ${plural(fight.buybacks, 'байбек', 'байбека', 'байбеков')}` : ''}
                 </span>
                 <span className={`fight-swing ${side ?? ''}`}>
-                  {fight.swing == null
-                    ? `${fight.deaths} ×`
-                    : `${fight.swing >= 0 ? '+' : '−'}${fmtK(Math.abs(fight.swing))}`}
-                  {fight.swing != null && <small>золота</small>}
+                  {fight.lines?.length
+                    ? `${fight.fightGold >= 0 ? '+' : '−'}${fmtK(Math.abs(fight.fightGold))}`
+                    : `${fight.deaths} ×`}
+                  <small>{fight.lines?.length ? 'золота в драке' : 'масштаб'}</small>
+                  {fight.swing != null && Math.abs(fight.mapSwing - fight.fightGold) > 900 && (
+                    <em title="Сдвиг преимущества на карте за окно вокруг драки — сюда попадают башни, крипы и добивания после возни, поэтому цифра может отличаться и даже иметь обратный знак">
+                      карта {fight.mapSwing >= 0 ? '+' : '−'}{fmtK(Math.abs(fight.mapSwing))}
+                    </em>
+                  )}
                 </span>
                 {decisive && <span className="fight-tag">решающая</span>}
                 <Icon.Chevron size={12} className="fight-caret" />

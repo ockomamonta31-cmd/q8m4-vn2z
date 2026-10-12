@@ -504,6 +504,7 @@ td.stat { position: relative; }
 .fight-meta { color: var(--ink-3); font-size: var(--t-xs); }
 .fight-swing { font: 500 var(--t-md)/1.1 var(--mono); text-align: right; color: var(--ink-2); }
 .fight-swing small { display: block; color: var(--ink-4); font: 400 9px/1.2 var(--ui); }
+.fight-swing em { display: block; margin-top: 3px; color: var(--ink-4); font: 400 9px/1.2 var(--mono); font-style: normal; cursor: help; }
 .fight-swing.r { color: var(--radiant-ink); }
 .fight-swing.d { color: var(--dire-ink); }
 .fight-tag { padding: 2px 7px; border: 1px solid var(--brass); border-radius: var(--r-pill); color: var(--brass); font: 600 9px/1.5 var(--ui); letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }

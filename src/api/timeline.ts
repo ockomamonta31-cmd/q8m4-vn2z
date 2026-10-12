@@ -102,38 +102,37 @@ export function turningPoint(timeline: MatchTimeline | null) {
 }
 
 export interface RankedTeamfight extends Teamfight {
-  /** насколько драка сдвинула игру: |свинга|, а без него — масштаб по смертям и байбекам */
-  weight: number
-  /** свинг в пользу той стороны, которая в итоге выиграла драку по убийствам */
-  swingForWinner: number
   winner: 'radiant' | 'dire' | 'even'
-  /** сколько золота каждая сторона оставила в драке */
+  /** сколько золота унесла из возни каждая сторона */
   radiantGold: number
   direGold: number
+  /** radiantGold − direGold; сходится со строками игроков, в отличие от swing */
+  fightGold: number
+  /** сдвиг карты вокруг драки — шире самой возни и включает последствия */
+  mapSwing: number
+  /** вес сортировки: сначала куш драки, без строк — сдвиг карты, без него — масштаб */
+  weight: number
 }
 
 /**
- * Драки по важности. Первичный признак — сдвиг преимущества по золоту,
- * потому что «много трупов» и «драка, после которой команда пошла выигрывать»
- * это разные вещи. Для старых записей кэша без swing считаем масштаб.
+ * Драки по важности. Берём золото, которое стороны унесли именно из возни: оно
+ * сходится со строками игроков. Сдвиг карты (swing) считается по окну шире драки
+ * и включает башни, крипов и добивания после, поэтому у него бывает обратный знак
+ * — как поддержка он полезен, по нему ранжировать нельзя.
  */
 export function rankTeamfights(timeline: MatchTimeline | null): RankedTeamfight[] {
   const fights = timeline?.teamfights ?? []
   return fights.map((fight): RankedTeamfight => {
-    const radiantGold = (fight.lines ?? []).filter((l) => l.slot < 128).reduce((sum, l) => sum + l.gold, 0)
-    const direGold = (fight.lines ?? []).filter((l) => l.slot >= 128).reduce((sum, l) => sum + l.gold, 0)
+    const lines = fight.lines ?? []
+    const radiantGold = lines.filter((l) => l.slot < 128).reduce((sum, l) => sum + l.gold, 0)
+    const direGold = lines.filter((l) => l.slot >= 128).reduce((sum, l) => sum + l.gold, 0)
+    const fightGold = radiantGold - direGold
     const winner: RankedTeamfight['winner'] = fight.radiantKills === fight.direKills ? 'even' : fight.radiantKills > fight.direKills ? 'radiant' : 'dire'
-    const swing = fight.swing ?? 0
-    const weight = fight.swing == null
-      ? fight.deaths * 1000 + (fight.buybacks ?? 0) * 500
-      : Math.abs(swing)
-    return {
-      ...fight,
-      radiantGold,
-      direGold,
-      winner,
-      swingForWinner: winner === 'dire' ? -swing : swing,
-      weight,
-    }
+    const weight = lines.length
+      ? Math.abs(fightGold)
+      : fight.swing == null
+        ? fight.deaths * 1000 + (fight.buybacks ?? 0) * 500
+        : Math.abs(fight.swing)
+    return { ...fight, radiantGold, direGold, fightGold, mapSwing: fight.swing ?? 0, winner, weight }
   }).sort((a, b) => b.weight - a.weight)
 }
