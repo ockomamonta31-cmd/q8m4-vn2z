@@ -5,6 +5,7 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { inferReplayPositions } from './infer-replay-positions.mjs'
 
 const [id] = process.argv.slice(2)
 if (!/^\d+$/.test(id ?? '')) {
@@ -26,6 +27,7 @@ const [match, replay, items] = await Promise.all([
 ])
 const itemIds = new Map(items.flatMap((x) => [[x.shortName, x.id], [x.shortName.replaceAll('_', ''), x.id]]))
 if (!Array.isArray(replay.players) || replay.players.length !== 10) throw new Error(`Replay does not contain the expected 10 player records`)
+const detectedPositions = inferReplayPositions(match.players, replay.players)
 let purchases = 0, unmapped = 0
 const replayPlayers = match.players.map((p) => {
   const side = match.players.filter((q) => q.isRadiant === p.isRadiant)
@@ -39,7 +41,8 @@ const replayPlayers = match.players.map((p) => {
     if (!itemId) { unmapped++; continue }
     p.purchaseEvents.push({ time: Number(e.time) || 0, itemId }); purchases++
   }
-  return { playerSlot: slot, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades }
+  const role = detectedPositions.get(slot)
+  return { playerSlot: slot, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, ...(role ?? {}) }
 })
 const path = join(data, 'matches', `${id}.json`)
 await writeFile(path, JSON.stringify(match))
@@ -51,4 +54,4 @@ if (ingestUrl && ingestToken) {
   if (!res.ok) throw new Error(`Worker ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
   console.log(`Uploaded to Worker: ${await res.text()}`)
 }
-console.log(JSON.stringify({ matchId: Number(id), purchases, unmappedItems: unmapped }))
+console.log(JSON.stringify({ matchId: Number(id), purchases, unmappedItems: unmapped, positionsDetected: [...detectedPositions.values()].filter((x) => x.positionSource === 'replay').length }))

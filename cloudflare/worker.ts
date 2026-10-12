@@ -58,12 +58,27 @@ function normalize(raw:any) {
     const radiant=(p.player_slot??0)<128, gpm=p.gold_per_min??0, nw=p.net_worth??0
     return {steamAccountId:p.account_id===PRIVATE_ID?0:(p.account_id??0),isRadiant:radiant,isVictory:radiant===Boolean(raw.radiant_win),heroId:p.hero_id??0,kills:p.kills??0,deaths:p.deaths??0,assists:p.assists??0,goldPerMinute:gpm,experiencePerMinute:p.xp_per_min??0,numLastHits:p.last_hits??0,numDenies:p.denies??0,networth:nw>gpm*dur*.5?nw:Math.round(gpm*dur),level:p.level??0,heroDamage:p.hero_damage??0,towerDamage:p.tower_damage??0,heroHealing:p.hero_healing??0,position:0,seasonRank:0,imp:null,items:[p.item_0,p.item_1,p.item_2,p.item_3,p.item_4,p.item_5].map((x:number)=>x||null),backpack:[p.backpack_0,p.backpack_1,p.backpack_2].map((x:number)=>x||null),neutralItem:p.item_neutral||null,neutralItem2:p.item_neutral2||null,aghanimsScepter:Boolean(p.aghanims_scepter),aghanimsShard:Boolean(p.aghanims_shard),moonshard:Boolean(p.moonshard),leaverStatus:p.leaver_status??0,scaledHeroDamage:p.scaled_hero_damage??0,scaledTowerDamage:p.scaled_tower_damage??0,scaledHeroHealing:p.scaled_hero_healing??0,abilityUpgrades:(p.ability_upgrades??[]).map((a:any)=>({ability:a.ability,time:a.time,level:a.level})),stats:null}
   })
+  const positioned=withPositionEstimates(players)
   const lobby=lobbies[raw.lobby_type]??'PUBLIC_MATCH'; let mode=modes[raw.game_mode]??`MODE_${raw.game_mode}`
   if(lobby==='RANKED'&&mode==='ALL_PICK') mode='ALL_PICK_RANKED'
-  return {schema:2,id:raw.match_id??0,didRadiantWin:raw.radiant_win??null,durationSeconds:raw.duration??0,startDateTime:raw.start_time??0,gameMode:mode,lobbyType:lobby,numHumanPlayers:raw.human_players??players.length,actualRank:0,firstBloodSeconds:raw.first_blood_time??null,radiantScore:raw.radiant_score??null,direScore:raw.dire_score??null,towerStatusRadiant:raw.tower_status_radiant??null,towerStatusDire:raw.tower_status_dire??null,barracksStatusRadiant:raw.barracks_status_radiant??null,barracksStatusDire:raw.barracks_status_dire??null,picksBans:(raw.picks_bans??[]).slice().sort((a:any,b:any)=>a.order-b.order).map((b:any)=>({isPick:Boolean(b.is_pick),isRadiant:b.team===0,heroId:b.hero_id,order:b.order})),players}
+  return {schema:2,id:raw.match_id??0,didRadiantWin:raw.radiant_win??null,durationSeconds:raw.duration??0,startDateTime:raw.start_time??0,gameMode:mode,lobbyType:lobby,numHumanPlayers:raw.human_players??positioned.length,actualRank:0,firstBloodSeconds:raw.first_blood_time??null,radiantScore:raw.radiant_score??null,direScore:raw.dire_score??null,towerStatusRadiant:raw.tower_status_radiant??null,towerStatusDire:raw.tower_status_dire??null,barracksStatusRadiant:raw.barracks_status_radiant??null,barracksStatusDire:raw.barracks_status_dire??null,picksBans:(raw.picks_bans??[]).slice().sort((a:any,b:any)=>a.order-b.order).map((b:any)=>({isPick:Boolean(b.is_pick),isRadiant:b.team===0,heroId:b.hero_id,order:b.order})),players:positioned}
+}
+function withPositionEstimates(players:any[]) {
+  const estimate=new Map<any,{position:number;positionSource:'stats'}>()
+  for(const radiant of [true,false]) {
+    const team=players.filter((p:any)=>p.isRadiant===radiant)
+    if(team.length!==5) continue
+    const score=new Map(team.map((p:any)=>[p,0]))
+    for(const [key,weight] of [['goldPerMinute',.35],['networth',.3],['numLastHits',.2],['experiencePerMinute',.15]] as const) {
+      const ranked=[...team].sort((a:any,b:any)=>(b[key]??0)-(a[key]??0))
+      ranked.forEach((p:any,i:number)=>score.set(p,score.get(p)!+(team.length-i)*weight))
+    }
+    ;[...team].sort((a:any,b:any)=>score.get(b)!-score.get(a)!).forEach((p:any,i:number)=>estimate.set(p,{position:i+1,positionSource:'stats'}))
+  }
+  return players.map((p:any)=>p.position>0?p:{...p,...estimate.get(p)})
 }
 async function match(env:Env,id:number,seq?:number) {
-  const hit=await cached<any>(env,`match:${id}`); if(hit) return hit
+  const hit=await cached<any>(env,`match:${id}`); if(hit) return {...hit,players:withPositionEstimates(hit.players??[])}
   const matchSeq=seq??await cached<number>(env,`seq:${id}`)
   if(!matchSeq) throw new Response(JSON.stringify({error:`Матч ${id}: сначала открой его из истории игрока`}),{status:404})
   const data=await steam(env,'IDOTA2Match_570/GetMatchHistoryBySequenceNum/v1/',{start_at_match_seq_num:matchSeq,matches_requested:1})
@@ -89,7 +104,7 @@ async function purchaseEvents(env:Env,id:number):Promise<Record<string,{time:num
   } catch(e) { console.error('STRATZ purchase query failed',e instanceof Error?e.message:'unknown error'); return null }
 }
 async function replayData(env:Env,id:number) {
-  return cached<Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[]}>>(env,`replay-data:v1:${id}`)
+  return cached<Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];position?:number;positionSource?:'replay'|'stats'}>>(env,`replay-data:v1:${id}`)
 }
 async function profiles(env:Env,ids:number[]) {
   const out=new Map<number,{name:string|null;avatar:string|null}>(), missing:number[]=[]
@@ -185,12 +200,13 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
       if(raw.length>1_000_000) return json({error:'Payload too large'},413)
       let data:any; try { data=JSON.parse(raw) } catch { return json({error:'Invalid JSON'},400) }
       if(!Array.isArray(data.players) || data.players.length>10) return json({error:'Expected player timeline array'},400)
-      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[]}>= {}
+      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];position?:number;positionSource?:'replay'|'stats'}>= {}
       for(const row of data.players) {
         const slot=Number(row.playerSlot)
         if(!Number.isInteger(slot)||slot<0||slot>255) return json({error:'Invalid player slot'},400)
         const purchases=Array.isArray(row.purchaseEvents)?row.purchaseEvents:[], upgrades=Array.isArray(row.abilityUpgrades)?row.abilityUpgrades:[]
-        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100)}
+        const position=Number(row.position)
+        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats'}:{})}
       }
       await save(env,`replay-data:v1:${id}`,bySlot)
       return json({ok:true,matchId:id,players:Object.keys(bySlot).length})
@@ -200,15 +216,15 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
       if(request.method!=='GET') return json({error:'Method not allowed'},405)
       const histories=await env.DB.prepare("SELECT value FROM cache WHERE key GLOB 'history:*'").all<{value:string}>()
       const ids=[...new Set(histories.results.flatMap(row=>{try{return (JSON.parse(row.value).rows??[]).map((x:any)=>Number(x.id)).filter((id:number)=>Number.isSafeInteger(id)&&id>0)}catch{return []}}))].sort((a,b)=>b-a)
-      const parsed=new Set<string>()
+      const complete=new Set<string>()
       for(let i=0;i<ids.length;i+=100) {
         const batch=ids.slice(i,i+100)
         if(!batch.length) continue
-        const found=await env.DB.prepare(`SELECT key FROM cache WHERE key IN (${batch.map(()=>'?').join(',')})`).bind(...batch.map(id=>`replay-data:v1:${id}`)).all<{key:string}>()
-        for(const row of found.results) parsed.add(row.key)
+        const found=await env.DB.prepare(`SELECT key,value FROM cache WHERE key IN (${batch.map(()=>'?').join(',')})`).bind(...batch.map(id=>`replay-data:v1:${id}`)).all<{key:string;value:string}>()
+        for(const row of found.results) { try { const entries=Object.values(JSON.parse(row.value)); if(entries.length===10&&entries.every((x:any)=>x.position>=1&&x.position<=5)) complete.add(row.key) } catch {} }
       }
       const limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit'))||25))
-      return json({matchIds:ids.filter(id=>!parsed.has(`replay-data:v1:${id}`)).slice(0,limit)})
+      return json({matchIds:ids.filter(id=>!complete.has(`replay-data:v1:${id}`)).slice(0,limit)})
     }
     const replayMatch=p.match(/^\/api\/internal\/replay\/match\/(\d+)$/)
     if(replayMatch) {
@@ -223,9 +239,9 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
     let m=p.match(/^\/api\/profile\/(\d+)$/)
     if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h]=await Promise.all([profiles(env,[id]),history(env,id)]); const info=ps.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:null,rankIsCore:null}) }
     m=p.match(/^\/api\/player\/(\d+)\/matches$/)
-    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take);return json(list.map((x:any)=>{const me=x.players.find((x:any)=>x.steamAccountId===id);return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:0,seasonRank:0,isVictory:me.isVictory,imp:null}}})) }
+    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take);return json(list.map((x:any)=>{const me=x.players.find((x:any)=>x.steamAccountId===id);return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:me.position,positionSource:me.positionSource,seasonRank:0,isVictory:me.isVictory,imp:null}}})) }
     m=p.match(/^\/api\/matches\/(\d+)$/)
-    if(m) {const id=Number(m[1]),x=await match(env,id),[ps,replay]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id)]),purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0};return json({...x,players:x.players.map((p:any)=>{const team=p.isRadiant?'r':'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)];return {...p,name:ps.get(p.steamAccountId)?.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades}})})}
+    if(m) {const id=Number(m[1]),x=await match(env,id),[ps,replay]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id)]),purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0};return json({...x,players:x.players.map((p:any)=>{const team=p.isRadiant?'r':'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)];return {...p,position:parsed?.position??p.position,positionSource:parsed?.positionSource??p.positionSource,name:ps.get(p.steamAccountId)?.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades}})})}
     m=p.match(/^\/api\/player\/(\d+)\/heroes$/)
     if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,{heroId:number;matchCount:number;winCount:number}>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id),a=agg.get(me.heroId)??{heroId:me.heroId,matchCount:0,winCount:0};a.matchCount++;if(me.isVictory)a.winCount++;agg.set(me.heroId,a)}return json([...agg.values()].sort((a,b)=>b.matchCount-a.matchCount).slice(0,Math.min(Number(url.searchParams.get('take'))||100,100)))}
     m=p.match(/^\/api\/player\/(\d+)\/peers$/)
