@@ -2,7 +2,7 @@
 import heroes from '../server/data/constants/heroes.json'
 import items from '../server/data/constants/items.json'
 
-interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string }
+interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; AUTH_SECRET?: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string }
 const PRIVATE_ID = 0xffffffff
 const modes: Record<number, string> = { 1:'ALL_PICK',2:'CAPTAINS_MODE',3:'RANDOM_DRAFT',4:'SINGLE_DRAFT',5:'ALL_RANDOM',11:'MID_ONLY',12:'LEAST_PICKED',13:'LIMITED_HEROES',16:'CAPTAINS_DRAFT',17:'BALANCED_DRAFT',18:'ABILITY_DRAFT',19:'EVENT',20:'ARDM',21:'ONE_VS_ONE_MID',22:'ALL_DRAFT',23:'TURBO',24:'MUTATION',25:'COACHES_CHALLENGE' }
 const lobbies: Record<number, string> = { 0:'PUBLIC_MATCH',1:'PRACTICE',7:'RANKED',8:'MID_ONE',9:'COMPETITIVE' }
@@ -120,9 +120,62 @@ async function getMatches(env:Env,account:number,rows:{id:number;seq:number}[],s
 }
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}})
 
+const encoder=new TextEncoder()
+const b64url=(bytes:Uint8Array)=>btoa(String.fromCharCode(...bytes)).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'')
+async function sessionSignature(payload:string,secret:string) {
+  const key=await crypto.subtle.importKey('raw',encoder.encode(secret),{name:'HMAC',hash:'SHA-256'},false,['sign'])
+  return b64url(new Uint8Array(await crypto.subtle.sign('HMAC',key,encoder.encode(payload))))
+}
+function cookieValue(request:Request,name:string) { return request.headers.get('cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(`${name}=`))?.slice(name.length+1)??'' }
+async function sessionAccount(request:Request,secret:string) {
+  const [id,expiry,signature]=cookieValue(request,'dota_session').split('.'),payload=`${id}.${expiry}`
+  if(!/^\d{17}$/.test(id??'')||!/^\d+$/.test(expiry??'')||Number(expiry)<Date.now()||!signature) return null
+  const expected=await sessionSignature(payload,secret)
+  return signature===expected?id:null
+}
+function authCookie(name:string,value:string,maxAge:number) { return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=${maxAge}` }
+async function steamAuth(request:Request,env:Env):Promise<Response|null> {
+  const url=new URL(request.url),secret=env.AUTH_SECRET
+  if(!url.pathname.startsWith('/api/auth/')) return null
+  if(!secret) return json({error:'Steam login is not configured'},503)
+  if(url.pathname==='/api/auth/steam'&&request.method==='GET') {
+    const state=b64url(crypto.getRandomValues(new Uint8Array(24))),callback=new URL('/api/auth/steam/callback',url.origin)
+    callback.searchParams.set('state',state)
+    const auth=new URL('https://steamcommunity.com/openid/login')
+    for(const [k,v] of Object.entries({'openid.ns':'http://specs.openid.net/auth/2.0','openid.mode':'checkid_setup','openid.return_to':callback.href,'openid.realm':`${url.origin}/`,'openid.identity':'http://specs.openid.net/auth/2.0/identifier_select','openid.claimed_id':'http://specs.openid.net/auth/2.0/identifier_select'})) auth.searchParams.set(k,v)
+    return new Response(null,{status:302,headers:{location:auth.href,'set-cookie':authCookie('openid_state',state,600),'cache-control':'no-store'}})
+  }
+  if(url.pathname==='/api/auth/steam/callback'&&request.method==='GET') {
+    const state=url.searchParams.get('state')??'',claimed=url.searchParams.get('openid.claimed_id')??'',steamId=claimed.match(/^https:\/\/steamcommunity\.com\/openid\/id\/(\d{17})$/)?.[1],returnTo=new URL('/api/auth/steam/callback',url.origin)
+    returnTo.searchParams.set('state',state)
+    if(!state||state!==cookieValue(request,'openid_state')||!steamId||url.searchParams.get('openid.identity')!==claimed||url.searchParams.get('openid.return_to')!==returnTo.href||url.searchParams.get('openid.op_endpoint')!=='https://steamcommunity.com/openid/login') return new Response('Steam sign-in verification failed',{status:400})
+    const assertion=new URLSearchParams()
+    for(const [k,v] of url.searchParams) if(k.startsWith('openid.')) assertion.set(k,v)
+    assertion.set('openid.mode','check_authentication')
+    const checked=await fetch('https://steamcommunity.com/openid/login',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:assertion})
+    if(!checked.ok||!(await checked.text()).split(/\r?\n/).includes('is_valid:true')) return new Response('Steam sign-in verification failed',{status:401})
+    const expires=Date.now()+30*24*60*60*1000,payload=`${steamId}.${expires}`,signature=await sessionSignature(payload,secret)
+    const headers=new Headers({location:'/','cache-control':'no-store'})
+    headers.append('set-cookie',authCookie('dota_session',`${payload}.${signature}`,30*24*60*60))
+    headers.append('set-cookie',authCookie('openid_state','',0))
+    return new Response(null,{status:302,headers})
+  }
+  if(url.pathname==='/api/auth/me'&&request.method==='GET') {
+    const steam64=await sessionAccount(request,secret)
+    if(!steam64) return json({loggedIn:false})
+    const id=Number(BigInt(steam64)-76561197960265728n)
+    let info:any={}
+    try { info=(await profiles(env,[id])).get(id)??{} } catch { /* Steam OpenID works independently from the Steam Web API key */ }
+    return json({loggedIn:true,steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null})
+  }
+  if(url.pathname==='/api/auth/logout'&&request.method==='POST') return new Response(null,{status:204,headers:{'set-cookie':authCookie('dota_session','',0),'cache-control':'no-store'}})
+  return json({error:'Method not allowed'},405)
+}
+
 export default { async fetch(request:Request,env:Env):Promise<Response> {
   const url=new URL(request.url), p=url.pathname
   if(!p.startsWith('/api/')) return env.ASSETS.fetch(request)
+  if(p.startsWith('/api/auth/')) { try { return (await steamAuth(request,env))??json({error:'Not found'},404) } catch(e) { console.error('Steam auth failed',e instanceof Error?e.message:'unknown'); return json({error:'Steam login failed'},502) } }
   try {
     const ingest=p.match(/^\/api\/internal\/replay\/(\d+)$/)
     if(ingest) {

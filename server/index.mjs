@@ -30,6 +30,7 @@ import { createServer } from 'node:http'
 import { readFileSync, writeFileSync, mkdirSync, existsSync, createReadStream, statSync } from 'node:fs'
 import { dirname, join, extname, resolve, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const DATA = join(ROOT, 'data')
@@ -51,6 +52,7 @@ function loadEnv() {
 loadEnv()
 
 const STEAM_KEY = process.env.STEAM_WEB_API_KEY || ''
+const AUTH_SECRET = process.env.AUTH_SECRET || ''
 
 // --- Хранилище (своя БД: JSON-файлы на диске) ---
 
@@ -645,10 +647,97 @@ function matchRoute(method, path) {
   return null
 }
 
+function signSession(steamId64, expires) {
+  const payload = `${steamId64}.${expires}`
+  return `${payload}.${createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url')}`
+}
+
+function readSession(req) {
+  if (!AUTH_SECRET) return null
+  const token = (req.headers.cookie ?? '').split(';').map((x) => x.trim()).find((x) => x.startsWith('dota_session='))?.slice(13)
+  if (!token) return null
+  const [steamId64, expiresText, signature] = token.split('.')
+  const payload = `${steamId64}.${expiresText}`
+  const expected = createHmac('sha256', AUTH_SECRET).update(payload).digest('base64url')
+  if (!/^\d{17}$/.test(steamId64 ?? '') || !/^\d+$/.test(expiresText ?? '') || Number(expiresText) < Date.now() || !signature) return null
+  const a = Buffer.from(signature), b = Buffer.from(expected)
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return null
+  return steamId64
+}
+
+function cookie(name, value, maxAge, secure) {
+  return `${name}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure ? '; Secure' : ''}`
+}
+
+async function authMiddleware(req, res, url) {
+  const secure = url.protocol === 'https:'
+  const sendRedirect = (location, setCookie) => {
+    res.statusCode = 302
+    res.setHeader('Location', location)
+    res.setHeader('Cache-Control', 'no-store')
+    if (setCookie) res.setHeader('Set-Cookie', setCookie)
+    res.end()
+  }
+  if (url.pathname === '/api/auth/steam' && req.method === 'GET') {
+    if (!AUTH_SECRET) { res.statusCode = 503; res.end('AUTH_SECRET is not configured'); return true }
+    const state = randomBytes(24).toString('base64url')
+    const callback = new URL('/api/auth/steam/callback', url.origin)
+    callback.searchParams.set('state', state)
+    const auth = new URL('https://steamcommunity.com/openid/login')
+    for (const [key, value] of Object.entries({
+      'openid.ns': 'http://specs.openid.net/auth/2.0', 'openid.mode': 'checkid_setup',
+      'openid.return_to': callback.href, 'openid.realm': `${url.origin}/`,
+      'openid.identity': 'http://specs.openid.net/auth/2.0/identifier_select',
+      'openid.claimed_id': 'http://specs.openid.net/auth/2.0/identifier_select',
+    })) auth.searchParams.set(key, value)
+    res.setHeader('Set-Cookie', cookie('openid_state', state, 600, secure))
+    sendRedirect(auth.href)
+    return true
+  }
+  if (url.pathname === '/api/auth/steam/callback' && req.method === 'GET') {
+    const stateCookie = (req.headers.cookie ?? '').split(';').map((x) => x.trim()).find((x) => x.startsWith('openid_state='))?.slice(13)
+    const state = url.searchParams.get('state'), returnTo = new URL('/api/auth/steam/callback', url.origin)
+    returnTo.searchParams.set('state', state ?? '')
+    const claimed = url.searchParams.get('openid.claimed_id') ?? ''
+    const steamId = claimed.match(/^https:\/\/steamcommunity\.com\/openid\/id\/(\d{17})$/)?.[1]
+    if (!state || state !== stateCookie || !steamId || url.searchParams.get('openid.identity') !== claimed ||
+        url.searchParams.get('openid.return_to') !== returnTo.href || url.searchParams.get('openid.op_endpoint') !== 'https://steamcommunity.com/openid/login') {
+      res.statusCode = 400; res.end('Steam sign-in verification failed'); return true
+    }
+    const assertion = new URLSearchParams()
+    for (const [key, value] of url.searchParams) if (key.startsWith('openid.')) assertion.set(key, value)
+    assertion.set('openid.mode', 'check_authentication')
+    const verified = await fetch('https://steamcommunity.com/openid/login', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: assertion })
+    if (!verified.ok || !(await verified.text()).split(/\r?\n/).includes('is_valid:true')) { res.statusCode = 401; res.end('Steam sign-in verification failed'); return true }
+    const expires = Date.now() + 30 * 24 * 60 * 60 * 1000
+    res.setHeader('Set-Cookie', [cookie('dota_session', signSession(steamId, expires), 30 * 24 * 60 * 60, secure), cookie('openid_state', '', 0, secure)])
+    sendRedirect('/')
+    return true
+  }
+  if (url.pathname === '/api/auth/me' && req.method === 'GET') {
+    const steam64 = readSession(req)
+    if (!steam64) { res.statusCode = 200; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ loggedIn: false })); return true }
+    try {
+      const accountId = toAccountId(steam64)
+      let info = {}
+      try { info = (await resolveProfiles([accountId])).get(accountId) ?? {} } catch { /* Steam OpenID identity remains valid without a Web API key */ }
+      res.statusCode = 200; res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store')
+      res.end(JSON.stringify({ loggedIn: true, steamAccountId: accountId, name: info.name ?? `#${accountId}`, avatar: info.avatar ?? null }))
+    } catch (e) { res.statusCode = 502; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ error: e.message })) }
+    return true
+  }
+  if (url.pathname === '/api/auth/logout' && req.method === 'POST') {
+    res.statusCode = 204; res.setHeader('Set-Cookie', cookie('dota_session', '', 0, secure)); res.end(); return true
+  }
+  return false
+}
+
 /** Connect-подобный middleware: используется и Vite-плагином, и standalone-сервером. */
 export function apiMiddleware(req, res) {
-  const url = new URL(req.url ?? '/', 'http://localhost')
+  const protocol = req.socket?.encrypted ? 'https:' : 'http:'
+  const url = new URL(req.url ?? '/', `${protocol}//${req.headers.host ?? 'localhost'}`)
   if (!url.pathname.startsWith('/api/')) return false
+  if (url.pathname.startsWith('/api/auth/')) { authMiddleware(req, res, url).catch((e) => { res.statusCode = 500; res.end('Steam sign-in failed'); console.error('[auth]', e.message) }); return true }
 
   const route = matchRoute(req.method ?? 'GET', url.pathname)
   const respond = (status, body) => {
