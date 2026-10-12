@@ -197,7 +197,7 @@ async function steamFetch(path, params) {
       }
       if (!res.ok) {
         const err = new Error(`Steam API вернул HTTP ${res.status}`)
-        err.status = 502
+        err.status = res.status === 401 ? 401 : 502
         throw err
       }
       const json = await res.json().catch(() => null)
@@ -243,6 +243,22 @@ const PRIVATE_ACCOUNT_ID = 0xffffffff
 
 function toAccountId(steamId64) {
   return Number(BigInt(steamId64) - 76561197960265728n)
+}
+
+async function steamFriends(id) {
+  const path = join(DATA, 'friends', `${id}.json`), cached = readJson(path, null)
+  if (cached && Date.now() - cached.ts < 60 * 60 * 1000) return new Set(cached.ids)
+  try {
+    const data = await steamFetch('ISteamUser/GetFriendList/v1/', {
+      steamid: String(BigInt(id) + 76561197960265728n), relationship: 'friend',
+    })
+    const ids = (data.friendslist?.friends ?? []).map((f) => toAccountId(f.steamid)).filter((x) => Number.isSafeInteger(x) && x > 0)
+    writeJson(path, { ts: Date.now(), ids })
+    return new Set(ids)
+  } catch (e) {
+    if (e.status === 401) throw new HttpError(403, 'Список друзей Steam скрыт. Открой его в настройках приватности Steam.')
+    throw e
+  }
 }
 
 function normalizeSteamMatch(raw) {
@@ -568,7 +584,7 @@ const handlers = {
   /** GET /api/player/:id/peers — из своей базы (загруженные матчи). */
   async peers(params) {
     const id = Number(params.id)
-    const history = await ensureHistory(id)
+    const [history, friends] = await Promise.all([ensureHistory(id), steamFriends(id)])
     const matches = await loadAllMatches(history, id)
     const acc = new Map()
     for (const m of matches) {
@@ -576,24 +592,18 @@ const handlers = {
       if (!me) continue
       for (const p of m.players) {
         // 0 — игрок скрыл историю, считать его «пиром» нельзя
-        if (!p.steamAccountId || p.steamAccountId === id) continue
+        if (!p.steamAccountId || p.steamAccountId === id || !friends.has(p.steamAccountId) || p.isRadiant !== me.isRadiant) continue
         let peer = acc.get(p.steamAccountId)
         if (!peer) {
           peer = { steamAccountId: p.steamAccountId, withMatchCount: 0, withWinCount: 0, againstMatchCount: 0, againstWinCount: 0 }
           acc.set(p.steamAccountId, peer)
         }
-        if (p.isVictory === me.isVictory) {
-          peer.withMatchCount++
-          if (me.isVictory) peer.withWinCount++
-        } else {
-          peer.againstMatchCount++
-          if (me.isVictory) peer.againstWinCount++
-        }
+        peer.withMatchCount++
+        if (me.isVictory) peer.withWinCount++
       }
     }
     const top = [...acc.values()]
-      .sort((a, b) => b.withMatchCount + b.againstMatchCount - (a.withMatchCount + a.againstMatchCount))
-      .slice(0, 14)
+      .sort((a, b) => b.withMatchCount - a.withMatchCount)
     const profiles = await resolveProfiles(top.map((p) => p.steamAccountId))
     return top.map((p) => ({
       steamAccountId: p.steamAccountId,

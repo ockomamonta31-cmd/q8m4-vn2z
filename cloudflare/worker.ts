@@ -25,7 +25,7 @@ async function steam(env: Env, endpoint: string, params: Record<string, string |
   url.searchParams.set('key', env.STEAM_WEB_API_KEY)
   for (const [k,v] of Object.entries(params)) url.searchParams.set(k, String(v))
   const res = await fetch(url)
-  if (!res.ok) throw new Response(JSON.stringify({error:`Steam API HTTP ${res.status}`}), {status:502})
+  if (!res.ok) throw new Response(JSON.stringify({error:`Steam API HTTP ${res.status}`}), {status:res.status === 401 ? 401 : 502})
   return res.json<any>()
 }
 async function history(env: Env, account: number) {
@@ -100,6 +100,19 @@ async function profiles(env:Env,ids:number[]) {
   }
   return out
 }
+async function steamFriends(env:Env, account:number):Promise<Set<number>> {
+  const key=`friends:${account}`, hit=await cached<number[]>(env,key,3_600_000)
+  if(hit) return new Set(hit)
+  try {
+    const data=await steam(env,'ISteamUser/GetFriendList/v1/',{steamid:String(BigInt(account)+76561197960265728n),relationship:'friend'})
+    const ids=(data.friendslist?.friends??[]).map((f:any)=>Number(BigInt(f.steamid)-76561197960265728n)).filter((x:number)=>Number.isSafeInteger(x)&&x>0)
+    await save(env,key,ids)
+    return new Set(ids)
+  } catch(e) {
+    if(e instanceof Response&&e.status===401) throw json({error:'Список друзей Steam скрыт. Открой его в настройках приватности Steam.'},403)
+    throw e
+  }
+}
 async function getMatches(env:Env,account:number,rows:{id:number;seq:number}[],skip:number,take:number) {
   const all=[]
   for(const r of rows.slice(skip,skip+take)) { try { const m=await match(env,r.id,r.seq); if(m.players.some((p:any)=>p.steamAccountId===account)) all.push(m) } catch(e) { if(!(e instanceof Response)&&e instanceof Error) throw e } }
@@ -163,7 +176,7 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
     m=p.match(/^\/api\/player\/(\d+)\/heroes$/)
     if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,{heroId:number;matchCount:number;winCount:number}>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id),a=agg.get(me.heroId)??{heroId:me.heroId,matchCount:0,winCount:0};a.matchCount++;if(me.isVictory)a.winCount++;agg.set(me.heroId,a)}return json([...agg.values()].sort((a,b)=>b.matchCount-a.matchCount).slice(0,Math.min(Number(url.searchParams.get('take'))||100,100)))}
     m=p.match(/^\/api\/player\/(\d+)\/peers$/)
-    if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,any>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id);for(const q of x.players){if(!q.steamAccountId||q.steamAccountId===id)continue;const a=agg.get(q.steamAccountId)??{steamAccountId:q.steamAccountId,withMatchCount:0,withWinCount:0,againstMatchCount:0,againstWinCount:0};if(q.isVictory===me.isVictory){a.withMatchCount++;if(me.isVictory)a.withWinCount++}else{a.againstMatchCount++;if(me.isVictory)a.againstWinCount++}agg.set(q.steamAccountId,a)}}const top=[...agg.values()].sort((a,b)=>b.withMatchCount+b.againstMatchCount-a.withMatchCount-a.againstMatchCount).slice(0,14),ps=await profiles(env,top.map(x=>x.steamAccountId));return json(top.map(x=>({...x,name:ps.get(x.steamAccountId)?.name??`#${x.steamAccountId}`,avatar:ps.get(x.steamAccountId)?.avatar??null})))}
+    if(m) {const id=Number(m[1]),[h,friends]=await Promise.all([history(env,id),steamFriends(env,id)]),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,any>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id);for(const q of x.players){if(!q.steamAccountId||q.steamAccountId===id||!friends.has(q.steamAccountId)||q.isRadiant!==me.isRadiant)continue;const a=agg.get(q.steamAccountId)??{steamAccountId:q.steamAccountId,withMatchCount:0,withWinCount:0,againstMatchCount:0,againstWinCount:0};a.withMatchCount++;if(me.isVictory)a.withWinCount++;agg.set(q.steamAccountId,a)}}const top=[...agg.values()].sort((a,b)=>b.withMatchCount-a.withMatchCount),ps=await profiles(env,top.map(x=>x.steamAccountId));return json(top.map(x=>({...x,name:ps.get(x.steamAccountId)?.name??`#${x.steamAccountId}`,avatar:ps.get(x.steamAccountId)?.avatar??null})))}
     return json({error:'Неизвестный эндпоинт'},404)
   } catch(e) { if(e instanceof Response)return e; return json({error:e instanceof Error?e.message:'Internal error'},500) }
 } }

@@ -11,7 +11,7 @@ import PeersList from '../components/PeersList'
 import ActivityHeatmap from '../components/ActivityHeatmap'
 
 const PAGE_SIZE = 25
-const TABS = ['Обзор', 'Матчи', 'Герои', 'Пиры', 'Активность'] as const
+const TABS = ['Обзор', 'Матчи', 'Герои', 'Друзья', 'Активность'] as const
 type Tab = (typeof TABS)[number]
 
 export default function PlayerPage() {
@@ -273,13 +273,13 @@ export default function PlayerPage() {
         </div>
       )}
 
-      {tab === 'Пиры' && (
+      {tab === 'Друзья' && (
         <div className="panel">
-          <h2 className="section-title">С кем играл</h2>
+          <h2 className="section-title">Друзья, с которыми играл</h2>
           {peers ? (
             <PeersList peers={peers} />
           ) : (
-            <div className="inline-note">{peersError ?? 'Пиры недоступны.'}</div>
+            <div className="inline-note">{peersError ?? 'Друзья недоступны.'}</div>
           )}
         </div>
       )}

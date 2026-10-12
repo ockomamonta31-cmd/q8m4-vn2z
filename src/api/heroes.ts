@@ -2,7 +2,7 @@ import { DEMO_MODE } from './client'
 import type { HeroInfo } from './types'
 import { DEMO_HEROES } from './mock'
 
-const CACHE_KEY = 'stratz.heroes.v2'
+const CACHE_KEY = 'stratz.heroes.v3'
 const CACHE_TTL_MS = 7 * 24 * 3600 * 1000
 
 let heroesPromise: Promise<Map<number, HeroInfo>> | null = null

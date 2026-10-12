@@ -5,7 +5,7 @@ import { fmtWinrate } from '../api/formats'
 
 export default function PeersList({ peers }: { peers: Peer[] }) {
   if (peers.length === 0) {
-    return <div className="inline-note">Игроки, с которыми пересекался, не найдены.</div>
+    return <div className="inline-note">Среди друзей Steam пока нет игроков из загруженных матчей.</div>
   }
   return (
     <div className="peers-grid">
@@ -20,9 +20,7 @@ export default function PeersList({ peers }: { peers: Peer[] }) {
           <div>
             <div className="peer-name">{p.name}</div>
             <div className="peer-records">
-              вместе {p.withWinCount}–{p.withMatchCount - p.withWinCount} ({fmtWinrate(p.withWinCount, p.withMatchCount)}) ·
-              против {p.againstWinCount}–{p.againstMatchCount - p.againstWinCount} (
-              {fmtWinrate(p.againstWinCount, p.againstMatchCount)})
+              {p.withMatchCount} матчей вместе · {p.withWinCount}–{p.withMatchCount - p.withWinCount} · {fmtWinrate(p.withWinCount, p.withMatchCount)} побед
             </div>
           </div>
         </Link>
