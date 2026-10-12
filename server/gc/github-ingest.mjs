@@ -23,7 +23,10 @@ const run=(file,...args)=>new Promise((resolve,reject)=>{
 })
 
 const requestedId=process.env.REPLAY_MATCH_ID
-const {matchIds=[]}=requestedId?{matchIds:[requestedId]}:await get('/api/internal/replay/pending?limit=100')
+// Ручной dispatch умеет список: "123,456". Всё, что не чистые цифры, отбрасываем,
+// чтобы в аргументы парсера не попало ничего кроме ID матча.
+const requested=(requestedId??'').split(',').map((x)=>x.trim()).filter((x)=>/^\d+$/.test(x))
+const {matchIds=[]}=requested.length?{matchIds:requested}:await get('/api/internal/replay/pending?limit=100')
 const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
 let completed=0
 for(const id of matchIds) {

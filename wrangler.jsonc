@@ -17,5 +17,8 @@
 			"database_name": "stratz-cache",
 			"database_id": "da55d3db-c275-4596-b53b-46f6076f9936"
 		}
-	]
+	],
+	"triggers": {
+		"crons": ["*/10 * * * *"]
+	}
 }

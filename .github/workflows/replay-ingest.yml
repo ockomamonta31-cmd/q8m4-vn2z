@@ -3,10 +3,14 @@ name: Replay timelines
 on:
   schedule:
     - cron: '*/5 * * * *'
+  # Cloudflare Cron Trigger на воркере будит парсер здесь: планировщик GitHub
+  # этому репозиторию запуски по schedule не отдаёт.
+  repository_dispatch:
+    types: [replay-backfill]
   workflow_dispatch:
     inputs:
       match_id:
-        description: 'Match ID to parse now (empty = pending batch)'
+        description: 'Match ID to parse now, comma separated (empty = pending batch)'
         required: false
         type: string
 
@@ -24,7 +28,10 @@ jobs:
     env:
       REPLAY_INGEST_URL: ${{ secrets.REPLAY_INGEST_URL }}
       REPLAY_INGEST_TOKEN: ${{ secrets.REPLAY_INGEST_TOKEN }}
-      REPLAY_MATCHES_PER_RUN: 5
+      # Из repository_dispatch берём только числовой лимит и проходим его через
+      # env: payload GitHub считает данными, которыми теоретически может
+      # управлять чужой код. Список матчей раннер читает сам из своего API.
+      REPLAY_MATCHES_PER_RUN: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.limit || '5' }}
       REPLAY_MATCH_ID: ${{ inputs.match_id }}
       DOTA_PARSER_URL: http://127.0.0.1:5600
     steps:

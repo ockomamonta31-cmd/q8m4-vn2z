@@ -2,7 +2,7 @@
 import heroes from '../server/data/constants/heroes.json'
 import items from '../server/data/constants/items.json'
 
-interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; AUTH_SECRET?: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string }
+interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; AUTH_SECRET?: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string; GITHUB_DISPATCH_TOKEN?: string; GITHUB_REPO?: string; REPLAY_MATCHES_PER_RUN?: string }
 const PRIVATE_ID = 0xffffffff
 const modes: Record<number, string> = { 1:'ALL_PICK',2:'CAPTAINS_MODE',3:'RANDOM_DRAFT',4:'SINGLE_DRAFT',5:'ALL_RANDOM',11:'MID_ONLY',12:'LEAST_PICKED',13:'LIMITED_HEROES',16:'CAPTAINS_DRAFT',17:'BALANCED_DRAFT',18:'ABILITY_DRAFT',19:'EVENT',20:'ARDM',21:'ONE_VS_ONE_MID',22:'ALL_DRAFT',23:'TURBO',24:'MUTATION',25:'COACHES_CHALLENGE' }
 const lobbies: Record<number, string> = { 0:'PUBLIC_MATCH',1:'PRACTICE',7:'RANKED',8:'MID_ONE',9:'COMPETITIVE' }
@@ -92,8 +92,38 @@ async function purchaseEvents(env:Env,id:number):Promise<Record<string,{time:num
     return out
   } catch(e) { console.error('STRATZ purchase query failed',e instanceof Error?e.message:'unknown error'); return null }
 }
-async function replayData(env:Env,id:number) {
-  return cached<Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];position?:number;positionSource?:'replay'|'stats'}>>(env,`replay-data:v1:${id}`)
+async function replayData(env:Env,id:number):Promise<Record<string,any>|null> {
+  return cached<Record<string,any>>(env,`replay-data:v1:${id}`)
+}
+/**
+ * Матчи, которым нужен парсинг реплея. Незавершённым считается и тот, у кого
+ * таймлайн лежит в кэше, но собран старой сборкой без вкладов игроков — иначе
+ * такие матчи висели бы «готовыми» вечно и никогда не получили бы подробностей.
+ * Драки без строк допустимы только когда драк вообще нет.
+ */
+async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
+  const histories=await env.DB.prepare("SELECT value FROM cache WHERE key GLOB 'history:*'").all<{value:string}>()
+  const ids=[...new Set(histories.results.flatMap(row=>{try{return (JSON.parse(row.value).rows??[]).map((x:any)=>Number(x.id)).filter((id:number)=>Number.isSafeInteger(id)&&id>0)}catch{return []}}))].sort((a,b)=>b-a)
+  const done=new Set<number>()
+  // Батч по 40: на каждый матч нужно два ключа, а D1 отказывается биндить
+  // слишком много параметров одним запросом ("too many SQL variables").
+  for(let i=0;i<ids.length;i+=40) {
+    const batch=ids.slice(i,i+40)
+    const keys=batch.flatMap(id=>[`replay-data:v1:${id}`,`replay-timeline:v1:${id}`])
+    const found=await env.DB.prepare(`SELECT key,value FROM cache WHERE key IN (${keys.map(()=>'?').join(',')})`).bind(...keys).all<{key:string;value:string}>()
+    const store=new Map<string,any>()
+    for(const row of found.results) { try { store.set(row.key,JSON.parse(row.value)) } catch {} }
+    for(const id of batch) {
+      const slots=store.get(`replay-data:v1:${id}`)
+      const entries=slots?Object.values(slots):[]
+      const positioned=entries.length===10&&entries.every((x:any)=>x.position>=1&&x.position<=5&&x.positionVersion>=2)
+      const timeline=store.get(`replay-timeline:v1:${id}`)
+      const fights=timeline?.teamfights??[]
+      const enriched=!timeline||fights.length===0||Array.isArray(fights[0]?.lines)
+      if(positioned&&enriched) done.add(id)
+    }
+  }
+  return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))
 }
 async function profiles(env:Env,ids:number[]) {
   const out=new Map<number,{name:string|null;avatar:string|null}>(), missing:number[]=[]
@@ -176,7 +206,31 @@ async function steamAuth(request:Request,env:Env):Promise<Response|null> {
   return json({error:'Method not allowed'},405)
 }
 
-export default { async fetch(request:Request,env:Env):Promise<Response> {
+export default {
+  /**
+   * GitHub не отдаёт этому репозиторию запуски по cron (0 срабатываний,
+   * disable/enable не помог), поэтому будильник живёт здесь, на Cloudflare,
+   * и будит GitHub через repository_dispatch. Пустую очередь не будим —
+   * иначе runner тратил бы минуту на npm ci впустую.
+   */
+  async scheduled(controller: ScheduledController, env: Env): Promise<void> {
+    if (!env.GITHUB_DISPATCH_TOKEN || !env.GITHUB_REPO) { console.error('cron: GITHUB_DISPATCH_TOKEN/GITHUB_REPO not set'); return }
+    const perRun = Math.max(1, Number(env.REPLAY_MATCHES_PER_RUN) || 5)
+    const pending = await pendingMatchIds(env, perRun)
+    if (!pending.length) return
+    const res = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/dispatches`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${env.GITHUB_DISPATCH_TOKEN}`,
+        'content-type': 'application/json',
+        'user-agent': 'dota-match-lab-cron',
+      },
+      // 204 без тела — GitHub просто ставит раннер в очередь
+      body: JSON.stringify({ event_type: 'replay-backfill', client_payload: { limit: perRun, matchIds: pending } }),
+    })
+    if (res.status !== 204) console.error('cron: repository_dispatch failed', res.status, (await res.text()).slice(0, 300))
+  },
+  async fetch(request:Request,env:Env):Promise<Response> {
   const url=new URL(request.url), p=url.pathname
   if(!p.startsWith('/api/')) return env.ASSETS.fetch(request)
   if(p.startsWith('/api/auth/')) { try { return (await steamAuth(request,env))??json({error:'Not found'},404) } catch(e) { console.error('Steam auth failed',e instanceof Error?e.message:'unknown'); return json({error:'Steam login failed'},502) } }
@@ -210,17 +264,7 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
     if(p==='/api/internal/replay/pending') {
       if(request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}` || !env.REPLAY_INGEST_TOKEN) return json({error:'Unauthorized'},401)
       if(request.method!=='GET') return json({error:'Method not allowed'},405)
-      const histories=await env.DB.prepare("SELECT value FROM cache WHERE key GLOB 'history:*'").all<{value:string}>()
-      const ids=[...new Set(histories.results.flatMap(row=>{try{return (JSON.parse(row.value).rows??[]).map((x:any)=>Number(x.id)).filter((id:number)=>Number.isSafeInteger(id)&&id>0)}catch{return []}}))].sort((a,b)=>b-a)
-      const complete=new Set<string>()
-      for(let i=0;i<ids.length;i+=100) {
-        const batch=ids.slice(i,i+100)
-        if(!batch.length) continue
-        const found=await env.DB.prepare(`SELECT key,value FROM cache WHERE key IN (${batch.map(()=>'?').join(',')})`).bind(...batch.map(id=>`replay-data:v1:${id}`)).all<{key:string;value:string}>()
-        for(const row of found.results) { try { const entries=Object.values(JSON.parse(row.value)); if(entries.length===10&&entries.every((x:any)=>x.position>=1&&x.position<=5&&x.positionVersion>=2)) complete.add(row.key) } catch {} }
-      }
-      const limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit'))||25))
-      return json({matchIds:ids.filter(id=>!complete.has(`replay-data:v1:${id}`)).slice(0,limit)})
+      return json({matchIds:await pendingMatchIds(env,Number(url.searchParams.get('limit'))||25)})
     }
     const replayMatch=p.match(/^\/api\/internal\/replay\/match\/(\d+)$/)
     if(replayMatch) {
