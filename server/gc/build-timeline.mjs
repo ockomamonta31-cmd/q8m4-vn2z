@@ -93,23 +93,49 @@ export function buildMatchTimeline(replay, match, heroes) {
   structures.sort((a, b) => a.t - b.t)
 
   // teamfights[].players is aligned with replay.players order, so slot lookup is positional
+  const advAt = (minute) => {
+    const index = Math.max(0, Math.min(minute, series.length - 1))
+    return series[index]?.gold ?? 0
+  }
   const teamfights = (replay.teamfights ?? []).map((fight, index) => {
+    const t = Number(fight.start) || 0
+    const end = Number(fight.end) || t
     let radiantKills = 0
     let direKills = 0
+    let buybacks = 0
     const members = fight.players ?? []
-    members.forEach((member, j) => {
+    const lines = members.map((member, j) => {
       const slot = Number(replay.players[j]?.player_slot ?? j)
-      const killed = Object.values(member.killed ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0)
-      if (slot < 128) radiantKills += killed
-      else direKills += killed
+      const radiant = slot < 128
+      const kills = Object.values(member.killed ?? {}).reduce((sum, n) => sum + (Number(n) || 0), 0)
+      if (radiant) radiantKills += kills
+      else direKills += kills
+      const bought = Number(member.buybacks) || 0
+      buybacks += bought
+      return {
+        slot,
+        heroId: heroBySlot.get(slot) ?? null,
+        kills,
+        deaths: Number(member.deaths) || 0,
+        buybacks: bought,
+        damage: Math.round(Number(member.damage) || 0),
+        healing: Math.round(Number(member.healing) || 0),
+        gold: Math.round(Number(member.gold_delta) || 0),
+      }
     })
+    // Свинг берём на минуту позже конца: сама драка часто умещается внутри одной
+    // минуты, и тогда посекундная выборка показала бы нулевое изменение.
+    const swing = advAt(Math.floor(end / 60) + 1) - advAt(Math.floor(t / 60))
     return {
-      t: Number(fight.start) || 0,
-      end: Number(fight.end) || Number(fight.start) || 0,
+      t,
+      end,
       deaths: Number(fight.deaths) || 0,
       radiantKills,
       direKills,
+      buybacks,
+      swing,
       index,
+      lines,
     }
   }).filter((fight) => fight.deaths >= 3)
 

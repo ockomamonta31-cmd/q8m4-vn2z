@@ -4,7 +4,7 @@
 
 import type { MatchDetails, MatchPlayer } from '../api/types'
 import type { MatchTimeline } from '../api/timeline'
-import { peakAdvantage, turningPoint } from '../api/timeline'
+import { peakAdvantage, rankTeamfights, turningPoint } from '../api/timeline'
 import { fmtDuration } from '../api/formats'
 import type { ImpactScore } from '../api/score'
 
@@ -161,6 +161,21 @@ export function buildInsights(match: MatchDetails, board: MatchBoard, timeline: 
     })
   }
 
+  const ranked = rankTeamfights(timeline)
+  const decisive = ranked[0]
+  if (decisive && (decisive.swing == null || Math.abs(decisive.swing) >= 800)) {
+    const side = decisive.winner === 'even' ? null : decisive.winner === 'radiant' ? board.radiant : board.dire
+    out.push({
+      tone: side ? (side.radiant ? 'r' : 'd') : '',
+      icon: 'flame',
+      label: 'Решающий тимфайт',
+      value: fmtDuration(decisive.t),
+      note: side
+        ? `${side.label} выиграл драку ${decisive.radiantKills}:${decisive.direKills} и забрал ${fmtK(Math.abs(decisive.swing ?? decisive.deaths * 900))} золота — после неё игра пошла по-другому.`
+        : `Драка ${decisive.radiantKills}:${decisive.direKills} при ${decisive.deaths} смертях — размен, но именно в ней преимущество перешло из рук в руки.`,
+    })
+  }
+
   if (board.mvp) {
     const { player, score } = board.mvp
     out.push({
@@ -183,20 +198,16 @@ export function buildInsights(match: MatchDetails, board: MatchBoard, timeline: 
     })
   }
 
-  const fights = timeline?.teamfights ?? []
-  if (fights.length) {
-    const wonR = fights.filter((f) => f.radiantKills > f.direKills).length
-    const wonD = fights.filter((f) => f.direKills > f.radiantKills).length
+  if (ranked.length > 1) {
+    const wonR = ranked.filter((f) => f.radiantKills > f.direKills).length
+    const wonD = ranked.filter((f) => f.direKills > f.radiantKills).length
     const lead = wonR === wonD ? null : wonR > wonD ? board.radiant : board.dire
-    const biggest = fights.reduce((top, f) => (f.deaths > top.deaths ? f : top), fights[0])
     out.push({
       tone: lead ? (lead.radiant ? 'r' : 'd') : '',
-      icon: 'flame',
-      label: 'Тимфайты',
+      icon: 'target',
+      label: 'Счёт по дракам',
       value: `${wonR} : ${wonD}`,
-      note: lead
-        ? `${lead.label} выиграл больше драк. Самая плотная — на ${fmtDuration(biggest.t)}, ${biggest.deaths} смертей.`
-        : `Драки поровну. Самая плотная — на ${fmtDuration(biggest.t)}, ${biggest.deaths} смертей.`,
+      note: `${ranked.length} потасовок от трёх смертей. ${lead ? `${lead.label} выиграл больше.` : 'Поровну — решающей стала одна, см. выше.'} Всего байбеков в них: ${ranked.reduce((sum, f) => sum + (f.buybacks ?? 0), 0)}.`,
     })
   }
 
@@ -224,4 +235,16 @@ export function buildInsights(match: MatchDetails, board: MatchBoard, timeline: 
   }
 
   return out.slice(0, 4)
+}
+
+/**
+ * Слот Valve по account_id: 0-4 Radiant, 128-132 Dire, порядок — как в players.
+ * Совпадает с build-timeline.mjs, поэтому строки драк сходятся с ростером.
+ */
+export function slotOfPlayer(match: MatchDetails, steamAccountId: number): number | null {
+  if (!steamAccountId) return null
+  const player = match.players.find((p) => p.steamAccountId === steamAccountId)
+  if (!player) return null
+  const team = match.players.filter((p) => p.isRadiant === player.isRadiant)
+  return (player.isRadiant ? 0 : 128) + team.indexOf(player)
 }

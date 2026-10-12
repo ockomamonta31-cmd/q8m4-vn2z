@@ -159,27 +159,6 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
           </div>
         ))}
       </div>
-
-      {timeline.teamfights.length > 0 && (
-        <div className="tf-table" aria-label="Крупнейшие тимфайты">
-          {timeline.teamfights
-            .slice()
-            .sort((a, b) => b.deaths - a.deaths)
-            .slice(0, 5)
-            .map((fight) => (
-              <div className="tf-row" key={fight.index}>
-                <b>{fmtDuration(fight.t)}</b>
-                <span className="muted">{fight.deaths} смертей за {fmtDuration(fight.end - fight.t)}</span>
-                <span className="tf-score">
-                  <span className="green">{fight.radiantKills}</span> : <span className="red">{fight.direKills}</span>
-                </span>
-                <span className="muted" style={{ textAlign: 'right' }}>
-                  {fight.radiantKills === fight.direKills ? 'ничья' : fight.radiantKills > fight.direKills ? 'Radiant' : 'Dire'}
-                </span>
-              </div>
-            ))}
-        </div>
-      )}
     </section>
   )
 }

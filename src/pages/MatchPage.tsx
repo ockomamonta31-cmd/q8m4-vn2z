@@ -8,7 +8,8 @@ import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails } from '../ap
 import { getHeroMap } from '../api/heroes'
 import { fetchTimeline, type MatchTimeline } from '../api/timeline'
 import { resolveImpact } from '../api/score'
-import { buildBoard, buildInsights, playerLabel } from './match-model'
+import { buildBoard, buildInsights, playerLabel, slotOfPlayer } from './match-model'
+import { fetchAuth } from '../auth'
 import { Notice, PageSkeleton } from '../components/States'
 import { Reveal, TabBar } from '../components/primitives'
 import { Icon } from '../components/Icons'
@@ -17,6 +18,7 @@ import Insights from '../components/match/Insights'
 import Rosters from '../components/match/Roster'
 import Draft from '../components/match/Draft'
 import TimelinePanel from '../components/match/Timeline'
+import Teamfights from '../components/match/Teamfights'
 import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
 
 type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft'
@@ -32,6 +34,13 @@ export default function MatchPage() {
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<TabId>('overview')
   const [attempt, setAttempt] = useState(0)
+  const [meId, setMeId] = useState<number | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    fetchAuth().then((a) => alive && setMeId(a?.loggedIn ? a.steamAccountId ?? null : null))
+    return () => { alive = false }
+  }, [])
 
   useEffect(() => {
     let alive = true
@@ -95,6 +104,7 @@ export default function MatchPage() {
   }
 
   const allPlayers = match.players
+  const meSlot = meId != null ? slotOfPlayer(match, meId) : null
   const hasEvents = Boolean(timeline && (timeline.structures.length || timeline.kills.length || timeline.roshans.length))
   const tabs = [
     { id: 'overview' as const, label: 'Обзор', icon: <Icon.Spark size={15} /> },
@@ -137,6 +147,10 @@ export default function MatchPage() {
           </Reveal>
 
           <Reveal className="section" delay={100}>
+            {timeline && <Teamfights timeline={timeline} heroMap={heroMap} match={match} meSlot={meSlot} limit={3} />}
+          </Reveal>
+
+          <Reveal className="section" delay={120}>
             <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
           </Reveal>
         </div>
@@ -203,7 +217,10 @@ export default function MatchPage() {
 
       {tab === 'timeline' && timeline && (
         <div className="tab-body" role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline">
-          <TimelinePanel timeline={timeline} heroMap={heroMap} durationSec={match.durationSeconds} />
+          <div className="rosters">
+            <Teamfights timeline={timeline} heroMap={heroMap} match={match} meSlot={meSlot} />
+            <TimelinePanel timeline={timeline} heroMap={heroMap} durationSec={match.durationSeconds} />
+          </div>
         </div>
       )}
 
