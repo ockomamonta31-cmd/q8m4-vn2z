@@ -1,6 +1,7 @@
 import type { Peer } from '../api/types'
 import { avatarImageUrl } from '../api/heroes'
-import { fmtWinrate, steamProfileUrl } from '../api/formats'
+import { Link } from 'react-router-dom'
+import { fmtWinrate } from '../api/formats'
 
 export default function PeersList({ peers }: { peers: Peer[] }) {
   if (peers.length === 0) {
@@ -9,12 +10,10 @@ export default function PeersList({ peers }: { peers: Peer[] }) {
   return (
     <div className="peers-grid">
       {peers.map((p) => (
-        <a
+        <Link
           key={p.steamAccountId}
           className="peer-card"
-          href={steamProfileUrl(p.steamAccountId)}
-          target="_blank"
-          rel="noreferrer"
+          to={`/player/${p.steamAccountId}`}
           style={{ color: 'inherit', textDecoration: 'none' }}
         >
           <img className="peer-avatar" src={avatarImageUrl(p.avatar)} alt={p.name} loading="lazy" />
@@ -26,7 +25,7 @@ export default function PeersList({ peers }: { peers: Peer[] }) {
               {fmtWinrate(p.againstWinCount, p.againstMatchCount)})
             </div>
           </div>
-        </a>
+        </Link>
       ))}
     </div>
   )
