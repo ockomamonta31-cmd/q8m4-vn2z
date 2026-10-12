@@ -73,27 +73,27 @@ function ImpactDetails({ player, durationSec, score }: { player: MatchPlayer; du
   const number = (n: number) => n.toLocaleString('ru-RU')
   return (
     <section className="impact-breakdown" aria-label="Разбор импакта">
-      <div>
-        <strong>Почему {score > 0 ? '+' : ''}{score}</strong>
-        <p>Та же модель и те же веса. Вклад фактора усреднён по разным порядкам подстановки реальных показателей вместо среднего игрока этого ранга; взаимодействия делятся между факторами. Сумма даёт итог.</p>
-      </div>
+      <header className="impact-breakdown-head">
+        <div><span className="impact-eyebrow">РАЗБОР ОЦЕНКИ</span><strong>Почему {score > 0 ? '+' : ''}{score}</strong></div>
+        <span>Та же модель · сумма факторов = оценка</span>
+      </header>
       <div className="impact-factors">
         {groups.map((group) => {
           const factors = details?.factors.filter((factor) => factor.section === group) ?? []
           if (!factors.length) return null
           const groupScore = factors.reduce((sum, factor) => sum + factor.contribution, 0)
-          return <div key={group}><b className="impact-group-title">{group}<strong className={groupScore >= 0 ? 'impact-plus' : 'impact-minus'}>{groupScore > 0 ? '+' : ''}{groupScore}</strong></b><ul>{factors.map((factor) => <li key={factor.label}>
+          return <div className="impact-factor-card" key={group}><b className="impact-group-title">{group}<strong className={groupScore >= 0 ? 'impact-plus' : 'impact-minus'}>{groupScore > 0 ? '+' : ''}{groupScore}</strong></b><ul>{factors.map((factor) => <li key={factor.label}>
             <span>{factor.label}<small>факт {number(factor.actual)} · обычно {number(factor.baseline)}</small></span>
             <strong className={factor.contribution >= 0 ? 'impact-plus' : 'impact-minus'}>{factor.contribution > 0 ? '+' : ''}{factor.contribution}</strong>
           </li>)}</ul></div>
         })}
       </div>
       <div className="impact-phase-list">
-        <strong>Что происходило по ходу матча</strong>
+        <strong>Матч по этапам</strong>
         {phases.length ? phases.map((phase) => <div className="impact-phase" key={phase.label}>
           <b>{phase.label}</b><span>K/D {phase.kills}/{phase.deaths}</span><span>LH +{number(phase.lastHits)}</span><span>XP +{number(phase.experience)}</span><span>нетворт +{number(phase.networth)}</span><span>урон героям +{number(phase.heroDamage)}</span><span>башням +{number(phase.towerDamage)}</span><span>золото +{number(phase.gold)}</span>
         </div>) : <p>События реплея для разбивки по времени ещё не загружены.</p>}
-        <small>Периоды показывают динамику из реплея; сама оценка рассчитана по итоговым показателям матча и не пересчитывается отдельно по минутам.</small>
+        <small>Этапы — статистика реплея. Итоговая оценка рассчитана прежней моделью по матчу целиком.</small>
       </div>
     </section>
   )

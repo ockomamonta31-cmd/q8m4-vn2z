@@ -7,6 +7,33 @@ export function inferReplayPositions(players, replayPlayers) {
     }
     return [...team].sort((a, b) => score.get(b) - score.get(a))
   }
+  // Final net worth often promotes a snowballing pos 4 above their pos 3.
+  // Use the first ten replay minutes to split each duo lane instead.
+  const laneFarmOrder = (lane) => {
+    const at = (parsed, field) => {
+      const series = parsed?.[field]
+      if (!Array.isArray(series) || !series.length) return null
+      const times = parsed.times ?? series.map((_, i) => i * 60)
+      let index = 0
+      while (index + 1 < times.length && Number(times[index + 1]) <= 600) index++
+      return Number(series[index]) || 0
+    }
+    const fields = [['lh_t', .5], ['networth_t', .3], ['xp_t', .12], ['gold_t', .08]]
+    const available = fields.filter(([key]) => lane.some((x) => at(x.parsed, key) !== null))
+    if (!available.length) return farmOrder(lane.map((x) => x.p)).map((p) => lane.find((x) => x.p === p))
+    const score = new Map(lane.map((x) => [x, 0]))
+    for (const [key, weight] of available) {
+      const divisor = available.reduce((sum, [, w]) => sum + w, 0)
+      ;[...lane].sort((a, b) => (at(b.parsed, key) ?? 0) - (at(a.parsed, key) ?? 0))
+        .forEach((x, i) => score.set(x, score.get(x) + ((lane.length - i) / lane.length) * weight / divisor))
+    }
+    // Early support purchases break close lane-farm ties without over-weighting one ward.
+    for (const x of lane) {
+      const supportBuys = (x.parsed?.purchase_log ?? []).filter((e) => Number(e.time) <= 600 && /ward_observer|ward_sentry|smoke_of_deceit|dust_of_appearance/.test(String(e.key))).length
+      score.set(x, score.get(x) - Math.min(supportBuys, 3) * .035)
+    }
+    return [...lane].sort((a, b) => score.get(b) - score.get(a))
+  }
 
   for (const radiant of [true, false]) {
     const team = players.filter((p) => p.isRadiant === radiant)
@@ -39,12 +66,12 @@ export function inferReplayPositions(players, replayPlayers) {
       farmOrder(team.filter((p) => p !== byMid[0].p)).forEach((p, i) => positions.set(slots.find((x) => x.p === p).slot, { position: [1, 3, 4, 5][i], positionSource: 'stats' }))
       continue
     }
-    const safeLane = farmOrder(byLane.slice(0, 2).map((x) => x.p))
-    const offLane = farmOrder(byLane.slice(2).map((x) => x.p))
-    positions.set(slots.find((x) => x.p === safeLane[0]).slot, { position: 1, positionSource: 'replay' })
-    positions.set(slots.find((x) => x.p === safeLane[1]).slot, { position: 5, positionSource: 'replay' })
-    positions.set(slots.find((x) => x.p === offLane[0]).slot, { position: 3, positionSource: 'replay' })
-    positions.set(slots.find((x) => x.p === offLane[1]).slot, { position: 4, positionSource: 'replay' })
+    const safeLane = laneFarmOrder(byLane.slice(0, 2))
+    const offLane = laneFarmOrder(byLane.slice(2))
+    positions.set(safeLane[0].slot, { position: 1, positionSource: 'replay' })
+    positions.set(safeLane[1].slot, { position: 5, positionSource: 'replay' })
+    positions.set(offLane[0].slot, { position: 3, positionSource: 'replay' })
+    positions.set(offLane[1].slot, { position: 4, positionSource: 'replay' })
   }
   return positions
 }

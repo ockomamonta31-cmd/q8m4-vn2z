@@ -189,14 +189,14 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
       if(raw.length>1_000_000) return json({error:'Payload too large'},413)
       let data:any; try { data=JSON.parse(raw) } catch { return json({error:'Invalid JSON'},400) }
       if(!Array.isArray(data.players) || data.players.length>10) return json({error:'Expected player timeline array'},400)
-      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];position?:number;positionSource?:'replay'|'stats'}>= {}
+      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];position?:number;positionSource?:'replay'|'stats';positionVersion?:number}>= {}
       for(const row of data.players) {
         const slot=Number(row.playerSlot)
         if(!Number.isInteger(slot)||slot<0||slot>255) return json({error:'Invalid player slot'},400)
         const purchases=Array.isArray(row.purchaseEvents)?row.purchaseEvents:[], upgrades=Array.isArray(row.abilityUpgrades)?row.abilityUpgrades:[]
         const position=Number(row.position)
         const impactPhases=Array.isArray(row.impactPhases)?row.impactPhases.slice(0,3).filter((x:any)=>x&&typeof x.label==='string').map((x:any)=>Object.fromEntries(['label','kills','deaths','gold','networth','lastHits','experience','heroDamage','towerDamage'].map(k=>[k,k==='label'?x[k]:Math.max(0,Math.trunc(Number(x[k])||0))]))):undefined
-        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats'}:{})}
+        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,positionVersion:Math.max(0,Math.trunc(Number(row.positionVersion)||0)),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats'}:{})}
       }
       await save(env,`replay-data:v1:${id}`,bySlot)
       return json({ok:true,matchId:id,players:Object.keys(bySlot).length})
@@ -211,7 +211,7 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
         const batch=ids.slice(i,i+100)
         if(!batch.length) continue
         const found=await env.DB.prepare(`SELECT key,value FROM cache WHERE key IN (${batch.map(()=>'?').join(',')})`).bind(...batch.map(id=>`replay-data:v1:${id}`)).all<{key:string;value:string}>()
-        for(const row of found.results) { try { const entries=Object.values(JSON.parse(row.value)); if(entries.length===10&&entries.every((x:any)=>x.position>=1&&x.position<=5)) complete.add(row.key) } catch {} }
+        for(const row of found.results) { try { const entries=Object.values(JSON.parse(row.value)); if(entries.length===10&&entries.every((x:any)=>x.position>=1&&x.position<=5&&x.positionVersion>=2)) complete.add(row.key) } catch {} }
       }
       const limit=Math.min(100,Math.max(1,Number(url.searchParams.get('limit'))||25))
       return json({matchIds:ids.filter(id=>!complete.has(`replay-data:v1:${id}`)).slice(0,limit)})

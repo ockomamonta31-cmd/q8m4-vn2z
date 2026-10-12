@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 18" role="img" aria-label="Позиция 3">
-  <path d="M1 1h18v16H1z" fill="#111a1b" stroke="#a58be5" stroke-width="1.2"/>
-  <path d="M1 1h18v2H1z" fill="#a58be5"/>
-  <text x="10" y="13.7" text-anchor="middle" font-family="Georgia,serif" font-size="10" font-weight="700" fill="#f2f0e6">III</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M10 1 19 10 10 19 1 10z" fill="#17231f" stroke="#d99c76" stroke-width="1.2"/><g fill="none" stroke="#d99c76" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2 16 5v5c0 4-3 7-6 9-3-2-6-5-6-9V5zM7 10l2 2 4-5"/></g></svg>

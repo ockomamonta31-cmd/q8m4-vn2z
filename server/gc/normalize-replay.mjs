@@ -61,7 +61,7 @@ const replayPlayers = match.players.map((p) => {
     p.purchaseEvents.push({ time: Number(e.time) || 0, itemId }); purchases++
   }
   const role = detectedPositions.get(slot)
-  return { playerSlot: slot, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, ...(role ?? {}) }
+  return { playerSlot: slot, positionVersion: 2, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, ...(role ?? {}) }
 })
 const path = join(data, 'matches', `${id}.json`)
 await writeFile(path, JSON.stringify(match))

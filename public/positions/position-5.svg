@@ -1,5 +1,1 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 18" role="img" aria-label="Позиция 5">
-  <path d="M1 1h18v16H1z" fill="#111a1b" stroke="#72c4cf" stroke-width="1.2"/>
-  <path d="M1 1h18v2H1z" fill="#72c4cf"/>
-  <text x="10" y="13.7" text-anchor="middle" font-family="Georgia,serif" font-size="10" font-weight="700" fill="#f2f0e6">V</text>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M10 1 19 10 10 19 1 10z" fill="#17231f" stroke="#b7a0dd" stroke-width="1.2"/><g fill="none" stroke="#b7a0dd" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4v12m-2-9h4m-4 4h4m6-7v12m-2-9h4m-4 4h4"/><circle cx="5" cy="17" r="1"/><circle cx="13" cy="17" r="1"/></g></svg>
