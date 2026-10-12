@@ -28,14 +28,19 @@ const requestedId=process.env.REPLAY_MATCH_ID
 const requested=(requestedId??'').split(',').map((x)=>x.trim()).filter((x)=>/^\d+$/.test(x))
 const {matchIds=[]}=requested.length?{matchIds:requested}:await get('/api/internal/replay/pending?limit=100')
 const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
-let completed=0
-for(const id of matchIds) {
+// Смотрим только на свежие кандидаты. Valve публикует replay_salt не сразу, и
+// без окна батч доедал бы очередь до матчей недельной давности, хотя смысл в
+// том, чтобы разобрать то, что человек только что сыграл.
+const scan=Math.max(max,Number(process.env.REPLAY_SCAN_LIMIT)||40)
+const candidates=matchIds.slice(0,scan)
+let completed=0, noReplay=0
+for(const id of candidates) {
   if(completed>=max) break
   try {
     const metaRes=await fetch(`https://api.opendota.com/api/matches/${id}`,{signal:AbortSignal.timeout(20_000)})
     if(!metaRes.ok) continue
     const meta=await metaRes.json()
-    if(!/^\d+$/.test(String(meta.cluster??''))||!/^\d+$/.test(String(meta.replay_salt??''))) continue
+    if(!/^\d+$/.test(String(meta.cluster??''))||!/^\d+$/.test(String(meta.replay_salt??''))) { noReplay++; continue }
     const match=await get(`/api/internal/replay/match/${id}`)
     if(match.players?.length!==10) continue
     await mkdir(join(data,'matches'),{recursive:true})
@@ -48,4 +53,4 @@ for(const id of matchIds) {
     console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
   }
 }
-console.log(`INGEST ${completed}/${Math.min(matchIds.length,max)}; pending=${matchIds.length}`)
+console.log(`INGEST ${completed}/${candidates.length}; реплей ещё не выложен=${noReplay}; всего в очереди=${matchIds.length}`)

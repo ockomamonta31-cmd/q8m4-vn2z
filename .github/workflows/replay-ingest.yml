@@ -32,6 +32,7 @@ jobs:
       # env: payload GitHub считает данными, которыми теоретически может
       # управлять чужой код. Список матчей раннер читает сам из своего API.
       REPLAY_MATCHES_PER_RUN: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.limit || '5' }}
+      REPLAY_SCAN_LIMIT: 40
       REPLAY_MATCH_ID: ${{ inputs.match_id }}
       DOTA_PARSER_URL: http://127.0.0.1:5600
     steps:
