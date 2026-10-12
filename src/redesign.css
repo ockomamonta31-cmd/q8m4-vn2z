@@ -286,8 +286,7 @@ a:hover { color: var(--ink-900); }
 .hero-name { overflow: hidden; font-weight: 600; text-overflow: ellipsis; }
 .hero-sub { display: block; color: var(--muted); font-size: 10px; line-height: 1.35; }
 .hero-portrait { position: relative; display: inline-flex; flex: 0 0 auto; }
-.position-icon { position: absolute; top: -5px; left: -5px; z-index: 1; width: 21px; height: 21px; filter: drop-shadow(0 2px 2px #000b); }
-.position-icon-estimated { opacity: .72; }
+.position-icon { position: absolute; top: 0; left: 0; z-index: 1; width: 18px; height: 18px; filter: drop-shadow(0 1px 2px #000b); }
 .match-player { display: flex; flex-direction: column; min-width: 0; }
 .player-line { display: flex; align-items: center; gap: 5px; min-width: 0; }
 .player-link { overflow: hidden; color: var(--text); font-size: 12px; font-weight: 700; text-overflow: ellipsis; }
