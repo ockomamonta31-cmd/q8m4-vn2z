@@ -1,422 +1,45 @@
-// Страница матча: обе команды, IMP всех игроков, шмотки, урон/башни/нетворт.
-// Данные — из кэша (матчи неизменяемы), повторные открытия мгновенные.
+// Страница матча. Данные — из кэша (матч неизменяем), повторное открытие мгновенное.
+// Таймлайн реплея опционален: без него вкладки «Графики» и «Таймлайн» не показываются.
 
 import { useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { fetchMatch, getItemMap, itemImageUrl } from '../api'
-import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails, type MatchPlayer } from '../api/types'
-import { getHeroMap, heroImageUrl } from '../api/heroes'
-import { fantasyPoints, globalModelInfo, predictImpGlobal, scoreClass } from '../api/performance'
-import { IMPACT_MODEL_READY, impactClass, personalImpact, personalImpactBreakdown } from '../api/impact'
-import { fmtDuration, gameModeName, lobbyName, steamProfileUrl } from '../api/formats'
-import PositionIcon from '../components/PositionIcon'
+import { useParams } from 'react-router-dom'
+import { fetchMatch, getItemMap } from '../api'
+import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails } from '../api/types'
+import { getHeroMap } from '../api/heroes'
+import { fetchTimeline, type MatchTimeline } from '../api/timeline'
+import { resolveImpact } from '../api/score'
+import { buildBoard, buildInsights, playerLabel } from './match-model'
+import { Notice, PageSkeleton } from '../components/States'
+import { Reveal, TabBar } from '../components/primitives'
+import { Icon } from '../components/Icons'
+import HeroPlate from '../components/match/HeroPlate'
+import Insights from '../components/match/Insights'
+import Rosters from '../components/match/Roster'
+import Draft from '../components/match/Draft'
+import TimelinePanel from '../components/match/Timeline'
+import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
 
-type AbilityInfo = { name: string; img: string | null; key: string }
-function useAbilityLookup() {
-  const [data, setData] = useState<{ book: Record<string, AbilityInfo>; heroSkills: Record<string, number[]> }>({ book: {}, heroSkills: {} })
-  useEffect(() => { Promise.all([import('../../server/data/constants/ability_lookup.json'), import('../../server/data/constants/hero_skill_order.json')]).then(([book, skills]) => setData({ book: book.default as Record<string, AbilityInfo>, heroSkills: skills.default as Record<string, number[]> })) }, [])
-  return data
-}
-
-function fmtNum(n: number): string {
-  return n.toLocaleString('ru-RU')
-}
-function ImpBadge({
-  imp,
-  our,
-  m,
-  durationSec,
-}: {
-  imp: number | null
-  /** наша честная оценка (−100…+100) — основная колонка */
-  our: number | null
-  m: MatchPlayer
-  durationSec: number
-}) {
-  if (our !== null) {
-    return (
-      <span className={`score-badge ${impactClass(our)}`} title="Модель импакта: сравнение с базовыми показателями игрока">
-        {our > 0 ? `+${our}` : our}
-      </span>
-    )
-  }
-  if (imp !== null) {
-    return (
-      <span className={`score-badge ${scoreClass(imp)}`} title="IMP: −100…+100, вклад в победу">
-        {imp > 0 ? `+${imp}` : imp}
-      </span>
-    )
-  }
-  const est = predictImpGlobal(m, durationSec)
-  if (est !== null) {
-    const info = globalModelInfo()
-    return (
-      <span
-        className={`score-badge score-est ${scoreClass(est)}`}
-        title={`Модель (обучена на ${info?.samples.toLocaleString('ru-RU') ?? '?'} матчах, MAE ±${info?.mae ?? '?'}): IMP для этого игрока не посчитан`}
-      >
-        {est > 0 ? `+${est}` : est}
-      </span>
-    )
-  }
-  return (
-    <span className="muted" title={`IMP не рассчитан. Valve-фэнтези: ${fantasyPoints(m).toFixed(1)} баллов`}>
-      —
-    </span>
-  )
-}
-
-function ImpactDetails({ player, durationSec, score }: { player: MatchPlayer; durationSec: number; score: number }) {
-  const details = personalImpactBreakdown({ ...player, position: 0 }, durationSec, null)
-  const groups = ['Бой', 'Фарм', 'Урон и объекты']
-  const phases = player.impactPhases ?? []
-  const number = (n: number) => n.toLocaleString('ru-RU')
-  return (
-    <section className="impact-breakdown" aria-label="Разбор импакта">
-      <header className="impact-breakdown-head">
-        <div><span className="impact-eyebrow">РАЗБОР ОЦЕНКИ</span><strong>Почему {score > 0 ? '+' : ''}{score}</strong></div>
-        <span>Та же модель · сумма факторов = оценка</span>
-      </header>
-      <div className="impact-factors">
-        {groups.map((group) => {
-          const factors = details?.factors.filter((factor) => factor.section === group) ?? []
-          if (!factors.length) return null
-          const groupScore = factors.reduce((sum, factor) => sum + factor.contribution, 0)
-          return <div className="impact-factor-card" key={group}><b className="impact-group-title">{group}<strong className={groupScore >= 0 ? 'impact-plus' : 'impact-minus'}>{groupScore > 0 ? '+' : ''}{groupScore}</strong></b><ul>{factors.map((factor) => <li key={factor.label}>
-            <span>{factor.label}<small>факт {number(factor.actual)} · обычно {number(factor.baseline)}</small></span>
-            <strong className={factor.contribution >= 0 ? 'impact-plus' : 'impact-minus'}>{factor.contribution > 0 ? '+' : ''}{factor.contribution}</strong>
-          </li>)}</ul></div>
-        })}
-      </div>
-      <div className="impact-phase-list">
-        <strong>Матч по этапам</strong>
-        {phases.length ? phases.map((phase) => <div className="impact-phase" key={phase.label}>
-          <b>{phase.label}</b><span>K/D {phase.kills}/{phase.deaths}</span><span>LH +{number(phase.lastHits)}</span><span>XP +{number(phase.experience)}</span><span>нетворт +{number(phase.networth)}</span><span>урон героям +{number(phase.heroDamage)}</span><span>башням +{number(phase.towerDamage)}</span><span>золото +{number(phase.gold)}</span>
-        </div>) : <p>События реплея для разбивки по времени ещё не загружены.</p>}
-        <small>Этапы — статистика реплея. Итоговая оценка рассчитана прежней моделью по матчу целиком.</small>
-      </div>
-    </section>
-  )
-}
-
-function ItemSlot({ id, itemMap, cls }: { id: number | null; itemMap: Map<number, ItemInfo>; cls?: string }) {
-  if (!id) return <span className={`item-slot empty ${cls ?? ''}`} />
-  const info = itemMap.get(id)
-  return (
-    <span className={`item-slot ${cls ?? ''}`} title={info ? info.name : `Предмет #${id}`}>
-      {info?.shortName ? (
-        <img src={itemImageUrl(info.shortName)} alt={info.name} loading="lazy" />
-      ) : (
-        <span className="item-placeholder">?</span>
-      )}
-    </span>
-  )
-}
-
-/**
- * Match ability IDs map to localized image/name constants; each level is a skill-pick tile.
- */
-function BuildTimeline({ upgrades, heroId }: { upgrades: { ability: number; time: number; level: number }[]; heroId: number }) {
-  const { book, heroSkills } = useAbilityLookup()
-  if (!upgrades.length) return <div className="build-title">Прокачка недоступна для этого матча.</div>
-  const taken = [...upgrades].sort((a, b) => a.level - b.level || a.time - b.time).map((u) => {
-    const info = book[String(u.ability)]
-    return { ...u, info, talent: info?.key.startsWith('special_bonus') || info?.key === 'attribute_bonus' }
-  })
-  const pickedSkills = [...new Set(taken.filter((u) => !u.talent).map((u) => u.ability))]
-  const skillOrder = heroSkills[String(heroId)] ?? pickedSkills
-  const skills = skillOrder.filter((id) => pickedSkills.includes(id))
-  const slot = (ability: number, talent: boolean) => talent ? 'T' : ['Q', 'W', 'E', 'D', 'F', 'R'][Math.max(0, skillOrder.indexOf(ability))] ?? '•'
-  return (
-    <section className="build-section">
-      <div className="build-heading"><div><strong>Раскачка</strong><span>{upgrades.length} очков · навыки и таланты</span></div><small>УРОВЕНЬ ГЕРОЯ</small></div>
-      <div className="skill-legend">
-        {skills.map((id, i) => {
-          const info = book[String(id)]
-          return <span key={id} title={info?.name ?? `Способность ${id}`}><b>{['Q', 'W', 'E', 'D', 'F', 'R'][skillOrder.indexOf(id)] ?? '•'}</b>{info?.img && <img src={`https://cdn.steamstatic.com${info.img}`} alt="" />}{info?.name ?? `Способность ${id}`}</span>
-        })}
-        {taken.some((u) => u.talent) && <span><b>T</b>Талант</span>}
-      </div>
-      <div className="skill-build-grid">
-        {taken.map((u, i) => <span className={`skill-build-cell${u.talent ? ' is-talent' : ''}`} key={`${u.level}-${u.ability}-${i}`} title={`Уровень ${u.level} · ${u.info?.name ?? `Способность ${u.ability}`} · ${fmtDuration(u.time)}`}>
-          <small>{u.level}</small>{u.info?.img ? <img src={`https://cdn.steamstatic.com${u.info.img}`} alt={u.info?.name ?? ''} loading="lazy" /> : <i>{slot(u.ability, u.talent)}</i>}<b>{slot(u.ability, u.talent)}</b>
-        </span>)}
-      </div>
-      <div className="skill-build-note">Наведи на значок — увидишь способность, уровень и время.</div>
-    </section>
-  )
-}
-
-function PurchaseTimeline({ events, itemMap }: { events: MatchPlayer['purchaseEvents']; itemMap: Map<number, ItemInfo> }) {
-  if (events == null) return <div className="build-title">Таймлайн покупок недоступен для этого матча.</div>
-  if (!events.length) return <div className="build-title">Покупки не найдены.</div>
-  return (
-    <div className="purchase-wrap">
-      <div className="build-title">Покупки · {events.length} событий</div>
-      <div className="purchase-timeline">
-        {[...events].sort((a, b) => a.time - b.time).map((e, i) => {
-          const item = itemMap.get(e.itemId)
-          const time = `${e.time < 0 ? '−' : ''}${Math.floor(Math.abs(e.time) / 60)}:${String(Math.abs(e.time) % 60).padStart(2, '0')}`
-          return (
-            <span className="purchase-event" key={`${e.time}-${e.itemId}-${i}`} title={`${item?.name ?? `Предмет #${e.itemId}`} · ${time}`}>
-              {item?.shortName ? <img src={itemImageUrl(item.shortName)} alt={item.name} loading="lazy" /> : <span className="item-placeholder">?</span>}
-              <small>{time}</small>
-            </span>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
-function DraftStrip({ picks, heroMap }: { picks: MatchDetails['picksBans']; heroMap: Map<number, HeroInfo> }) {
-  if (!picks.length) return null
-  const bans = picks.filter((p) => !p.isPick)
-  const picksList = picks.filter((p) => p.isPick)
-  const cell = (b: MatchDetails['picksBans'][number]) => {
-    const hero = heroMap.get(b.heroId)
-    return (
-      <span
-        key={`${b.order}-${b.heroId}`}
-        className={`draft-slot ${b.isPick ? '' : 'ban'} ${b.isRadiant ? 'radiant' : 'dire'}`}
-        title={`${hero?.name ?? `герой ${b.heroId}`} · ${b.isPick ? 'выбор' : 'бан'} · ${b.isRadiant ? 'Radiant' : 'Dire'}`}
-      >
-        {hero && <img src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
-      </span>
-    )
-  }
-  return (
-    <div className="panel">
-      <h2 className="section-title">Драфт</h2>
-      <div className="draft">
-        <span className="draft-tag">Баны</span>
-        <span className="draft-group">{bans.map(cell)}</span>
-        <span className="draft-tag">Выбор</span>
-        <span className="draft-group">{picksList.map(cell)}</span>
-      </div>
-    </div>
-  )
-}
-
-function PlayerRow({
-  p,
-  heroMap,
-  itemMap,
-  isWinner,
-  durationSec,
-  ourImp,
-}: {
-  p: MatchPlayer
-  heroMap: Map<number, HeroInfo>
-  itemMap: Map<number, ItemInfo>
-  isWinner: boolean
-  durationSec: number
-  ourImp: number | null
-}) {
-  const hero = heroMap.get(p.heroId)
-  const [open, setOpen] = useState(false)
-  const [impactOpen, setImpactOpen] = useState(false)
-  const hasBuild = p.abilityUpgrades.length > 0 || p.purchaseEvents !== undefined
-  const { book: abilityBook } = useAbilityLookup()
-  const buildPreview = p.abilityUpgrades.slice(0, 8)
-  return (
-    <>
-      <tr
-        className={`${isWinner ? 'result-win' : 'result-loss'}${hasBuild ? ' row-clickable' : ''}`}
-        onClick={hasBuild ? () => setOpen((v) => !v) : undefined}
-        onKeyDown={
-          hasBuild
-            ? (e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  setOpen((v) => !v)
-                }
-              }
-            : undefined
-        }
-        tabIndex={hasBuild ? 0 : undefined}
-        aria-expanded={hasBuild ? open : undefined}
-        title={hasBuild ? 'Показать раскачку и покупки' : undefined}
-      >
-        <td>
-          <div className="hero-cell">
-            <span className="hero-portrait">
-              {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
-              <PositionIcon position={p.position} source={p.positionSource} />
-            </span>
-            <div className="match-player">
-              <span className="player-line">
-                {p.steamAccountId ? (
-                  <>
-                    <Link className="player-link" to={`/player/${p.steamAccountId}`} onClick={(e) => e.stopPropagation()}>
-                      {p.name ?? `#${p.steamAccountId}`}
-                    </Link>
-                    <a className="ext-link" href={steamProfileUrl(p.steamAccountId)} target="_blank" rel="noreferrer" title="Открыть профиль в Steam" onClick={(e) => e.stopPropagation()}>
-                      ↗
-                    </a>
-                  </>
-                ) : (
-                  <span className="muted" title="Имя получено из доступных публичных данных матча">
-                    Приватный игрок
-                  </span>
-                )}
-              </span>
-              <span className="hero-sub muted">
-                {hero?.name ?? `hero #${p.heroId}`}
-              </span>
-              {buildPreview.length > 0 && <span className="row-build-preview" aria-label="Первые уровни раскачки">{buildPreview.map((u, i) => {
-                const info = abilityBook[String(u.ability)]
-                return <span key={`${u.ability}-${i}`} title={`Ур. ${u.level} · ${info?.name ?? `Ability ${u.ability}`} · ${fmtDuration(u.time)}`}>{info?.img ? <img src={`https://cdn.steamstatic.com${info.img}`} alt="" loading="lazy" /> : <i>+</i>}</span>
-              })}</span>}
-            </div>
-          </div>
-        </td>
-        <td className="num">
-          <span className="impact-explainer">
-            <ImpBadge imp={p.imp} our={ourImp} m={p} durationSec={durationSec} />
-            {ourImp !== null && <button type="button" aria-expanded={impactOpen} onClick={(e) => { e.stopPropagation(); setImpactOpen((v) => !v) }} onKeyDown={(e) => e.stopPropagation()}>
-              {impactOpen ? 'Скрыть разбор' : 'Подробно'}
-            </button>}
-          </span>
-        </td>
-        <td className="num">
-          <span className="green">{p.kills}</span>
-          <span className="muted"> / </span>
-          <span className="red">{p.deaths}</span>
-          <span className="muted"> / {p.assists}</span>
-        </td>
-        <td className="num col-sm">{p.level}</td>
-        <td className="num col-md">{fmtNum(p.networth)}</td>
-        <td className="num col-md">{p.goldPerMinute}</td>
-        <td className="num col-md">{p.experiencePerMinute}</td>
-        <td className="num col-sm">
-          {p.numLastHits}
-          <span className="muted"> / {p.numDenies}</span>
-        </td>
-        <td className="num col-md" title={`Сырой урон по героям. С поправкой на время матча: ${fmtNum(p.scaledHeroDamage)}`}>
-          {fmtNum(p.heroDamage)}
-        </td>
-        <td className="num col-md" title={`С поправкой на время: ${fmtNum(p.scaledTowerDamage)}`}>{fmtNum(p.towerDamage)}</td>
-        <td className="items-cell">
-          <div className="items-row">
-            {p.items.map((it, i) => (
-              <ItemSlot key={i} id={it} itemMap={itemMap} />
-            ))}
-          </div>
-          <div className="items-row items-backpack">
-            {p.backpack.map((it, i) => (
-              <ItemSlot key={i} id={it} itemMap={itemMap} />
-            ))}
-            <ItemSlot id={p.neutralItem} itemMap={itemMap} cls="neutral" />
-            <span className={`item-slot ${p.aghanimsScepter ? 'scepter' : 'empty'}`} title={p.aghanimsScepter ? 'Aghanim’s Scepter' : 'без скипетра'}>
-              {p.aghanimsScepter ? <img src={itemImageUrl('ultimate_scepter')} alt="Скипетр" loading="lazy" /> : null}
-            </span>
-            <span className={`item-slot ${p.aghanimsShard ? 'shard' : 'empty'}`} title={p.aghanimsShard ? "Aghanim's Shard" : 'без шарда'}>
-              {p.aghanimsShard ? <img src={itemImageUrl('aghanims_shard')} alt="Шард" loading="lazy" /> : null}
-            </span>
-          </div>
-        </td>
-      </tr>
-      {impactOpen && ourImp !== null && <tr className="impact-details-row"><td colSpan={11}><ImpactDetails player={p} durationSec={durationSec} score={ourImp} /></td></tr>}
-      {open && (
-        <tr className="build-row">
-          <td colSpan={11}>
-            <BuildTimeline upgrades={p.abilityUpgrades} heroId={p.heroId} />
-            <PurchaseTimeline events={p.purchaseEvents} itemMap={itemMap} />
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-function TeamPanel({
-  title,
-  players,
-  won,
-  heroMap,
-  itemMap,
-  durationSec,
-}: {
-  title: 'Radiant' | 'Dire'
-  players: MatchPlayer[]
-  won: boolean
-  heroMap: Map<number, HeroInfo>
-  itemMap: Map<number, ItemInfo>
-  durationSec: number
-}) {
-  // Одна и та же функция с одной и той же seasonRank=null даёт то же число,
-  // что и в списке матчей: seasonRank там тоже null (Steam его не отдаёт).
-  const our = (p: MatchPlayer) => (IMPACT_MODEL_READY ? personalImpact({ ...p, position: 0 }, durationSec, null) : null)
-  const scores = players.map(our)
-  const totalOur = IMPACT_MODEL_READY ? scores.reduce<number>((s, v) => s + (v ?? 0), 0) : null
-  const totalImp = players.reduce((s, p) => s + (p.imp ?? 0), 0)
-  return (
-    <div className={`panel team-panel ${title === 'Radiant' ? 'team-radiant' : 'team-dire'}`}>
-      <div className="team-header">
-        <h2 className="section-title">{title === 'Radiant' ? 'Radiant' : 'Dire'}</h2>
-        <span className={`team-result ${won ? 'win' : 'loss'}`}>{won ? 'Победа' : 'Поражение'}</span>
-        {totalOur !== null ? (
-          <span className="muted team-imp" title="Суммарный импакт команды по нашей модели: у проигравшей обычно отрицательный — сыграли ниже базлайна своего ранга">
-            суммарный импакт {totalOur > 0 ? `+${totalOur}` : totalOur}
-            {totalImp !== 0 ? ` · IMP ${totalImp > 0 ? `+${totalImp}` : totalImp}` : ''}
-          </span>
-        ) : (
-          <span className="muted team-imp">
-            суммарный IMP {totalImp > 0 ? `+${totalImp}` : totalImp}
-          </span>
-        )}
-      </div>
-      <div className="table-wrap">
-        <table className="table match-table">
-          <thead>
-            <tr>
-              <th>Игрок</th>
-              <th className="num" title="Оценка модели по K/D/A, фарму, уровню, урону и лечению относительно базовых показателей той же позиции и ранга.">Импакт ★</th>
-              <th className="num">K / D / A</th>
-              <th className="num col-sm">Ур.</th>
-              <th className="num col-md">Нетворт</th>
-              <th className="num col-md">GPM</th>
-              <th className="num col-md">XPM</th>
-              <th className="num col-sm">LH / DN</th>
-              <th className="num col-md">Урон</th>
-              <th className="num col-md">Башни</th>
-              <th>Предметы</th>
-            </tr>
-          </thead>
-          <tbody>
-            {players.map((p, i) => (
-              <PlayerRow
-                key={`${p.steamAccountId}:${p.heroId}`}
-                p={p}
-                heroMap={heroMap}
-                itemMap={itemMap}
-                isWinner={won}
-                durationSec={durationSec}
-                ourImp={scores[i]}
-              />
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  )
-}
+type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft'
 
 export default function MatchPage() {
   const { id } = useParams()
   const matchId = Number(id)
   const [match, setMatch] = useState<MatchDetails | null>(null)
+  const [timeline, setTimeline] = useState<MatchTimeline | null>(null)
   const [heroMap, setHeroMap] = useState<Map<number, HeroInfo>>(new Map())
   const [itemMap, setItemMap] = useState<Map<number, ItemInfo>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState<TabId>('overview')
+  const [attempt, setAttempt] = useState(0)
 
   useEffect(() => {
     let alive = true
     setLoading(true)
     setError(null)
     setMatch(null)
+    setTimeline(null)
+    setTab('overview')
     Promise.all([getHeroMap(), getItemMap()]).then(([h, i]) => {
       if (!alive) return
       setHeroMap(h)
@@ -424,70 +47,171 @@ export default function MatchPage() {
     })
     fetchMatch(matchId)
       .then((m) => alive && setMatch(m))
-      .catch((e) => alive && setError(e instanceof ApiError ? e.message : 'Не удалось загрузить матч'))
+      .catch((e) => alive && setError(e instanceof ApiError ? e.message : 'Матч не загрузился'))
       .finally(() => alive && setLoading(false))
-    return () => {
-      alive = false
-    }
-  }, [matchId])
+    // таймлайн не блокирует отрисовку: секции графиков включатся, когда придёт
+    fetchTimeline(matchId).then((t) => alive && setTimeline(t))
+    return () => { alive = false }
+  }, [matchId, attempt])
 
-  const { radiant, dire } = useMemo(() => {
-    if (!match) return { radiant: [] as MatchPlayer[], dire: [] as MatchPlayer[] }
-    return {
-      radiant: match.players.filter((p) => p.isRadiant),
-      dire: match.players.filter((p) => !p.isRadiant),
-    }
-  }, [match])
+  const board = useMemo(
+    () => (match ? buildBoard(match, (p) => resolveImpact(p, match.durationSeconds, null)) : null),
+    [match],
+  )
 
-  if (loading) return <div className="spinner" />
+  const radiantWon = Boolean(match?.didRadiantWin)
 
-  if (error) {
+  useEffect(() => {
+    if (!match) return
+    const root = document.documentElement
+    root.style.setProperty('--stage-glow', radiantWon ? 'var(--radiant)' : 'var(--dire)')
+    return () => { root.style.removeProperty('--stage-glow') }
+  }, [match, radiantWon])
+
+  const insights = useMemo(
+    () => (match && board ? buildInsights(match, board, timeline, (p) => playerLabel(p, heroMap.get(p.heroId)?.name)) : []),
+    [match, board, timeline, heroMap],
+  )
+
+  if (loading) return <PageSkeleton rows={5} />
+
+  if (error || !match || !board) {
     return (
-      <div className="error-panel">
-        <h3>Не удалось загрузить матч</h3>
-        <div>{error}</div>
-        <p className="muted">Матч мог быть скрыт или удалён. Проверь ID и попробуй ещё раз.</p>
-      </div>
+      <Notice kind="error" title={error ? 'Матч не загрузился' : 'Данные не получены'}>
+        {error ?? 'Ответ пришёл пустым.'}
+        <p>Матч мог быть скрыт или удалён. Проверь ID — и открой другой из истории профиля.</p>
+        <div style={{ display: 'flex', gap: 'var(--s-2)', marginTop: 'var(--s-4)' }}>
+          <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>
+            <Icon.Timeline size={16} />
+            Повторить
+          </button>
+          <a className="btn btn-ghost" href="/">
+            <Icon.ArrowLeft size={16} />
+            На главную
+          </a>
+        </div>
+      </Notice>
     )
   }
 
-  if (!match) return null
-
-  const radiantWon = Boolean(match.didRadiantWin)
+  const allPlayers = match.players
+  const hasEvents = Boolean(timeline && (timeline.structures.length || timeline.kills.length || timeline.roshans.length))
+  const tabs = [
+    { id: 'overview' as const, label: 'Обзор', icon: <Icon.Spark size={15} /> },
+    { id: 'roster' as const, label: 'Игроки', icon: <Icon.Roster size={15} /> },
+    { id: 'charts' as const, label: 'Графики', icon: <Icon.Chart size={15} />, disabled: !timeline, hint: timeline ? undefined : 'Реплей ещё не разобран — кривые преимущества нет что строить' },
+    { id: 'timeline' as const, label: 'Таймлайн', icon: <Icon.Timeline size={15} />, disabled: !hasEvents, hint: hasEvents ? undefined : 'Событий реплея нет' },
+    { id: 'draft' as const, label: 'Драфт', icon: <Icon.Draft size={15} />, disabled: !match.picksBans.length },
+  ]
 
   return (
-    <div className="match-page">
-      <header className="match-report">
-        <div className="match-report-meta">
-          <strong>Матч #{match.id}</strong>
-          <span>{gameModeName(match.gameMode)}</span>
-          <span>{lobbyName(match.lobbyType)}</span>
-          <span>{new Date(match.startDateTime * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
-          {match.numHumanPlayers !== null && <span>{match.numHumanPlayers} игроков</span>}
-        </div>
-        <div className={`match-scoreboard ${radiantWon ? 'radiant' : 'dire'}`}>
-          <div className="score-team score-radiant">
-            <span className="score-side-name">Radiant</span>
-            <strong>{match.radiantScore ?? '—'}</strong>
-            {radiantWon && <small>Победитель</small>}
-          </div>
-          <div className="score-middle">
-            <span className={`match-outcome ${radiantWon ? 'win' : 'loss'}`}>{radiantWon ? 'Победа Radiant' : 'Победа Dire'}</span>
-            <strong>{fmtDuration(match.durationSeconds)}</strong>
-            <small>{match.firstBloodSeconds !== null && match.firstBloodSeconds >= 0 ? `Первая кровь · ${fmtDuration(match.firstBloodSeconds)}` : 'Длительность матча'}</small>
-          </div>
-          <div className="score-team score-dire">
-            <span className="score-side-name">Dire</span>
-            <strong>{match.direScore ?? '—'}</strong>
-            {!radiantWon && <small>Победитель</small>}
-          </div>
-        </div>
-      </header>
+    <div className="match">
+      <HeroPlate match={match} board={board} timeline={timeline} heroMap={heroMap} />
 
-      <DraftStrip picks={match.picksBans} heroMap={heroMap} />
+      <TabBar items={tabs} value={tab} onChange={setTab} className="subnav" />
 
-      <TeamPanel title="Radiant" players={radiant} won={radiantWon} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
-      <TeamPanel title="Dire" players={dire} won={!radiantWon} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
+      {tab === 'overview' && (
+        <div className="tab-body" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+          <Reveal>
+            <Insights items={insights} />
+          </Reveal>
+
+          {timeline && timeline.series.length > 1 && (
+            <Reveal className="section" delay={60}>
+              <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />
+            </Reveal>
+          )}
+
+          <Reveal className="section" delay={80}>
+            <div className="chart-grid">
+              <CompareBars board={board} />
+              <PlayerBars
+                title="Нетворт игроков"
+                sub="Итоговое состояние на конец матча"
+                players={allPlayers}
+                pick={(p) => p.networth}
+                heroMap={heroMap}
+                format={(n) => n.toLocaleString('ru-RU')}
+              />
+            </div>
+          </Reveal>
+
+          <Reveal className="section" delay={100}>
+            <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
+          </Reveal>
+        </div>
+      )}
+
+      {tab === 'roster' && (
+        <div className="tab-body" role="tabpanel" id="panel-roster" aria-labelledby="tab-roster">
+          <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
+        </div>
+      )}
+
+      {tab === 'charts' && timeline && (
+        <div className="tab-body" role="tabpanel" id="panel-charts" aria-labelledby="tab-charts">
+          <div className="rosters">
+            <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />
+            <CompareBars board={board} />
+            <div className="chart-grid">
+              <PlayerBars
+                title="Урон по героям"
+                sub="Сырой урон без поправки на время матча"
+                players={allPlayers}
+                pick={(p) => p.heroDamage}
+                heroMap={heroMap}
+                format={(n) => n.toLocaleString('ru-RU')}
+              />
+              <PlayerBars
+                title="Лечение"
+                sub="Кто держал команду на плаву"
+                players={allPlayers}
+                pick={(p) => p.heroHealing}
+                heroMap={heroMap}
+                format={(n) => n.toLocaleString('ru-RU')}
+              />
+            </div>
+            <div className="chart-grid">
+              <PlayerBars
+                title="Золото в минуту"
+                sub="Эффективность фарма"
+                players={allPlayers}
+                pick={(p) => p.goldPerMinute}
+                heroMap={heroMap}
+                format={(n) => String(n)}
+              />
+              <PlayerBars
+                title="Опыт в минуту"
+                sub="Скорость набора уровней"
+                players={allPlayers}
+                pick={(p) => p.experiencePerMinute}
+                heroMap={heroMap}
+                format={(n) => String(n)}
+              />
+            </div>
+            <PlayerBars
+              title="Урон по строениям"
+              sub="Давление на карту"
+              players={allPlayers}
+              pick={(p) => p.towerDamage}
+              heroMap={heroMap}
+              format={(n) => n.toLocaleString('ru-RU')}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === 'timeline' && timeline && (
+        <div className="tab-body" role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline">
+          <TimelinePanel timeline={timeline} heroMap={heroMap} durationSec={match.durationSeconds} />
+        </div>
+      )}
+
+      {tab === 'draft' && (
+        <div className="tab-body" role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
+          <Draft picks={match.picksBans} heroMap={heroMap} match={match} />
+        </div>
+      )}
     </div>
   )
 }

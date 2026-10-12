@@ -6,6 +6,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { inferReplayPositions } from './infer-replay-positions.mjs'
+import { buildMatchTimeline } from './build-timeline.mjs'
 
 const [id] = process.argv.slice(2)
 if (!/^\d+$/.test(id ?? '')) {
@@ -20,10 +21,11 @@ try {
     if (entry && !process.env[entry[1]]) process.env[entry[1]] = entry[2].replace(/^['"]|['"]$/g, '')
   }
 } catch {}
-const [match, replay, items] = await Promise.all([
+const [match, replay, items, heroes] = await Promise.all([
   readFile(join(data, 'matches', `${id}.json`), 'utf8').then(JSON.parse),
   readFile(join(data, 'replays', `${id}.json`), 'utf8').then(JSON.parse),
   readFile(join(data, 'constants', 'items.json'), 'utf8').then(JSON.parse),
+  readFile(join(data, 'constants', 'heroes.json'), 'utf8').then(JSON.parse),
 ])
 const itemIds = new Map(items.flatMap((x) => [[x.shortName, x.id], [x.shortName.replaceAll('_', ''), x.id]]))
 if (!Array.isArray(replay.players) || replay.players.length !== 10) throw new Error(`Replay does not contain the expected 10 player records`)
@@ -69,7 +71,8 @@ const ingestUrl = process.env.REPLAY_INGEST_URL
 const ingestToken = process.env.REPLAY_INGEST_TOKEN
 if (ingestUrl && ingestToken) {
   const endpoint = new URL(`/api/internal/replay/${id}`, ingestUrl)
-  const res = await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${ingestToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ players: replayPlayers }), signal: AbortSignal.timeout(30_000) })
+  const body = { players: replayPlayers, timeline: buildMatchTimeline(replay, match, heroes) }
+  const res = await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${ingestToken}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) })
   if (!res.ok) throw new Error(`Worker ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
   console.log(`Uploaded to Worker: ${await res.text()}`)
 }

@@ -1,146 +1,163 @@
+// Хедер: логотип, навигация, единый поиск матча/профиля, тема и аккаунт.
+
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { fetchProfile } from '../api'
 import { avatarImageUrl } from '../api/heroes'
+import { parseQuery } from '../api/formats'
+import { addRecentSearch, readRecentSearches, readTheme, writeTheme, type RecentSearch } from '../recents'
+import type { Auth } from '../auth'
+import { Icon } from './Icons'
 
-type Recent = { id: number; name: string }
-type Auth = { loggedIn: boolean; steamAccountId?: number; name?: string; avatar?: string | null }
-const RECENTS_KEY = 'dota.recentProfiles.v1'
-const THEME_KEY = 'matchlab.theme.v1'
-
-function loadTheme(): 'light' | 'dark' {
-  try {
-    const saved = localStorage.getItem(THEME_KEY)
-    if (saved === 'light' || saved === 'dark') return saved
-    return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-  } catch { return 'light' }
+function Logo() {
+  return (
+    <svg className="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+      <path className="m-r" d="M12.6 2 1.6 14l11 12z" />
+      <path className="m-d" d="M15.4 2l11 12-11 12z" />
+    </svg>
+  )
 }
 
-function loadRecents(): Recent[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(RECENTS_KEY) ?? '[]') as Recent[]
-    return Array.isArray(value) ? value.slice(0, 5) : []
-  } catch { return [] }
-}
-
-export default function TopBar({ onSearch }: { onSearch: (id: string) => void }) {
+export default function TopBar({
+  auth,
+  onSearch,
+  onLogout,
+}: {
+  auth: Auth | null
+  onSearch: (path: string) => void
+  onLogout: () => void
+}) {
   const [value, setValue] = useState('')
-  const [recents, setRecents] = useState<Recent[]>(loadRecents)
-  const [showRecents, setShowRecents] = useState(false)
-  const [auth, setAuth] = useState<Auth | null>(null)
-  const [theme, setTheme] = useState<'light' | 'dark'>(loadTheme)
+  const [recents, setRecents] = useState<RecentSearch[]>(readRecentSearches)
+  const [open, setOpen] = useState(false)
+  const [theme, setTheme] = useState<'light' | 'dark'>(readTheme)
   const navigate = useNavigate()
   const location = useLocation()
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-    try { localStorage.setItem(THEME_KEY, theme) } catch { /* theme still works for this visit */ }
+    writeTheme(theme)
   }, [theme])
 
+  useEffect(() => setRecents(readRecentSearches()), [location.pathname])
+
+  // Профиль попадает в журнал сразу, матч — только после того как подтвердится,
+  // что он существует (иначе в истории будут случайные цифры).
   useEffect(() => {
-    fetch('/api/auth/me').then((r) => r.ok ? r.json() as Promise<Auth> : null).then(setAuth).catch(() => setAuth({ loggedIn: false }))
+    const profile = location.pathname.match(/^\/player\/(\d+)$/)
+    if (!profile) return
+    const id = Number(profile[1])
+    setRecents(addRecentSearch(id, `#${id}`, 'player'))
+    fetchProfile(id)
+      .then((result) => setRecents(addRecentSearch(id, result.name || `#${id}`, 'player')))
+      .catch(() => {})
   }, [location.pathname])
 
   useEffect(() => {
-    const match = location.pathname.match(/^\/player\/(\d+)$/)
-    if (!match) return
-    const id = Number(match[1])
-    const add = (name: string) => setRecents((old) => {
-      const next = [{ id, name }, ...old.filter((item) => item.id !== id)].slice(0, 5)
-      localStorage.setItem(RECENTS_KEY, JSON.stringify(next))
-      return next
-    })
-    add(`#${id}`)
-    fetchProfile(id).then((profile) => add(profile.name || `#${id}`)).catch(() => {})
+    const match = location.pathname.match(/^\/match\/(\d+)$/)
+    if (match) setRecents(addRecentSearch(Number(match[1]), `Матч ${match[1]}`, 'match'))
   }, [location.pathname])
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
-    const digits = value.match(/\d{5,}/g)?.at(-1)
-    if (!digits) { navigate('/'); return }
-    let id = digits
-    if (digits.length >= 17) {
-      try { id = (BigInt(digits) - 76561197960265728n).toString() } catch { return }
-    }
-    onSearch(id)
+    const parsed = parseQuery(value)
+    if (!parsed) return
+    onSearch(parsed.kind === 'match' ? `/match/${parsed.id}` : `/player/${parsed.id}`)
     setValue('')
+    setOpen(false)
   }
 
-  async function logout() {
-    await fetch('/api/auth/logout', { method: 'POST' }).catch(() => {})
-    setAuth({ loggedIn: false })
+  const go = (item: RecentSearch) => {
+    onSearch(item.kind === 'match' ? `/match/${item.id}` : `/player/${item.id}`)
+    setValue('')
+    setOpen(false)
   }
 
   return (
     <header className="topbar">
       <div className="topbar-inner">
         <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/') }}>
-          <svg className="brand-mark" viewBox="0 0 34 34" aria-hidden="true">
-            <path d="M17 2 32 17 17 32 2 17 17 2Z" />
-            <path d="M17 8v18M8 17h18" />
-          </svg>
-          <span className="brand-wordmark"><strong>match</strong><b>lab</b></span>
+          <Logo />
+          <span className="brand-word">dota match<b>lab</b></span>
         </a>
-        <button className="home-link" type="button" onClick={() => navigate('/')}>Обзор</button>
-        <button
-          className="theme-toggle"
-          type="button"
-          aria-label={`Включить ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
-          aria-pressed={theme === 'dark'}
-          title={`Включить ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
-          onClick={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
-        >
-          {theme === 'dark' ? (
-            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.5"/><path d="M10 1.5v2M10 16.5v2M1.5 10h2m13 0h2M4 4l1.4 1.4m9.2 9.2L16 16m0-12-1.4 1.4m-9.2 9.2L4 16"/></svg>
-          ) : (
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16.6 12.4A7 7 0 0 1 7.6 3.4 7 7 0 1 0 16.6 12.4Z"/></svg>
-          )}
-          <span>{theme === 'dark' ? 'Светлая' : 'Тёмная'}</span>
-        </button>
-        <form className="search" onSubmit={submit}>
+
+        <nav className="nav">
+          <button type="button" className={`nav-link${location.pathname === '/' ? ' active' : ''}`} onClick={() => navigate('/')}>
+            Обзор
+          </button>
+          {auth?.loggedIn && auth.steamAccountId ? (
+            <button
+              type="button"
+              className={`nav-link${location.pathname === `/player/${auth.steamAccountId}` ? ' active' : ''}`}
+              onClick={() => onSearch(`/player/${auth.steamAccountId}`)}
+            >
+              Мой профиль
+            </button>
+          ) : null}
+        </nav>
+
+        <form className="search" onSubmit={submit} role="search">
+          <Icon.Search size={16} className="search-glass" />
           <input
+            className="search-field"
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            onFocus={() => setShowRecents(true)}
-            onBlur={() => window.setTimeout(() => setShowRecents(false), 120)}
-            placeholder="Steam ID или ссылка на профиль"
-            aria-label="Поиск игрока"
-            list="recent-player-searches"
+            onFocus={() => setOpen(true)}
+            onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+            placeholder="ID матча или игрока"
+            aria-label="Поиск матча или игрока"
+            autoComplete="off"
+            spellCheck={false}
           />
-          <datalist id="recent-player-searches">
-            {recents.map((item) => <option key={item.id} value={String(item.id)} label={item.name} />)}
-          </datalist>
-          <button type="submit" aria-label="Найти профиль">
-            <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
-            <span>Найти</span>
-          </button>
-          {showRecents && recents.length > 0 && (
-            <div className="recent-searches" role="listbox" aria-label="Недавно просмотренные профили">
-              <div className="recent-searches-title">Недавно просмотренные</div>
+          <span className="search-hint">Enter</span>
+          {open && recents.length > 0 && (
+            <div className="recents" role="listbox" aria-label="Недавние поиски">
+              <div className="recents-title">Недавние поиски</div>
               {recents.map((item) => (
-                <button key={item.id} type="button" role="option" onMouseDown={(e) => e.preventDefault()} onClick={() => { onSearch(String(item.id)); setValue(''); setShowRecents(false) }}>
-                  <span>{item.name}</span><small>{item.id}</small>
+                <button
+                  key={`${item.kind}:${item.id}`}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  className="recent-row"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => go(item)}
+                >
+                  <span>{item.name}</span>
+                  <small>{item.kind === 'match' ? 'матч' : 'профиль'}</small>
                 </button>
               ))}
             </div>
           )}
         </form>
+
         <div className="topbar-auth">
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label={`Включить ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
+            title={`Включить ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
+            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
+          >
+            {theme === 'dark' ? <Icon.Sun size={17} /> : <Icon.Moon size={17} />}
+          </button>
           {auth?.loggedIn ? (
             <>
-              <button className="auth-account" onClick={() => auth.steamAccountId && navigate(`/player/${auth.steamAccountId}`)} title="Открыть мой профиль">
-                <img src={avatarImageUrl(auth.avatar)} alt="" />
+              <button className="auth-account" onClick={() => auth.steamAccountId && onSearch(`/player/${auth.steamAccountId}`)} aria-label="Открыть свой профиль">
+                <img src={avatarImageUrl(auth.avatar)} alt="" width={22} height={22} />
                 <span>{auth.name}</span>
               </button>
-              <button type="button" className="auth-button" onClick={logout}>
+              <button type="button" className="auth-button" onClick={onLogout}>
                 <span>Выйти</span>
-                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M8 3H4v14h4m3-3 4-4-4-4m4 4H8" /></svg>
+                <Icon.Logout size={15} />
               </button>
             </>
-          ) : <a className="auth-button" href="/api/auth/steam">
-            <span>Войти через Steam</span>
-            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3a7 7 0 1 0 7 7M10 3v7l5 3" /></svg>
-          </a>}
+          ) : (
+            <a className="auth-button" href="/api/auth/steam">
+              <span>Войти через Steam</span>
+              <Icon.External size={15} />
+            </a>
+          )}
         </div>
       </div>
     </header>

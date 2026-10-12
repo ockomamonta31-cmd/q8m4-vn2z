@@ -3,12 +3,13 @@ import { useParams } from 'react-router-dom'
 import { fetchHeroStats, fetchMatches, fetchMatchesPages, fetchPeers, fetchProfile } from '../api'
 import { ApiError, type HeroInfo, type HeroStat, type Peer, type PlayerMatch, type Profile } from '../api/types'
 import { getHeroMap } from '../api/heroes'
-import { fmtWinrate, kda, winrate } from '../api/formats'
+import { kda, winrate } from '../api/formats'
 import PlayerHeader from '../components/PlayerHeader'
 import MatchesTable from '../components/MatchesTable'
 import HeroesTable from '../components/HeroesTable'
 import PeersList from '../components/PeersList'
 import ActivityHeatmap from '../components/ActivityHeatmap'
+import { Notice, PageSkeleton } from '../components/States'
 
 const PAGE_SIZE = 25
 const TABS = ['Обзор', 'Матчи', 'Герои', 'Друзья', 'Активность'] as const
@@ -48,7 +49,7 @@ export default function PlayerPage() {
 
     // Герои и пиры считаются по всем 100 накачанным матчам. Их просим ПОСЛЕ
     // первого экрана: иначе сто фоновых запросов отъедают окно Steam у списка
-    // матчей, и страница висит на спиннере вместо того чтобы показывать данные.
+    // матчей, и страница висит на скелетоне вместо того чтобы показывать данные.
     function loadAggregates() {
       fetchHeroStats(playerId)
         .then((r) => {
@@ -59,7 +60,7 @@ export default function PlayerPage() {
         .catch(() => {})
       fetchPeers(playerId)
         .then((v) => alive && setPeers(v))
-        .catch((e) => alive && setPeersError(e instanceof Error ? e.message : 'Пиры недоступны'))
+        .catch((e) => alive && setPeersError(e instanceof Error ? e.message : 'Друзья не загрузились'))
     }
 
     async function load() {
@@ -95,7 +96,7 @@ export default function PlayerPage() {
       const next = await fetchMatches(playerId, PAGE_SIZE, matches.length)
       setMatches((prev) => [...prev, ...next])
     } catch (e) {
-      setFatal(e instanceof Error ? e.message : 'Не удалось загрузить матчи')
+      setFatal(e instanceof Error ? e.message : 'Матчи не загрузились')
     } finally {
       setLoadingMore(false)
     }
@@ -129,7 +130,7 @@ export default function PlayerPage() {
       { k: 0, d: 0, a: 0, gpm: 0, xpm: 0, wins: 0 },
     )
     return {
-      kda: (sum.k + sum.a) / Math.max(1, sum.d),
+      kda: kda(sum.k, sum.d, sum.a),
       avgK: sum.k / n,
       avgD: sum.d / n,
       avgA: sum.a / n,
@@ -141,28 +142,27 @@ export default function PlayerPage() {
     }
   }, [recent])
 
-  if (loading) {
-    return (
-      <div>
-        <div className="spinner" />
-      </div>
-    )
-  }
+  const counts = useMemo(() => ({
+    'Обзор': recent.length ? String(recent.length) : null,
+    'Матчи': String(matches.length),
+    'Герои': heroStats ? String(heroStats.length) : null,
+    'Друзья': peers ? String(peers.length) : null,
+    'Активность': null,
+  }), [recent.length, matches.length, heroStats, peers])
+
+  if (loading) return <PageSkeleton rows={7} />
 
   if (fatal) {
     return (
-      <div className="error-panel">
-        <h3>Не удалось загрузить данные</h3>
-        <div>{fatal}</div>
-        <p className="muted">
-          Проверь <code>STEAM_WEB_API_KEY</code> в файле <code>stratz/.env</code> — бесплатный ключ
-          создаётся на{' '}
-          <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer">
-            steamcommunity.com/dev/apikey
-          </a>
-          . Затем перезапусти <code>npm run dev</code>.
+      <Notice kind="error" title="Данные не загрузились">
+        {fatal}
+        <p>
+          Проверь <code className="code">STEAM_WEB_API_KEY</code> в <code className="code">.env</code>: бесплатный
+          ключ создаётся на{' '}
+          <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer">steamcommunity.com/dev/apikey</a>{' '}
+          и после перезапуска <code className="code">npm run dev</code> начинает работать.
         </p>
-      </div>
+      </Notice>
     )
   }
 
@@ -174,8 +174,9 @@ export default function PlayerPage() {
 
       <nav className="tabs" role="tablist" aria-label="Разделы профиля">
         {TABS.map((t) => (
-          <button key={t} role="tab" aria-selected={t === tab} className={`tab ${t === tab ? 'active' : ''}`} onClick={() => setTab(t)}>
+          <button key={t} role="tab" aria-selected={t === tab} className={`tab${t === tab ? ' active' : ''}`} onClick={() => setTab(t)}>
             {t}
+            {counts[t] && <span className="tab-count">{counts[t]}</span>}
           </button>
         ))}
       </nav>
@@ -184,58 +185,112 @@ export default function PlayerPage() {
         <div className="overview-grid">
           <div className="overview-main">
             {averages ? (
-              <section className="stat-band" aria-label="Средняя статистика по загруженным матчам">
-                <div className="stat-cell stat-primary"><span>Винрейт · последние {averages.n}</span><strong>{fmtWinrate(averages.wins, averages.n)}</strong><small>{averages.wins} побед / {averages.n - averages.wins} поражений</small></div>
-                <div className="stat-cell"><span>Средний KDA</span><strong>{averages.kda.toFixed(2)}</strong><small>{averages.avgK.toFixed(1)} / {averages.avgD.toFixed(1)} / {averages.avgA.toFixed(1)}</small></div>
-                <div className="stat-cell"><span>Золото в минуту</span><strong>{Math.round(averages.gpm)}</strong><small>GPM</small></div>
-                <div className="stat-cell"><span>Опыт в минуту</span><strong>{Math.round(averages.xpm)}</strong><small>XPM</small></div>
-                <div className="stat-cell"><span>Убийства / матч</span><strong>{averages.avgK.toFixed(1)}</strong><small>в среднем</small></div>
-                <div className="stat-cell"><span>Смерти / матч</span><strong>{averages.avgD.toFixed(1)}</strong><small>в среднем</small></div>
+              <section className="readout" aria-label="Средние показатели по загруженным матчам">
+                <div className="readout-cell primary cell-accent">
+                  <div className="cell-label">Винрейт · {averages.n} матчей</div>
+                  <div className="cell-value">{averages.wr.toFixed(1)}<span className="pct">%</span></div>
+                  <div className="cell-sub">{averages.wins} побед · {averages.n - averages.wins} поражений</div>
+                </div>
+                <div className="readout-cell">
+                  <div className="cell-label">Средний KDA</div>
+                  <div className="cell-value">{averages.kda.toFixed(2)}</div>
+                  <div className="cell-sub">{averages.avgK.toFixed(1)} / {averages.avgD.toFixed(1)} / {averages.avgA.toFixed(1)}</div>
+                </div>
+                <div className="readout-cell">
+                  <div className="cell-label">Золото/мин</div>
+                  <div className="cell-value">{Math.round(averages.gpm)}</div>
+                  <div className="cell-sub">GPM</div>
+                </div>
+                <div className="readout-cell">
+                  <div className="cell-label">Опыт/мин</div>
+                  <div className="cell-value">{Math.round(averages.xpm)}</div>
+                  <div className="cell-sub">XPM</div>
+                </div>
+                <div className="readout-cell">
+                  <div className="cell-label">Убийства</div>
+                  <div className="cell-value">{averages.avgK.toFixed(1)}</div>
+                  <div className="cell-sub">в среднем за матч</div>
+                </div>
+                <div className="readout-cell">
+                  <div className="cell-label">Смерти</div>
+                  <div className="cell-value">{averages.avgD.toFixed(1)}</div>
+                  <div className="cell-sub">в среднем за матч</div>
+                </div>
               </section>
-            ) : <div className="inline-note">Нет загруженных матчей для статистики.</div>}
+            ) : <div className="notice">Загруженных матчей нет — сводку считать не по чему.</div>}
 
-            <section className="content-section">
-              <header className="section-heading"><h2>Последние матчи</h2><span>10 последних</span></header>
+            <section className="section">
+              <header className="section-head">
+                <h2 className="section-title">Последние матчи</h2>
+                <span className="section-note">10 из {matches.length}</span>
+              </header>
               <MatchesTable matches={matches.slice(0, 10)} heroMap={heroMap} seasonRank={profile.rank} />
             </section>
           </div>
 
           <aside className="overview-aside">
-            <section className="content-section heroes-preview">
-              <header className="section-heading"><h2>Чаще всего играет</h2><span>Герои</span></header>
-              {heroStats ? <HeroesTable stats={heroStats.slice(0, 5)} heroMap={heroMap} /> : <div className="inline-note">Статистика по героям недоступна.</div>}
+            <section className="section section-aside">
+              <header className="section-head">
+                <h2 className="section-title">Чаще всего играет</h2>
+                <span className="section-note">герои</span>
+              </header>
+              {heroStats ? <HeroesTable stats={heroStats.slice(0, 5)} heroMap={heroMap} compact /> : <div className="notice">Считаем по героям — данные подгрузятся со следующих страниц истории.</div>}
             </section>
-            <div className="data-note"><strong>Что попало в обзор</strong><span>Сводка рассчитана по загруженным матчам. История и активность догружаются отдельно.</span></div>
+            <div className="notice">
+              <strong className="notice-title">Что попало в обзор</strong>
+              Сводка рассчитана по загруженным матчам. Полная история и активность догружаются на своих вкладках.
+            </div>
           </aside>
         </div>
       )}
 
       {tab === 'Матчи' && (
-        <section className="content-section">
-          <header className="section-heading"><h2>История матчей</h2><span>{matches.length} загружено</span></header>
+        <section className="section">
+          <header className="section-head">
+            <h2 className="section-title">История матчей</h2>
+            <span className="section-note">загружено {matches.length}</span>
+          </header>
           <MatchesTable matches={matches} heroMap={heroMap} seasonRank={profile.rank} />
-          <button className="btn load-more" onClick={loadMore} disabled={loadingMore}>{loadingMore ? 'Загрузка…' : 'Показать ещё матчи'}</button>
+          <button className="btn load-more" onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Загружаем…' : 'Показать ещё матчи'}
+          </button>
         </section>
       )}
 
       {tab === 'Герои' && (
-        <section className="content-section">
-          <header className="section-heading"><h2>Герои</h2>{heroStats && <span>{heroStats.length} героев</span>}</header>
-          {heroStats ? <><HeroesTable stats={heroStats} heroMap={heroMap} />{heroStatsSource === 'matches' && <div className="inline-note">Агрегировано из последних {recent.length} матчей: точные счётчики из API героев недоступны.</div>}</> : <div className="inline-note">Статистика по героям недоступна.</div>}
+        <section className="section">
+          <header className="section-head">
+            <h2 className="section-title">Герои</h2>
+            {heroStats && <span className="section-note">{heroStats.length} героев</span>}
+          </header>
+          {heroStats ? (
+            <>
+              <HeroesTable stats={heroStats} heroMap={heroMap} />
+              {heroStatsSource === 'matches' && (
+                <div className="notice">Посчитано по последним {recent.length} матчам: точных счётчиков по героям API не отдаёт.</div>
+              )}
+            </>
+          ) : <PageSkeleton rows={5} band={false} />}
         </section>
       )}
 
       {tab === 'Друзья' && (
-        <section className="content-section">
-          <header className="section-heading"><h2>Друзья, с которыми играл</h2>{peers && <span>{peers.length} игроков</span>}</header>
-          {peers ? <PeersList peers={peers} /> : <div className="inline-note">{peersError ?? 'Друзья недоступны.'}</div>}
+        <section className="section">
+          <header className="section-head">
+            <h2 className="section-title">Друзья, с которыми играл</h2>
+            {peers && <span className="section-note">{peers.length} игроков</span>}
+          </header>
+          {peers ? <PeersList peers={peers} /> : (peersError ? <div className="notice">{peersError}</div> : <PageSkeleton rows={3} band={false} />)}
         </section>
       )}
 
       {tab === 'Активность' && (
-        <section className="content-section">
-          <header className="section-heading"><h2>Активность</h2><span>По дням</span></header>
-          {activityLoading || !activityMatches ? <div className="loading-line" aria-label="Загружаем активность" /> : <ActivityHeatmap matches={activityMatches} />}
+        <section className="section">
+          <header className="section-head">
+            <h2 className="section-title">Активность</h2>
+            <span className="section-note">матчи по дням</span>
+          </header>
+          {activityLoading || !activityMatches ? <PageSkeleton rows={3} band={false} /> : <ActivityHeatmap matches={activityMatches} />}
         </section>
       )}
     </div>

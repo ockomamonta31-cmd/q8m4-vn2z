@@ -2,20 +2,20 @@ import type { HeroInfo, HeroStat } from '../api/types'
 import { heroImageUrl } from '../api/heroes'
 import { fmtWinrate, winrate } from '../api/formats'
 
-export default function HeroesTable({ stats, heroMap }: { stats: HeroStat[]; heroMap: Map<number, HeroInfo> }) {
+export default function HeroesTable({ stats, heroMap, compact = false }: { stats: HeroStat[]; heroMap: Map<number, HeroInfo>; compact?: boolean }) {
   if (stats.length === 0) {
-    return <div className="inline-note">Статистика по героям пока пуста.</div>
+    return <div className="notice">По героям пока нечего показать — матчей в истории нет.</div>
   }
   return (
-    <div className="table-wrap">
+    <div className={`table-wrap${compact ? ' table-compact' : ''}`}>
       <table className="table">
         <thead>
           <tr>
-            <th>Герой</th>
+            <th className="col-hero">Герой</th>
             <th className="num">Матчи</th>
-            <th className="num">Победы</th>
-            <th className="num">Поражения</th>
-            <th>Винрейт</th>
+            {!compact && <th className="num">Победы</th>}
+            {!compact && <th className="num">Поражения</th>}
+            <th>{compact ? 'WR' : 'Винрейт'}</th>
           </tr>
         </thead>
         <tbody>
@@ -27,19 +27,19 @@ export default function HeroesTable({ stats, heroMap }: { stats: HeroStat[]; her
               <tr key={s.heroId}>
                 <td>
                   <div className="hero-cell">
-                    {hero && <img className="hero-icon" src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
-                    <span className="hero-name">{hero ? hero.name : `hero #${s.heroId}`}</span>
+                    <span className="hero-portrait">
+                      {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+                    </span>
+                    <span className="hero-name">{hero?.name ?? `герой #${s.heroId}`}</span>
                   </div>
                 </td>
                 <td className="num">{s.matchCount}</td>
-                <td className="num green">{s.winCount}</td>
-                <td className="num red">{losses}</td>
+                {!compact && <td className="num green">{s.winCount}</td>}
+                {!compact && <td className="num red">{losses}</td>}
                 <td>
-                  <span className="wr-mini">
-                    <span>{fmtWinrate(s.winCount, s.matchCount)}</span>
-                    <span className="bar">
-                      <span className="fill-win" style={{ width: `${wr}%` }} />
-                    </span>
+                  <span className="wr-cell">
+                    <b>{fmtWinrate(s.winCount, s.matchCount)}</b>
+                    <span className="wr-bar"><i style={{ width: `${wr}%` }} /></span>
                   </span>
                 </td>
               </tr>

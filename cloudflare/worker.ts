@@ -199,7 +199,13 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
         bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,positionVersion:Math.max(0,Math.trunc(Number(row.positionVersion)||0)),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats'}:{})}
       }
       await save(env,`replay-data:v1:${id}`,bySlot)
-      return json({ok:true,matchId:id,players:Object.keys(bySlot).length})
+      // Global charts (advantage curve, event feed) ride along when the parser
+      // run provides them; older payloads simply omit the key and the UI hides
+      // those sections instead of rendering an empty chart.
+      if (data.timeline && typeof data.timeline === 'object' && Array.isArray(data.timeline.series)) {
+        await save(env,`replay-timeline:v1:${id}`,data.timeline)
+      }
+      return json({ok:true,matchId:id,players:Object.keys(bySlot).length,timeline:Boolean(data.timeline)})
     }
     if(p==='/api/internal/replay/pending') {
       if(request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}` || !env.REPLAY_INGEST_TOKEN) return json({error:'Unauthorized'},401)
@@ -232,6 +238,8 @@ export default { async fetch(request:Request,env:Env):Promise<Response> {
     if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),role=(await replayData(env,x.id))?.[String(slot)];return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:role?.position??0,positionSource:role?.positionSource,seasonRank:0,isVictory:me.isVictory,imp:null}}}))) }
     m=p.match(/^\/api\/matches\/(\d+)$/)
     if(m) {const id=Number(m[1]),x=await match(env,id),[ps,replay]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id)]),purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0};return json({...x,players:x.players.map((p:any)=>{const team=p.isRadiant?'r':'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)];return {...p,position:parsed?.position??p.position,positionSource:parsed?.positionSource??p.positionSource,name:ps.get(p.steamAccountId)?.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases}})})}
+    m=p.match(/^\/api\/matches\/(\d+)\/timeline$/)
+    if(m){const id=Number(m[1]),t=await cached<unknown>(env,`replay-timeline:v1:${id}`);if(!t)return json({error:'Реплей этого матча ещё не разобран'},404);return json(t)}
     m=p.match(/^\/api\/player\/(\d+)\/heroes$/)
     if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,{heroId:number;matchCount:number;winCount:number}>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id),a=agg.get(me.heroId)??{heroId:me.heroId,matchCount:0,winCount:0};a.matchCount++;if(me.isVictory)a.winCount++;agg.set(me.heroId,a)}return json([...agg.values()].sort((a,b)=>b.matchCount-a.matchCount).slice(0,Math.min(Number(url.searchParams.get('take'))||100,100)))}
     m=p.match(/^\/api\/player\/(\d+)\/peers$/)

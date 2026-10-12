@@ -93,7 +93,61 @@ export function fmtWinrate(wins: number, total: number): string {
   return `${winrate(wins, total).toFixed(1)}%`
 }
 
+/**
+ * Из строки поиска — account_id. Принимает чистый id32, steamID64 или ссылку
+ * на профиль; steamID64 отнимает базовое смещение Steam.
+ */
+export function parsePlayerQuery(value: string): string | null {
+  const link = value.match(/(?:id|profiles)\/(\d{6,})/)?.[1]
+  const digits = link ?? value.match(/\d{5,}/g)?.at(-1)
+  if (!digits) return null
+  if (digits.length < 17) return digits
+  try {
+    return (BigInt(digits) - 76561197960265728n).toString()
+  } catch {
+    return null
+  }
+}
+
 /** Ссылка на профиль Steam (account_id32 → steamID64). */
 export function steamProfileUrl(accountId: number): string {
   return `https://steamcommunity.com/profiles/${BigInt(accountId) + 76561197960265728n}`
+}
+
+export type ParsedQuery = { kind: 'match' | 'player'; id: string }
+
+/**
+ * Строка поиска → матч или профиль. Граница честная: account_id Valve — это
+ * uint32, поэтому число больше 4 294 967 295 матчем быть не может, а 17-значный
+ * steamID64 матчем быть не может по длине. Ссылки на stratz/dotabuff/opendota
+ * и префикс «матч» снимают остаток неоднозначности.
+ */
+export function parseQuery(value: string): ParsedQuery | null {
+  const text = value.trim()
+  if (!text) return null
+
+  const matchLink = text.match(/(?:^|[/.?=&])match(?:es)?[/:=_-]*(\d{6,})/i)
+  if (matchLink) return { kind: 'match', id: matchLink[1] }
+  if (/^(match|матч)\s*[:#\s]?\s*(\d{6,})$/i.test(text)) {
+    return { kind: 'match', id: text.match(/(\d{6,})\s*$/)![1] }
+  }
+  if (/(?:steamcommunity\.com)\/(?:id|profiles)\//i.test(text)) {
+    const id = parsePlayerQuery(text)
+    return id ? { kind: 'player', id } : null
+  }
+
+  const digits = text.replace(/[\s-]/g, '')
+  if (!/^\d{6,}$/.test(digits)) {
+    const id = parsePlayerQuery(text)
+    return id ? { kind: 'player', id } : null
+  }
+  if (digits.length >= 17) {
+    const id = parsePlayerQuery(digits)
+    return id ? { kind: 'player', id } : null
+  }
+  try {
+    return BigInt(digits) > 4294967295n ? { kind: 'match', id: digits } : { kind: 'player', id: digits }
+  } catch {
+    return null
+  }
 }

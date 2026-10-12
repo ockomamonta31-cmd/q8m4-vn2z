@@ -32,6 +32,7 @@ import { dirname, join, extname, resolve, relative, isAbsolute } from 'node:path
 import { fileURLToPath } from 'node:url'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { inferReplayPositions } from './gc/infer-replay-positions.mjs'
+import { buildMatchTimeline } from './gc/build-timeline.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const DATA = join(ROOT, 'data')
@@ -585,8 +586,7 @@ const handlers = {
   },
 
   /** GET /api/matches/:id — полный матч (все 10 игроков с именами). */
-  async match(params) {
-    const id = Number(params.id)
+  async match(params) {    const id = Number(params.id)
     if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный ID матча')
     const match = await ensureMatch(id)
     const profiles = await resolveProfiles(match.players.map((p) => p.steamAccountId))
@@ -604,6 +604,20 @@ const handlers = {
         name: profiles.get(p.steamAccountId)?.name ?? null,
       })),
     }
+  },
+
+  /**
+   * GET /api/matches/:id/timeline — кривые преимущества и лента событий из реплея.
+   * 404, если реплей этого матча ещё не разобран: интерфейс прячет секции,
+   * а не показывает пустой график.
+   */
+  async timeline(params) {
+    const id = Number(params.id)
+    if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный ID матча')
+    const replay = readJson(join(DATA, 'replays', `${id}.json`), null)
+    if (!replay) throw new HttpError(404, 'Реплей этого матча ещё не разобран')
+    const match = await ensureMatch(id)
+    return buildMatchTimeline(replay, match, CONSTANTS.heroes)
   },
 
   /** GET /api/player/:id/heroes — агрегация по героям из своей базы матчей. */
@@ -683,6 +697,8 @@ function matchRoute(method, path) {
   if (m) return { handler: handlers.peers, params: { id: m[1] } }
   m = path.match(/^\/api\/matches\/(\d+)$/)
   if (m) return { handler: handlers.match, params: { id: m[1] } }
+  m = path.match(/^\/api\/matches\/(\d+)\/timeline$/)
+  if (m) return { handler: handlers.timeline, params: { id: m[1] } }
   if (path === '/api/constants/heroes') return { handler: async () => CONSTANTS.heroes, params: {} }
   if (path === '/api/constants/items') return { handler: async () => CONSTANTS.items, params: {} }
   return null
