@@ -31,7 +31,13 @@ export default function ActivityHeatmap({ matches }: { matches: PlayerMatch[] })
       const week = cells.slice(w * 7, w * 7 + 7).find((c) => c.count > 0)
       weekStarts.push(week ? MONTHS[new Date(week.key).getMonth()] : '')
     }
-    for (let w = 1; w < WEEKS; w++) if (weekStarts[w] === weekStarts[w - 1]) weekStarts[w] = ''
+    // Подпись месяца влезает только если от предыдущей отступ не меньше 4 недель,
+    // иначе метки набегают друг на друга в 12-пиксельной сетке.
+    let last = -9
+    for (let w = 0; w < WEEKS; w++) {
+      if (!weekStarts[w] || w - last < 4) weekStarts[w] = ''
+      else last = w
+    }
 
     let best = { key: '', count: 0 }
     for (const [key, count] of counts) if (count > best.count) best = { key, count }

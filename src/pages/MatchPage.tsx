@@ -17,12 +17,13 @@ import HeroPlate from '../components/match/HeroPlate'
 import Insights from '../components/match/Insights'
 import Rosters from '../components/match/Roster'
 import Draft from '../components/match/Draft'
+import Builds from '../components/match/Builds'
 import TimelinePanel from '../components/match/Timeline'
 import Teamfights from '../components/match/Teamfights'
 import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
 
-type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft'
-const TABS: TabId[] = ['overview', 'roster', 'charts', 'timeline', 'draft']
+type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft' | 'builds'
+const TABS: TabId[] = ['overview', 'roster', 'charts', 'timeline', 'draft', 'builds']
 
 export default function MatchPage() {
   const { id } = useParams()
@@ -113,6 +114,7 @@ export default function MatchPage() {
     { id: 'charts' as const, label: 'Графики', disabled: !timeline, hint: timeline ? undefined : 'Реплей ещё не разобран — кривой преимущества нет' },
     { id: 'timeline' as const, label: 'Таймлайн', disabled: !hasEvents, hint: hasEvents ? undefined : 'Событий реплея нет' },
     { id: 'draft' as const, label: 'Драфт', disabled: !match.picksBans.length },
+    { id: 'builds' as const, label: 'Билды', disabled: !allPlayers.some((p) => p.abilityUpgrades.length) },
   ]
 
   return (
@@ -228,6 +230,12 @@ export default function MatchPage() {
       {tab === 'draft' && (
         <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
           <Draft picks={match.picksBans} heroMap={heroMap} match={match} />
+        </div>
+      )}
+
+      {tab === 'builds' && (
+        <div role="tabpanel" id="panel-builds" aria-labelledby="tab-builds">
+          <Builds sides={board.sides} heroMap={heroMap} itemMap={itemMap} />
         </div>
       )}
       </div>

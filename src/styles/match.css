@@ -331,15 +331,31 @@
 
 /* --- драфт --- */
 
-.drf { display: grid; gap: var(--sp-8); }
-.drf-r { display: flex; gap: var(--sp-4); }
-.drf-c { position: relative; width: 64px; height: 36px; border-radius: var(--r-sm); overflow: hidden; box-shadow: inset 0 0 0 1px var(--tc, var(--line)); }
+.drf { display: flex; flex-wrap: wrap; gap: var(--sp-8); }
+.drf-c { position: relative; width: 64px; height: 36px; border-radius: var(--r-sm); overflow: hidden; box-shadow: inset 0 0 0 1px var(--tc, var(--line)); background: var(--bg-deep); }
 .drf-c.r { --tc: var(--radiant); }
 .drf-c.d { --tc: var(--dire); }
-.drf-c img { width: 100%; height: 100%; object-fit: cover; }
+.drf-c img { width: 100%; height: 100%; object-fit: cover; object-position: 50% 22%; }
 .drf-c.ban { opacity: .5; }
-.drf-c.ban::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top right, transparent 47%, var(--line) 47%, var(--line) 53%, transparent 53%); }
-.drf-n { position: absolute; right: var(--sp-4); bottom: var(--sp-4); font-size: var(--fs-12); color: var(--text); }
+.drf-c.ban::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top right, transparent 46%, var(--line) 46%, var(--line) 54%, transparent 54%); }
+.drf-n { position: absolute; right: var(--sp-4); bottom: 0; font-size: var(--fs-12); color: var(--text); text-shadow: 0 1px 2px #000; }
+
+.lu-board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-32); margin-top: var(--sp-32); }
+.lu { display: grid; gap: var(--sp-4); min-width: 0; }
+.lu-h { font-family: var(--display); font-size: var(--fs-20); line-height: 1; padding-bottom: var(--sp-8); border-bottom: 1px solid var(--line); }
+.lu.r .lu-h { color: var(--radiant-t); }
+.lu.d .lu-h { color: var(--dire-t); }
+.lu-r { display: grid; grid-template-columns: 40px 88px minmax(0, 1fr); gap: var(--sp-12); align-items: center; min-height: 56px; border-bottom: 1px solid var(--line); }
+.lu-n { display: grid; min-width: 0; font-size: var(--fs-12); }
+.lu-n b { font-size: var(--fs-16); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* --- билды --- */
+
+.blds { display: grid; gap: var(--sp-24); }
+.bld-p { border-top: 1px solid var(--line); padding-top: var(--sp-16); }
+.bld-p-h { display: grid; grid-template-columns: 40px 88px minmax(0, 1fr); gap: var(--sp-12); align-items: center; margin-bottom: var(--sp-16); }
+.bld-p-h b { font-size: var(--fs-16); font-weight: 600; }
+.bld-p-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--sp-24); }
 
 /* --- инсайты --- */
 
