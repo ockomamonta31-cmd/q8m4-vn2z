@@ -29,7 +29,7 @@ function Card({ p, hero, radiant, impact }: { p: MatchPlayer; hero: HeroInfo | u
         <b className={positive ? 'pos' : 'neg'}>{signed(impact)}</b>
         <span className="imp-t" aria-hidden="true"><i className={positive ? 'pos' : 'neg'} style={{ width: `${width}%` }} /></span>
       </span>
-      <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={p.isRadiant} size={40} />
+      <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} size={48} />
       <span className="vc-n" title={hero?.name}>{hero?.name ?? `герой #${p.heroId}`}</span>
     </li>
   )

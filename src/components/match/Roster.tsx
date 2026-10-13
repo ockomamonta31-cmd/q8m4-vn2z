@@ -105,7 +105,7 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec, best }:
         aria-expanded={canOpen ? open : undefined}
       >
         <span className="c-who">
-          <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={p.isRadiant} size={40} />
+          <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} size={40} />
           <span className={`port ${p.isRadiant ? 'r' : 'd'}`}>
             {hero && <img src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
           </span>

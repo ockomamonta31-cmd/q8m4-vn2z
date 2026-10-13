@@ -65,7 +65,7 @@ export default function MatchesTable({
               <span className={`port ${p.isVictory ? 'r' : 'd'}`}>
                 {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
               </span>
-              <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={p.isVictory} size={40} />
+              <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} size={40} />
 
               <span className="mrow-hero">
                 <b>{heroName}</b>

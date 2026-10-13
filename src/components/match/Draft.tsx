@@ -25,7 +25,7 @@ export default function Draft({ picks, heroMap, match }: {
           const h = hero(p.heroId)
           return (
             <div className="lu-r" key={`${p.steamAccountId}:${p.heroId}`}>
-              <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={radiant} size={40} />
+              <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} size={40} />
               <span className={`port ${radiant ? 'r' : 'd'}`}>
                 {h && <img src={heroImageUrl(h.shortName)} alt="" loading="lazy" />}
               </span>

@@ -22,7 +22,7 @@ function Side({ side, heroMap, itemMap }: { side: TeamSide; heroMap: Map<number,
           return (
             <div className="bld-p" key={`${p.steamAccountId}:${p.heroId}`}>
               <div className="bld-p-h">
-                <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={p.isRadiant} size={40} />
+                <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} size={40} />
                 <span className={`port ${p.isRadiant ? 'r' : 'd'}`}>
                   {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
                 </span>

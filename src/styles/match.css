@@ -98,7 +98,7 @@
 .vsc.list .vc { width: 100%; grid-template-columns: 104px 72px 40px minmax(0, 1fr); grid-template-areas: "p i r n"; align-items: center; gap: var(--sp-12); justify-items: start; }
 .vsc.list .vc-p { grid-area: p; }
 .vsc.list .vc-i { grid-area: i; justify-items: start; }
-.vsc.list .vc .role { grid-area: r; }
+.vsc.list .vc .roleicon { grid-area: r; }
 .vsc.list .vc-n { grid-area: n; text-align: left; max-width: none; }
 
 /* --- вкладки: sticky под шапкой, 48px, --bg-deep --- */

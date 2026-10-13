@@ -14,11 +14,6 @@ colors:
   dire: "#E0533F"
   dire-d: "#7A2A20"
   gold: "#D1A646"
-  role-1: "#6C7BE8"
-  role-2: "#37B6C9"
-  role-3: "#F2A33A"
-  role-4: "#E5604A"
-  role-5: "#5CCFB4"
 typography:
   display:
     fontFamily: "'Forum', Georgia, 'Times New Roman', serif"
@@ -74,9 +69,9 @@ that were won — the primary button, focus ring, caret, selection, MVP, the
 best-in-category dot, the networth delta, key-moment markers, the active tab
 underline.
 
-Role colours `--role-1…5` appear **only inside a role icon**. Team allegiance is
-carried by the row strip and the portrait frame, so role colour never doubles as
-camp colour.
+Role icons carry STRATZ's own gradient colours and are the only place those
+hues appear. Team allegiance is carried by the row strip and the portrait
+frame, so a role colour never doubles as camp colour.
 
 **The tinted-numerals rule.** `--dire` at #E0533F on `--surface` measures 3.7:1
 and fails WCAG AA for body-size text. Where a red or green number *is* text, it
@@ -134,11 +129,13 @@ middle-dot characters.
 with a 3px gold underline; inactive is `--text-dim`. No pills, no backgrounds,
 no transition on switch.
 
-**Role icons.** Volumetric shield: dark base gradient, 1.5px metallic rim, inner
-bevel, top-third gloss, `drop-shadow(0 2px 4px rgba(0,0,0,.5))`. The glyph is
-gradient-filled in its role colour. 40px in tables, 48px in hero and
-Противостояние, 24px in chips. A lane badge (16px) sits on the bottom-right
-corner. No position data → no icon; estimated position dims to 62%.
+**Role icons.** The original STRATZ position glyphs, downloaded from their match
+page and served from `public/assets/roles/role-1.svg … role-5.svg` (sword, bow,
+shield-with-bolt, hand-with-flame, hand-with-sparks) plus `lane-safe/-mid/-off.svg`.
+Rendered as plain `<img>` — no base, no frame, no shield, no shadow, no recolouring.
+48px in Противостояние, 40px in tables and rows, 24px in chips; the 16px lane badge
+sits on the bottom-right corner. No position data → no icon; estimated position
+dims to 62%. Russian tooltips stay in `title`/`alt`.
 
 **Player table.** Exactly eight columns: player, impact, K/D/A, networth,
 GPM/XPM, LH/DN, damage, items. 64px rows, `--surface`, hover `--surface-2`, a
@@ -173,8 +170,9 @@ disables all of it.
   `networth_t` per player, but surfacing them means changing normalisation and
   the API, which the brief puts out of scope. Networth across ten players is
   shown as horizontal team-coloured bars instead.
-- **Lane badge supports `jungle` and `roaming` shapes, but they never render** —
-  `infer-replay-positions.mjs` distinguishes only safe / mid / off.
+- **Lane badge covers safe / mid / off only.** STRATZ's own bundle also has
+  `Roaming` and `Jungle` lane glyphs, but `infer-replay-positions.mjs` never
+  distinguishes them, so those two are not shipped.
 - **Position coverage is ~0.8% of the cached library** (7 parsed replays of 907
   matches), so the role system is empty on most matches by design.
 - **The detector flags five "side-tab" strips.** All five are mandated by the
