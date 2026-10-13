@@ -14,7 +14,9 @@
     "gen-constants": "node server/gen-constants.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "cf:types": "wrangler types"
+    "cf:types": "wrangler types",
+    "drafts:data": "node scripts/build-draft-data.mjs",
+    "drafts:harvest": "node scripts/harvest-drafts.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

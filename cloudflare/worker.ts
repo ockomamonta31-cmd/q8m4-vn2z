@@ -100,12 +100,18 @@ type StratzDraft={bans:{heroId:number;radiant:boolean|null}[];picks:{heroId:numb
  * Полный драфт и линии. Steam отдаёт `picks_bans` обрезанным (из 16 автобанов
  * приходит 5–8) и часть банов помечает как пики, поэтому список берётся из
  * разбора STRATZ и сверяется с составом матча перед показом.
+ *
+ * Напрямую из Worker'а в api.stratz.com не выходит: их анти-абьюз отвечает
+ * «You can only use one Steam Account» на общий исходящий IP Cloudflare.
+ * Строки `match-draft:v1:*` наполняет `npm run drafts:harvest` — оттуда
+ * запросы проходят. Поэтому удачный ответ лежит в кэше навсегда (матч
+ * неизменяем), а «данных нет» — неделю, чтобы свежий матч догрузился.
  */
 async function matchDraft(env:Env,id:number):Promise<StratzDraft|null> {
+  const good=await cached<StratzDraft&{missing?:1}>(env,`match-draft:v1:${id}`)
+  if(good) return good.missing?null:good
+  if(await cached<{missing:1}>(env,`match-draft:missing:${id}`,7*24*3600_000)) return null
   if (!env.STRATZ_API_TOKEN) return null
-  const key=`match-draft:v1:${id}`
-  const hit=await cached<StratzDraft&{missing?:number}>(env,key,7*24*3600_000)
-  if(hit) return hit.missing?null:hit
   try {
     const res=await fetch('https://api.stratz.com/graphql',{method:'POST',headers:{Authorization:`Bearer ${env.STRATZ_API_TOKEN}`,'Content-Type':'application/json','User-Agent':'STRATZ_API'},body:JSON.stringify({query:`query { match(id: ${id}) { pickBans { isPick order heroId bannedHeroId isRadiant } players { isRadiant heroId lane position } } }`})})
     if(!res.ok) { console.error('STRATZ draft query HTTP',res.status); return null }
@@ -124,8 +130,8 @@ async function matchDraft(env:Env,id:number):Promise<StratzDraft|null> {
       if(!position) continue
       out.roles[`${p.isRadiant?'r':'d'}:${p.heroId}`]={lane:lanes[p.lane]??'',position}
     }
-    if(!out.picks.length&&!Object.keys(out.roles).length) { await save(env,key,{...out,missing:1}); return null }
-    await save(env,key,out)
+    if(!out.picks.length&&!Object.keys(out.roles).length) { await save(env,`match-draft:missing:${id}`,{missing:1}); return null }
+    await save(env,`match-draft:v1:${id}`,out)
     return out
   } catch(e) { console.error('STRATZ draft query failed',e instanceof Error?e.message:'unknown error'); return null }
 }
