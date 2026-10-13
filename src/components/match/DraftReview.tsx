@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import type { HeroInfo, MatchPlayer } from '../../api/types'
 import { heroImageUrl } from '../../api/heroes'
 import { ATTR_RU, ATTACK_RU, TAG_ORDER, TAG_RU, getHeroMeta, type HeroMeta } from '../../api/heroMeta'
-import { draftNotes, edgeVerdict, laneGaps, teamProfile, type TeamProfile } from '../../api/draft'
+import { draftNotes, laneGaps, teamProfile, type TeamProfile } from '../../api/draft'
 import { callShare, type DraftRating, type LaneCall } from '../../api/draftStrength'
 import RoleIcon from '../RoleIcon'
 
@@ -54,10 +54,12 @@ function Hero({ player, heroMap, side }: { player: MatchPlayer | null; heroMap: 
 
 const fmt = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(0)}`
 
+const ratio = (share: number | null) => (share === null ? '—' : `${(share * 100).toFixed(0)} : ${((1 - share) * 100).toFixed(0)}`)
+
 function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo> }) {
   const gaps = laneGaps(lane.radiant, lane.dire)
-  const measured = edgeVerdict(gaps.edge)
   const call = callShare(lane.share)
+  const fact = lane.actual === 'radiant' ? 'взял Radiant' : lane.actual === 'dire' ? 'взяла Dire' : lane.actual === 'even' ? 'равная' : 'неизвестно'
   return (
     <section className="lm">
       <header className="lm-h">
@@ -65,9 +67,17 @@ function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo
           <h5 className="lm-t">{lane.label}</h5>
           <span className="dim t12">{lane.note}</span>
         </span>
-        <span className="lm-v">
-          <b className={call.tone}>{lane.share === null ? '—' : `${(lane.share * 100).toFixed(0)} : ${((1 - lane.share) * 100).toFixed(0)}`}</b>
-          <span className="dim t12">{call.text}</span>
+        <span className="lm-calls">
+          <span className="lm-call">
+            <span className="dim t12">по драфту</span>
+            <b>{ratio(lane.share)}</b>
+            <span className={`t12 ${call.tone}`}>{call.text}</span>
+          </span>
+          <span className="lm-call">
+            <span className="dim t12">по факту</span>
+            <b>{lane.actualEdge === null ? '—' : fmt(lane.actualEdge)}</b>
+            <span className="dim t12">{fact}{lane.hit === null ? '' : lane.hit ? ' · совпало' : ' · не совпало'}</span>
+          </span>
         </span>
       </header>
 
@@ -106,9 +116,6 @@ function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo
         </span>
         <span className="lm-sum d"><b>{gaps.totals.d.gpm}</b> GPM · <b>{gaps.totals.d.xpm}</b> XPM · <b>{gaps.totals.d.lh}</b> LH · <b>{gaps.totals.d.nw}</b> NW</span>
       </div>
-      <p className="pnote lm-by">
-        По итогу матча линия {measured.text} (край {fmt(gaps.edge)} по четырём замерам).
-      </p>
     </section>
   )
 }
@@ -144,9 +151,10 @@ export default function DraftReview({ players, heroMap, rating }: {
       )}
 
       <p className="pnote">
-        Числа рядом с парой — что герои нафармили друг против друга в этом матче.
-        Отношение слева (например, 57 : 43) — предсказание по нашей базе: как такие
-        герои на таких ролях стоят свою линию против таких соперников.
+        «По драфту» — предсказание до матча: как такие герои на своих ролях стоят
+        такие линии по нашей базе ({rating ? rating.corpus : '…'} матчей). «По факту» —
+        что линия реально дала в этом матче: край по GPM, опыту, добиваниям и
+        нетворсу. {rating?.model ? `По нашей же базе такая модель берёт линию в ${(rating.model.laneAccuracy * 100).toFixed(0)}% случаев из ${rating.model.lanes} разобранных линий.` : ''}
         {rating && !rating.realLanes ? ' Линии этого матча взяты из порядка фарма, а не из разобранного реплея.' : ''}
       </p>
 

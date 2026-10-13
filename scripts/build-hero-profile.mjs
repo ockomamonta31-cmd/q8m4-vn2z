@@ -40,6 +40,7 @@ const pairs = new Map()    // "a:b" (a<b) → { games, wins }
 const heroTotals = new Map()
 let used = 0
 let skipped = 0
+let durationSum = 0
 
 const bucket = () => ({ games: 0, wins: 0, ...Object.fromEntries(METRICS.map((m) => [m, 0])) })
 
@@ -59,6 +60,7 @@ for (const f of files) {
   if ((match.durationSeconds ?? 0) < MIN_MATCH) { skipped++; continue }
   if (players.some((p) => !p.heroId)) { skipped++; continue }
   used += 1
+  durationSum += match.durationSeconds
   const won = match.didRadiantWin
 
   for (const radiant of [true, false]) {
@@ -130,6 +132,8 @@ const out = {
     heroes: Object.keys(hero).length,
     minMatchSeconds: MIN_MATCH,
     minPairGames: MIN_PAIR,
+    /** средняя длительность: кумулятивные статы пересчитываются на неё */
+    avgDurationSeconds: Math.round(durationSum / Math.max(1, used)),
     roleOf: '1 керри, 2 мид, 3 оффлейн, 4 и 5 саппорты — по нетворсу в команде',
   },
   hero,

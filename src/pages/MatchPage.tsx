@@ -1,7 +1,7 @@
 // Страница матча. Данные — из кэша (матч неизменяем), повторное открытие мгновенное.
 // Таймлайн реплея опционален: без него вкладки «Графики» и «Таймлайн» не показываются.
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { fetchMatch, getItemMap } from '../api'
 import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails, type MatchPlayer } from '../api/types'
@@ -87,7 +87,8 @@ export default function MatchPage() {
   // Оценка драфта считается один раз на страницу и нужна и вкладке «Драфт»,
   // и обзору. Массив-заглушка константный, чтобы хук не дёргался на каждом
   // рендере до того, как матч пришёл.
-  const { rating } = useDraftRating(match?.players ?? NO_PLAYERS)
+  const heroName = useCallback((id: number) => heroMap.get(id)?.name ?? `герой #${id}`, [heroMap])
+  const { rating } = useDraftRating(match?.players ?? NO_PLAYERS, match ?? null, heroName)
 
   // Единственный оркестрованный момент страницы: табло, затем ось, затем
   // составы. Секции ниже по скроллу больше ничего не выезжают.

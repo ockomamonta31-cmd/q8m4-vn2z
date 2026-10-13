@@ -16,7 +16,8 @@
     "preview": "vite preview",
     "cf:types": "wrangler types",
     "drafts:harvest": "node scripts/harvest-drafts.mjs",
-    "profile:build": "node scripts/build-hero-profile.mjs"
+    "profile:build": "node scripts/build-hero-profile.mjs",
+    "draft:backtest": "node scripts/backtest-draft.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

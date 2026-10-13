@@ -526,7 +526,9 @@
 .lm { display: grid; gap: var(--sp-12); min-width: 0; }
 .lm-h { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-12); padding-bottom: var(--sp-8); border-bottom: 1px solid var(--line); }
 .lm-t-wrap { display: grid; gap: var(--sp-4); min-width: 0; }
-.lm-by { margin-top: var(--sp-8); }
+.lm-calls { display: flex; gap: var(--sp-24); flex: none; }
+.lm-call { display: grid; gap: var(--sp-4); justify-items: end; text-align: right; }
+.lm-call b { font-size: var(--fs-20); font-weight: 700; line-height: 1; }
 .lm-t { font-family: var(--display); font-weight: 400; font-size: var(--fs-20); line-height: 1; }
 .lm-v { display: grid; gap: var(--sp-4); justify-items: end; text-align: right; }
 .lm-v b { font-size: var(--fs-16); font-weight: 700; }
@@ -590,6 +592,17 @@
 .dp-axis.total .dp-n b { font-size: var(--fs-28); }
 .dp-n { display: grid; gap: var(--sp-4); justify-items: end; text-align: right; min-width: 0; }
 .dp-n b { font-size: var(--fs-20); font-weight: 700; line-height: 1; }
+.dp-predict { display: grid; gap: var(--sp-16); margin-top: var(--sp-16); }
+.dp-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-16); }
+.dp-fact { display: grid; gap: var(--sp-4); min-width: 0; }
+.dp-fact b { font-size: var(--fs-20); font-weight: 700; line-height: 1; }
+.dp-why { display: grid; gap: var(--sp-8); font-size: var(--fs-14); list-style: none; }
+.dp-why li { position: relative; padding-left: var(--sp-16); color: var(--text-dim); }
+.dp-why li::before { content: ''; position: absolute; left: 0; top: 0.6em; width: 6px; height: 2px; background: var(--line); }
+.dp-why li.pos { color: var(--text); }
+.dp-why li.pos::before { background: var(--radiant); }
+.dp-why li.neg { color: var(--text); }
+.dp-why li.neg::before { background: var(--dire); }
 .dp-total { position: relative; display: flex; height: 44px; margin-top: var(--sp-16); border-radius: var(--r-sm); overflow: hidden; background: var(--bg-deep) }
 .dp-total-r { background: var(--radiant-d) }
 .dp-total-d { background: var(--dire-d); flex: 1 }
@@ -621,5 +634,8 @@
 @media (max-width: 768px) {
   .dp-teams { grid-template-columns: minmax(0, 1fr); gap: var(--sp-24); }
   .dp-axis { grid-template-columns: minmax(0, 1fr) 96px; gap: var(--sp-8); }
-  .dp-hnums { gap: var(--sp-12); }
+  .dp-facts { grid-template-columns: minmax(0, 1fr); gap: var(--sp-12); }
+  .dp-hnums { gap: var(--sp-8); }
+  .lm-h { flex-direction: column; align-items: flex-start; gap: var(--sp-8); }
+  .lm-call { justify-items: start; text-align: left; }
 }

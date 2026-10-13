@@ -22,7 +22,16 @@ export type Profile = {
   generated: string
   source: string
   metrics: string[]
-  meta: { matches: number; players: number; heroes: number; minMatchSeconds: number; minPairGames: number }
+  meta: { matches: number; players: number; heroes: number; minMatchSeconds: number; minPairGames: number; avgDurationSeconds: number }
+  /** бэктест этой же модели по нашей базе: предсказание против факта */
+  backtest?: {
+    matches: number
+    lanes: number
+    matchAccuracy: number
+    laneAccuracy: number
+    calibration: { lo: number; hi: number; games: number; won: number }[]
+    laneBuckets?: { lo: number; hi: number; games: number; won: number }[]
+  }
   hero: Record<string, { all: MetricRow; roles: Record<string, MetricRow> }>
   baseline: Record<string, MetricRow>
   pair: Record<string, { games: number; wins: number; winRate: number; floor: number }>
@@ -90,6 +99,51 @@ export function heroIndex(profile: Profile, heroId: number, role: number): HeroI
   const values = Object.values(axes)
   if (!values.length) return null
   return { role, games: row.games, floor: row.floor, axes, total: values.reduce((a, b) => a + b, 0) / values.length, missing }
+}
+
+/**
+ * Что герой выдал в КОНКРЕТНОМ матче, в тех же единицах, что и профиль:
+ * 1.00 = отработал как средний по своей роли. Кумулятивные статы (урон,
+ * лх, нетворс) пересчитаны на среднюю длительность базы — иначе катаболия
+ * на 18 минуте выглядит как провал.
+ */
+const PER_MINUTE = new Set(['goldPerMinute', 'experiencePerMinute'])
+
+export function realizedIndex(profile: Profile, player: MatchPlayer, role: number, durationSeconds: number) {
+  const base = profile.baseline[String(role)]
+  if (!base) return null
+  const avg = profile.meta.avgDurationSeconds || 1
+  const scale = Math.max(0.2, (durationSeconds || avg) / avg)
+  const axes: Record<string, number> = {}
+  for (const axis of AXES) {
+    const parts: number[] = []
+    for (const m of axis.metrics) {
+      const expected = (base[m.field] ?? 0) * (PER_MINUTE.has(m.field) ? 1 : scale)
+      const raw = Number((player as unknown as Record<string, unknown>)[m.field]) || 0
+      const v = ratio(raw, expected, m.sign)
+      if (v !== null) parts.push(v)
+    }
+    if (parts.length) axes[axis.key] = parts.reduce((a, b) => a + b, 0) / parts.length
+  }
+  const values = Object.values(axes)
+  if (!values.length) return null
+  return { axes, total: values.reduce((a, b) => a + b, 0) / values.length }
+}
+
+/**
+ * Калибровка по нашей же базе: доля силы → как часто такая доля действительно
+ * выигрывала. Берём ближайший бакет бэктеста; если бакета нет — честное
+ * «не знаем», то есть линейная аппроксимация от 50%.
+ */
+export function calibrate(profile: Profile, share: number): { probability: number; games: number } {
+  const buckets = profile.backtest?.calibration ?? []
+  const exact = buckets.find((b) => share >= b.lo && share < b.hi)
+  if (exact && exact.games >= 20) return { probability: exact.won, games: exact.games }
+  const nearest = buckets
+    .filter((b) => b.games >= 20)
+    .sort((a, b) => Math.abs((a.lo + a.hi) / 2 - share) - Math.abs((b.lo + b.hi) / 2 - share))[0]
+  if (nearest) return { probability: nearest.won, games: nearest.games }
+  return { probability: 0.5 + (share - 0.5) * 2 * 0.5, games: 0 }
 }
 
 /**

@@ -15,7 +15,8 @@
 //      выпадает из среднего, а не тянет его нулём.
 
 import type { MatchPlayer } from './types'
-import { AXES, heroIndex, pairSynergy, roleOf, type Profile } from './heroProfile'
+import { EDGE_STRONG, laneGaps } from './draft'
+import { AXES, calibrate, heroIndex, pairSynergy, realizedIndex, roleOf, type Profile } from './heroProfile'
 
 export type LaneCall = {
   key: string
@@ -24,8 +25,13 @@ export type LaneCall = {
   radiant: MatchPlayer[]
   dire: MatchPlayer[]
   pairs: { radiant: MatchPlayer | null; dire: MatchPlayer | null }[]
-  /** доля силы Radiant на линии, 0…1; null — героев с профилем слишком мало */
+  /** предсказание: доля силы Radiant на линии, 0…1; null — героев с профилем мало */
   share: number | null
+  /** что линия реально дала в матче, по четырём замерам, −100…100 */
+  actualEdge: number | null
+  actual: 'radiant' | 'dire' | 'even' | null
+  /** совпало ли предсказание с фактом */
+  hit: boolean | null
   rIndex: number
   dIndex: number
   coverage: number
@@ -48,16 +54,28 @@ export type HeroRating = {
   index: number | null
   axes: Record<string, number>
   games: number
+  /** что герой выдал в этом матче в тех же единицах (1.00 = как средний по роли) */
+  realized: number | null
+  realizedAxes: Record<string, number>
 }
+
+export type WhyLine = { text: string; tone: 'pos' | 'neg' | 'dim' }
 
 export type DraftRating = {
   generated: string
   corpus: number
   minPairGames: number
+  /** точность модели по нашей базе — чтобы цифра предсказания не была магией */
+  model: { matchAccuracy: number; laneAccuracy: number; matches: number; lanes: number } | null
   lanes: LaneCall[]
   axes: RatingAxis[]
   synergy: { r: number | null; d: number | null; games: number }
   total: { radiant: number; dire: number }
+  /** предикт матча: доля силы, переведённая в вероятность по нашей базе */
+  prediction: { share: number; probability: number; games: number }
+  /** чем дело кончилось: факт и совпало ли с предиктом */
+  outcome: { winner: 'radiant' | 'dire' | null; hit: boolean | null } | null
+  why: WhyLine[]
   heroes: HeroRating[]
   /** линии взяты из разобранного реплея, а не из порядка фарма */
   realLanes: boolean
@@ -76,7 +94,12 @@ const laneKey = (p: MatchPlayer, role: number): string =>
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
 
-export function evaluateDraft(profile: Profile, players: MatchPlayer[]): DraftRating | null {
+export function evaluateDraft(
+  profile: Profile,
+  players: MatchPlayer[],
+  match?: { durationSeconds: number; didRadiantWin: boolean | null },
+  names?: (heroId: number) => string,
+): DraftRating | null {
   const radiant = players.filter((p) => p.isRadiant)
   const dire = players.filter((p) => !p.isRadiant)
   if (radiant.length !== 5 || dire.length !== 5) return null
@@ -88,6 +111,7 @@ export function evaluateDraft(profile: Profile, players: MatchPlayer[]): DraftRa
 
   const heroes: HeroRating[] = players.map((p) => {
     const idx = indexes.get(p)
+    const done = match ? realizedIndex(profile, p, roles.get(p)!, match.durationSeconds) : null
     return {
       player: p,
       role: roles.get(p)!,
@@ -95,6 +119,8 @@ export function evaluateDraft(profile: Profile, players: MatchPlayer[]): DraftRa
       index: idx ? idx.total : null,
       axes: idx?.axes ?? {},
       games: idx?.games ?? 0,
+      realized: done ? done.total : null,
+      realizedAxes: done?.axes ?? {},
     }
   })
 
@@ -122,6 +148,9 @@ export function evaluateDraft(profile: Profile, players: MatchPlayer[]): DraftRa
     const share = rv.index !== null && dv.index !== null && rv.coverage >= 0.5 && dv.coverage >= 0.5
       ? rv.index / (rv.index + dv.index)
       : null
+    const gaps = r.length && d.length ? laneGaps(r, d) : null
+    const actual: LaneCall['actual'] = !gaps ? null : gaps.edge >= EDGE_STRONG ? 'radiant' : gaps.edge <= -EDGE_STRONG ? 'dire' : 'even'
+    const predicted: LaneCall['actual'] = share === null ? null : share >= 0.57 ? 'radiant' : share <= 0.43 ? 'dire' : 'even'
     return {
       key: lane.key,
       label: lane.label,
@@ -130,6 +159,9 @@ export function evaluateDraft(profile: Profile, players: MatchPlayer[]): DraftRa
       dire: dSorted,
       pairs,
       share,
+      actualEdge: gaps ? gaps.edge : null,
+      actual,
+      hit: predicted && actual ? predicted === actual : null,
       rIndex: rv.index ?? 0,
       dIndex: dv.index ?? 0,
       coverage: Math.min(rv.coverage, dv.coverage),
@@ -192,14 +224,58 @@ export function evaluateDraft(profile: Profile, players: MatchPlayer[]): DraftRa
   }
 
   const totalShare = mean(axes.map((a) => a.share)) ?? 0.5
+  const calibrated = calibrate(profile, totalShare)
+  const predicted: 'radiant' | 'dire' = totalShare >= 0.5 ? 'radiant' : 'dire'
+  const winner: 'radiant' | 'dire' | null =
+    !match || match.didRadiantWin === null || match.didRadiantWin === undefined ? null : match.didRadiantWin ? 'radiant' : 'dire'
+  const outcome = winner ? { winner, hit: winner === predicted } : null
+
+  // --- «что пошло не так»: только расхождения предикта и факта, с числами
+  const why: WhyLine[] = []
+  const label = (side: 'radiant' | 'dire' | 'even') => (side === 'radiant' ? 'Radiant' : side === 'dire' ? 'Dire' : 'равные')
+  for (const lane of lanes) {
+    if (lane.hit === false && lane.actual && lane.share !== null) {
+      const expected = lane.share >= 0.5 ? 'radiant' : 'dire'
+      why.push({
+        text: `${lane.label}: ждали ${label(expected)}, по факту ${label(lane.actual)} — край ${lane.actualEdge!.toFixed(0)} по GPM/опыту/ЛХ/нетворсу.`,
+        tone: lane.actual === 'radiant' ? 'pos' : 'neg',
+      })
+    }
+  }
+  const deviations = heroes
+    .filter((h) => h.index !== null && h.realized !== null)
+    .map((h) => ({ h, diff: h.realized! - h.index! }))
+    .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff))
+    .slice(0, 3)
+  for (const { h, diff } of deviations) {
+    if (Math.abs(diff) < 0.12) continue
+    why.push({
+      text: `${names?.(h.player.heroId) ?? `герой #${h.player.heroId}`} (${h.role}-я роль): профиль обещал ${h.index!.toFixed(2)}×, по матчу ${h.realized!.toFixed(2)}× — ${diff > 0 ? 'выше' : 'ниже'} на ${Math.abs(diff * 100).toFixed(0)}%.`,
+      tone: diff > 0 === h.player.isRadiant ? 'pos' : 'neg',
+    })
+  }
+  if (!why.length) {
+    why.push({
+      text: outcome?.hit === false
+        ? 'Линии взяты туда, куда и ждали — матч решился не линией, а тем, что было после неё.'
+        : 'Расхождений нет: линии и итог совпали с тем, что обещал драфт.',
+      tone: 'dim',
+    })
+  }
+
+  const bt = profile.backtest
   return {
     generated: profile.generated,
     corpus: profile.meta.matches,
     minPairGames: profile.meta.minPairGames,
+    model: bt ? { matchAccuracy: bt.matchAccuracy, laneAccuracy: bt.laneAccuracy, matches: bt.matches, lanes: bt.lanes } : null,
     lanes,
     axes,
     synergy,
     total: { radiant: totalShare * 100, dire: (1 - totalShare) * 100 },
+    prediction: { share: totalShare, probability: calibrated.probability, games: calibrated.games },
+    outcome,
+    why,
     heroes,
     realLanes,
   }

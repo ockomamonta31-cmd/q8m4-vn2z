@@ -210,6 +210,19 @@ disables all of it.
   and the total is their mean. No third-party winrates are used anywhere in the
   rating; the STRATZ merge above is only match facts (bans, picks, lanes), never
   an evaluation.
+- **Every verdict reads prediction → fact → divergence.** A lane row shows «по
+  драфту» (share of strength, computed before the match) next to «по факту»
+  (measured GPM/XP/LH/networth edge) and whether they agree. «Что пошло не так»
+  lists only the disagreements: lanes that went the other way, and heroes whose
+  realized index — same units, rescaled to the length of this match — beat or
+  fell short of their profile.
+- **The win probability is calibrated on our own library, not invented.**
+  `npm run draft:backtest` runs the same `evaluateDraft()` (bundled by esbuild so
+  it cannot drift from the frontend) over every cached match and writes
+  `backtest` into `hero_profile.json`: 61.1% of match winners called correctly
+  over 998 games, 57.2% of lanes over 2128, plus a calibration table of strength
+  share → observed win rate. The UI quotes that table instead of a made-up
+  mapping.
 - **Synergy needs sample.** A pair counts only if it played together ≥12 times in
   our library; expected winrate is the mean of the two heroes' own winrates (not
   the union — that made every lift negative). If a side has fewer than two known
