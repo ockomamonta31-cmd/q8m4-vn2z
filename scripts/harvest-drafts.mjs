@@ -29,6 +29,18 @@ const only = (process.argv.find((a) => a.startsWith('--ids=')) ?? '').slice(6).s
 const DRAFTS = join(ROOT, 'server', 'data', 'drafts')
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
+/** npx на Windows — это .cmd: запускаем через cmd.exe, но аргументами, а не
+    строкой, чтобы путь до SQL-файла не мог ничего подставить в shell. */
+function wrangler(args) {
+  const win = process.platform === 'win32'
+  return execFileSync(win ? 'cmd.exe' : 'npx', win ? ['/c', 'npx', 'wrangler', ...args] : ['wrangler', ...args], {
+    cwd: ROOT,
+    encoding: 'utf8',
+    maxBuffer: 128e6,
+    stdio: ['ignore', 'pipe', 'inherit'],
+  })
+}
+
 const QUERY = 'query M($id:Long!){ match(id:$id) { pickBans { isPick order heroId bannedHeroId isRadiant } players { isRadiant heroId lane position } } }'
 
 async function gql(id, attempt = 0) {
@@ -81,7 +93,7 @@ function allIds() {
   if (PUSH) {
     // в D1 матчей больше, чем на диске: берём и те, что Worker уже видел
     try {
-      const out = execFileSync('npx', ['wrangler', 'd1', 'execute', 'stratz-cache', '--remote', '--json', '--command', "SELECT key FROM cache WHERE key GLOB 'match:*'"], { cwd: ROOT, encoding: 'utf8', maxBuffer: 64e6 })
+      const out = wrangler(['d1', 'execute', 'stratz-cache', '--remote', '--json', '--command', "SELECT key FROM cache WHERE key GLOB 'match:*'"])
       const rows = JSON.parse(out.slice(out.indexOf('[')))
       const found = (Array.isArray(rows) ? rows.flatMap((r) => r.results ?? []) : [])
         .map((r) => Number(String(r.key).slice('match:'.length)))
@@ -133,7 +145,7 @@ if (!PUSH) {
       .join('\n')
     const file = join(ROOT, '.tmp-shots', `drafts-${i / 200}.sql`)
     writeFileSync(file, sql)
-    execFileSync('npx', ['wrangler', 'd1', 'execute', 'stratz-cache', '--remote', '--file', file, '--yes'], { cwd: ROOT, stdio: 'inherit' })
+    wrangler(['d1', 'execute', 'stratz-cache', '--remote', '--file', file, '--yes'])
     console.log(`  D1: чанк ${i / 200 + 1} из ${Math.ceil(list.length / 200)} (${chunk.length} строк)`)
   }
 }
