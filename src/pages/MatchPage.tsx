@@ -18,6 +18,7 @@ import Insights from '../components/match/Insights'
 import Rosters from '../components/match/Roster'
 import Draft from '../components/match/Draft'
 import Builds from '../components/match/Builds'
+import DraftReview from '../components/match/DraftReview'
 import TimelinePanel from '../components/match/Timeline'
 import Teamfights from '../components/match/Teamfights'
 import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
@@ -157,6 +158,10 @@ export default function MatchPage() {
           )}
 
           <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
+
+          <div className="sec">
+            <DraftReview players={allPlayers} heroMap={heroMap} />
+          </div>
         </div>
       )}
 
@@ -233,6 +238,9 @@ export default function MatchPage() {
       {tab === 'draft' && hasDraft && (
         <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
           <Draft picks={match.picksBans} heroMap={heroMap} match={match} />
+          <div className="sec">
+            <DraftReview players={allPlayers} heroMap={heroMap} />
+          </div>
         </div>
       )}
 
