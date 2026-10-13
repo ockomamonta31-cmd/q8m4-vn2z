@@ -85,6 +85,9 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
       </div>
 
       <div className="tl" aria-hidden="true">
+        {Array.from({ length: Math.floor(durationSec / 300) + 1 }, (_, i) => (
+          <span key={`m${i}`} className="tl-t" style={{ left: `${((i * 300) / durationSec) * 100}%` }}>{i * 5}′</span>
+        ))}
         {timeline.teamfights.map((fight) => (
           <span
             key={fight.index}

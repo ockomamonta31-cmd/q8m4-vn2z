@@ -21,6 +21,11 @@ type Row = MatchPlayer & { __impact: number; __score: ImpactScore | null }
 
 const posOf = (p: MatchPlayer) => (p.positionSource && p.position >= 1 && p.position <= 5 ? p.position : 6)
 
+/** Лучший в категории по матчу — золотая точка справа от числа. */
+function Best({ on }: { on: boolean }) {
+  return on ? <i className="best" title="Лучший показатель в матче" aria-label="лучший в матче" /> : null
+}
+
 function TeamTable({ side, board, heroMap, itemMap, durationSec }: {
   side: TeamSide
   board: MatchBoard
@@ -69,19 +74,21 @@ function TeamTable({ side, board, heroMap, itemMap, durationSec }: {
           maxDamage={maxDamage}
           isMvp={mvpId === `${p.steamAccountId}:${p.heroId}`}
           durationSec={durationSec}
+          best={board.best}
         />
       ))}
     </section>
   )
 }
 
-function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec }: {
+function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec, best }: {
   p: Row
   heroMap: Map<number, HeroInfo>
   itemMap: Map<number, ItemInfo>
   maxDamage: number
   isMvp: boolean
   durationSec: number
+  best: MatchBoard['best']
 }) {
   const hero = heroMap.get(p.heroId)
   const [open, setOpen] = useState(false)
@@ -122,22 +129,23 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec }: {
 
         <span className="c-imp"><ImpactMeter score={p.__score} /></span>
 
+
         <span className="c-kda">
           <b>{p.kills} / <i>{p.deaths}</i> / {p.assists}</b>
           <span className="dim">KDA {p.deaths === 0 ? (p.kills + p.assists).toFixed(2) : ((p.kills + p.assists) / p.deaths).toFixed(2)}</span>
         </span>
 
-        <span className="c-nw">{number(p.networth)}</span>
+        <span className="c-nw">{number(p.networth)}<Best on={best.networth === p.networth} /></span>
 
         <span className="c-gx">
-          <span>{p.goldPerMinute} <span className="dim">GPM</span></span>
-          <span>{p.experiencePerMinute} <span className="dim">XPM</span></span>
+          <span>{p.goldPerMinute} <span className="dim">GPM</span><Best on={best.goldPerMinute === p.goldPerMinute} /></span>
+          <span>{p.experiencePerMinute} <span className="dim">XPM</span><Best on={best.experiencePerMinute === p.experiencePerMinute} /></span>
         </span>
 
-        <span className="c-lh">{p.numLastHits} / {p.numDenies}</span>
+        <span className="c-lh">{p.numLastHits} / {p.numDenies}<Best on={best.numLastHits === p.numLastHits} /></span>
 
         <span className="c-dm">
-          <b>{number(p.heroDamage)}</b>
+          <b>{number(p.heroDamage)}<Best on={best.heroDamage === p.heroDamage} /></b>
           <span className="bar"><i style={{ width: `${(p.heroDamage / maxDamage) * 100}%` }} /></span>
         </span>
 

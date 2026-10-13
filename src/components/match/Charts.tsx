@@ -6,6 +6,7 @@ import type { MatchTimeline } from '../../api/timeline'
 import type { MatchBoard } from '../../pages/match-model'
 import { fmtK, playerLabel } from '../../pages/match-model'
 import { fmtDuration } from '../../api/formats'
+import { peakAdvantage, turningPoint } from '../../api/timeline'
 import { heroImageUrl } from '../../api/heroes'
 import type { HeroInfo, MatchPlayer } from '../../api/types'
 
@@ -47,7 +48,7 @@ export function MomentumChart({ timeline, durationSeconds }: { timeline: MatchTi
     const x = (t: number) => PAD.l + (Math.min(t, durationSeconds) / Math.max(durationSeconds, 1)) * innerW
     const pts = series.map((p, i) => ({ x: x(p.t), y: scale(values[i]), t: p.t, v: values[i] }))
     const line = smoothPath(pts)
-    const step = durationSeconds > 2400 ? 600 : durationSeconds > 1200 ? 300 : 120
+    const step = durationSeconds > 480 ? 300 : 60
     const ticks: { x: number; label: string }[] = []
     for (let t = 0; t <= durationSeconds; t += step) ticks.push({ x: x(t), label: `${Math.round(t / 60)}` })
     return {
@@ -62,6 +63,31 @@ export function MomentumChart({ timeline, durationSeconds }: { timeline: MatchTi
   }, [timeline, durationSeconds, metric])
 
   const active = hover != null ? points[hover] : null
+
+  /** Ключевые моменты прямо на кривой: Рошан, казармы, максимум перевеса, перелом. */
+  const marks = useMemo(() => {
+    const innerH = H - PAD.t - PAD.b
+    const out: { t: number; label: string; above: boolean }[] = []
+    const peak = peakAdvantage(timeline)
+    if (peak) out.push({ t: peak.t, label: `пик ${fmtK(Math.abs(peak.gold))}`, above: peak.radiant })
+    const turn = turningPoint(timeline)
+    if (turn) out.push({ t: turn.t, label: 'перелом', above: !turn.radiant })
+    for (const r of timeline.roshans) out.push({ t: r.t, label: 'Рошан', above: r.radiant })
+    for (const b of timeline.structures.filter((x) => x.kind === 'barracks')) out.push({ t: b.t, label: 'казармы', above: b.radiant !== false })
+    const seen = new Set<number>()
+    const uniq = out
+      .sort((a, b) => a.t - b.t)
+      .filter((m) => { const k = Math.round(m.t / 60); if (seen.has(k)) return false; seen.add(k); return true })
+      .map((m) => ({ ...m, x: PAD.l + (Math.min(m.t, durationSeconds) / Math.max(durationSeconds, 1)) * (W - PAD.l - PAD.r), row: 0 }))
+    // Метки идут плотной толпой в конце матча: сдвигаем каждую следующую,
+    // если она наступает на предыдущую, а не рисуем кашу из подписей.
+    for (let i = 1; i < uniq.length; i++) {
+      for (let j = 0; j < i; j++) {
+        if (Math.abs(uniq[i].x - uniq[j].x) < 112 && uniq[i].row === uniq[j].row) uniq[i].row += 1
+      }
+    }
+    return uniq.map((m) => ({ ...m, y: zeroY - (m.above ? 26 + m.row * 18 : -26 - m.row * 18) }))
+  }, [timeline, durationSeconds])
 
   return (
     <section className="chart">
@@ -109,6 +135,14 @@ export function MomentumChart({ timeline, durationSeconds }: { timeline: MatchTi
             <text className="tick-text" x={PAD.l - 8} y={H - PAD.b + 4} textAnchor="end">−{fmtK(max)}</text>
             {ticks.map((tick) => (
               <text key={tick.x} className="tick-text" x={tick.x} y={H - PAD.b + 16} textAnchor="middle">{tick.label}′</text>
+            ))}
+
+            {marks.map((m) => (
+              <g key={`${m.t}-${m.label}`}>
+                <line className="mark-stem" x1={m.x} x2={m.x} y1={zeroY} y2={m.y} />
+                <circle className="mark-dot" cx={m.x} cy={zeroY} r="4" />
+                <text className="mark-text" x={m.x} y={m.above ? m.y - 6 : m.y + 12} textAnchor="middle">{m.label}</text>
+              </g>
             ))}
 
             {active && (

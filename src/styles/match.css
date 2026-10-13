@@ -206,6 +206,7 @@
 .c-kda b i { font-style: normal; color: var(--dire-t); }
 .c-kda { display: grid; gap: var(--sp-4); font-size: var(--fs-12); }
 .c-nw { font-size: var(--fs-16); color: var(--gold); }
+.best { display: inline-block; width: 5px; height: 5px; margin-left: var(--sp-4); border-radius: 50%; background: var(--gold); vertical-align: middle; }
 .c-gx { display: grid; gap: var(--sp-4); font-size: var(--fs-14); }
 .c-lh { font-size: var(--fs-16); }
 .c-dm { display: grid; gap: var(--sp-4); font-size: var(--fs-16); }
@@ -227,6 +228,7 @@
 /* --- графики --- */
 
 .chart { margin-top: var(--sp-48); }
+.mbody > .chart:first-child, .sec > .chart:first-child { margin-top: 0; }
 .chart-h { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-16); flex-wrap: wrap; margin-bottom: var(--sp-16); }
 .chart-t { font-family: var(--display); font-weight: 400; font-size: var(--fs-20); line-height: var(--lh-head); }
 .chart-s { font-size: var(--fs-14); color: var(--text-dim); }
@@ -239,6 +241,9 @@
 .area-d { fill: color-mix(in oklab, var(--dire), transparent 75%); }
 .line-r { fill: none; stroke: var(--radiant); stroke-width: 2; }
 .crosshair { stroke: var(--gold); stroke-width: 1; }
+.mark-stem { stroke: var(--line); stroke-width: 1; }
+.mark-dot { fill: var(--gold); }
+.mark-text { fill: var(--text-dim); font-family: var(--ui); font-size: 12px; }
 .cursor-dot { fill: var(--gold); }
 .chart-tip { position: absolute; transform: translate(-50%, -140%); padding: var(--sp-4) var(--sp-8); background: var(--bg-deep); border: 1px solid var(--line); border-radius: var(--r-sm); box-shadow: var(--pop); font-size: var(--fs-12); white-space: nowrap; pointer-events: none; }
 .chart-hover { position: relative; }
@@ -256,6 +261,59 @@
 .hb.d { --tc: var(--dire); }
 .hb-v { text-align: right; font-variant-numeric: tabular-nums; }
 
+/* --- тимфайты --- */
+
+.flist { display: grid; }
+.frow { border-bottom: 1px solid var(--line); }
+.frow.top { background: var(--surface); }
+
+.fbtn {
+  display: grid;
+  grid-template-columns: 24px 96px 72px minmax(0, 1fr) 130px auto 24px;
+  gap: var(--sp-16);
+  align-items: center;
+  width: 100%;
+  min-height: 56px;
+  padding: var(--sp-8) var(--sp-16);
+  text-align: left;
+  transition: background 120ms linear;
+}
+
+.fbtn:hover { background: var(--surface-2); }
+.frow.open .fbtn { background: var(--surface); }
+.frow.open .c-go svg { transform: rotate(180deg); }
+.c-go svg { transition: transform 120ms linear; }
+
+.fr { font-size: var(--fs-16); font-weight: 700; color: var(--text-dim); }
+.frow.top .fr { color: var(--gold); }
+.ft { display: grid; gap: var(--sp-4); font-size: var(--fs-16); font-weight: 600; }
+.ft small { font-size: var(--fs-12); font-weight: 400; color: var(--text-dim); }
+.fs { font-size: var(--fs-16); font-weight: 700; }
+.fs .sep { color: var(--text-dim); margin: 0 var(--sp-4); }
+.fm { font-size: var(--fs-14); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fw { display: grid; gap: var(--sp-4); font-size: var(--fs-16); font-weight: 700; }
+.fw small { font-size: var(--fs-12); font-weight: 400; color: var(--text-dim); }
+.fw em { font-size: var(--fs-12); font-style: italic; color: var(--text-dim); }
+.fw.r { color: var(--radiant-t); }
+.fw.d { color: var(--dire-t); }
+.frow .badge { color: var(--gold); white-space: nowrap; }
+
+.fcols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-24); padding: var(--sp-16) var(--sp-16) var(--sp-24); background: var(--bg-deep); }
+.fcol { display: grid; gap: var(--sp-4); min-width: 0; }
+.fcolh, .fline { display: grid; grid-template-columns: 30px minmax(0, 1fr) 56px 56px 56px; gap: var(--sp-8); align-items: center; font-size: var(--fs-14); }
+.fcolh { color: var(--text-dim); font-size: var(--fs-12); }
+.fline { padding: var(--sp-4) 0; border-top: 1px solid var(--line); }
+.fline img { border-radius: var(--r-sm); }
+.fline.r { --tc: var(--radiant); }
+.fline.d { --tc: var(--dire); }
+.fline.me { background: var(--surface); }
+.fwho { display: grid; min-width: 0; }
+.fwho b { font-size: var(--fs-14); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fwho small { font-size: var(--fs-12); color: var(--text-dim); }
+.fn { text-align: right; font-variant-numeric: tabular-nums; }
+.fn.zero { color: var(--line); }
+.fme { font-size: var(--fs-12); color: var(--gold); }
+
 /* --- таймлайн --- */
 
 .tl { position: relative; height: 120px; margin-top: var(--sp-24); background: var(--surface); border-radius: var(--r-md); }
@@ -265,7 +323,7 @@
 .tl-e.r { --tc: var(--radiant); }
 .tl-e.d { --tc: var(--dire); }
 .tl-e svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
-.tl-t { position: absolute; bottom: var(--sp-4); transform: translateX(-50%); font-size: var(--fs-12); color: var(--text-dim); }
+.tl-t { position: absolute; bottom: var(--sp-4); transform: translateX(-50%); font-size: var(--fs-12); color: var(--text-dim); font-variant-numeric: tabular-nums; }
 
 .feed { display: grid; margin-top: var(--sp-16); }
 .feed-r { display: grid; grid-template-columns: 56px minmax(0, 1fr); gap: var(--sp-16); align-items: center; padding: var(--sp-8) 0; border-bottom: 1px solid var(--line); font-size: var(--fs-14); }
