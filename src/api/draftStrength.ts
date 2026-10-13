@@ -167,9 +167,26 @@ export function evaluateDraft(
     }
     const value = (side: MatchPlayer[]) => {
       const known = side.map(laneIndexOf).filter((x): x is number => x !== null)
+      const base = known.length ? known.reduce((a, b) => a + b, 0) / known.length : null
+      // «потому что таг тим»: эти двое стоят в одном коридоре — если они уже
+      // играли вместе в нашей базе, берём измеренный прирост пары
+      const mates: { lift: number; games: number; text: string }[] = []
+      for (let i = 0; i < side.length; i++) {
+        for (let j = i + 1; j < side.length; j++) {
+          const a = side[i]
+          const b = side[j]
+          const soloA = profile.hero[String(a.heroId)]?.all?.winRate ?? 0.5
+          const soloB = profile.hero[String(b.heroId)]?.all?.winRate ?? 0.5
+          const s = pairSynergy(profile, a.heroId, b.heroId, soloA, soloB)
+          if (!s) continue
+          mates.push({ lift: s.lift, games: s.games, text: `${name(a)} + ${name(b)}: вместе ${s.games} игр в нашей базе, ${s.lift >= 0 ? 'выигрывают' : 'проигрывают'} на ${Math.abs(s.lift * 100).toFixed(0)} п.п. против их же героев поодиночке` })
+        }
+      }
+      const mateLift = mates.length ? mates.reduce((a, m) => a + m.lift, 0) / mates.length : 0
       return {
-        index: known.length ? known.reduce((a, b) => a + b, 0) / known.length : null,
+        index: base === null ? null : base * (1 + 2 * mateLift),
         coverage: side.length ? known.length / side.length : 0,
+        mates,
       }
     }
     const rv = value(r)
@@ -198,7 +215,12 @@ export function evaluateDraft(
       text: expectedSide === 'even'
         ? `по драфту линия равная: ${p}% против ${100 - p}%`
         : `по драфту линию должна была взять ${SIDE[expectedSide]}: ${p}% против ${100 - p}%`,
-      lines: pairLines,
+      lines: [
+        ...pairLines,
+        ...rv.mates.map((m) => m.text),
+        ...dv.mates.map((m) => m.text),
+        ...(rv.mates.length || dv.mates.length ? [] : ['эти пары вместе не играли — комбо не измерено, только сила героев на своих ролях']),
+      ],
     }
 
     // --- чем закончилась именно линия: 0–10 минут из разобранного реплея
