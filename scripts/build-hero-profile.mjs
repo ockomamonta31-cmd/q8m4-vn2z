@@ -16,12 +16,13 @@
 //
 // Запуск: node scripts/build-hero-profile.mjs
 
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const MATCHES = join(ROOT, 'server', 'data', 'matches')
+const DRAFTS = join(ROOT, 'server', 'data', 'drafts')
 const OUT = join(ROOT, 'server', 'data', 'constants', 'hero_profile.json')
 
 const MIN_MATCH = 12 * 60 // матчи короче 12 минут ничего не говорят о драфте
@@ -134,8 +135,10 @@ function add(target, player, won) {
 
 for (const f of files) {
   let match
+  let draft = null
   try {
     match = JSON.parse(readFileSync(join(MATCHES, f), 'utf8'))
+    draft = existsSync(join(DRAFTS, f)) ? JSON.parse(readFileSync(join(DRAFTS, f), 'utf8')) : null
   } catch { skipped++; continue }
   const players = match.players ?? []
   if (players.length !== 10) { skipped++; continue }
@@ -145,12 +148,20 @@ for (const f of files) {
   durationSum += match.durationSeconds
   const won = match.didRadiantWin
 
+  const roleOfDraft = (p, radiant) => draft?.roles?.[`${radiant ? 'r' : 'd'}:${p.heroId}`]?.position ?? 0
+
   for (const radiant of [true, false]) {
-    const side = players
-      .filter((p) => p.isRadiant === radiant)
-      .sort((a, b) => (b.networth - a.networth) || (b.goldPerMinute - a.goldPerMinute))
+    const members = players.filter((p) => p.isRadiant === radiant)
+    // Роль берём из разбора матча (STRATZ lane/position), а не из порядка фарма:
+    // нетворс в катке ставит саппорта выше мидера, и профиль героя начинает
+    // описывать не его роль, а чужую. Если разбора нет у всех пятерых —
+    // остаёмся на порядке фарма, он хотя бы согласован внутри команды.
+    const real = members.every((p) => roleOfDraft(p, radiant) >= 1 && roleOfDraft(p, radiant) <= 5)
+    const side = real
+      ? [...members].sort((a, b) => roleOfDraft(a, radiant) - roleOfDraft(b, radiant))
+      : [...members].sort((a, b) => (b.networth - a.networth) || (b.goldPerMinute - a.goldPerMinute))
     side.forEach((p, i) => {
-      const role = i + 1
+      const role = real ? roleOfDraft(p, radiant) : i + 1
       const byRole = acc.get(p.heroId) ?? acc.set(p.heroId, new Map()).get(p.heroId)
       add(byRole.get(role) ?? byRole.set(role, bucket()).get(role), p, radiant === won)
       const b = base.get(role) ?? base.set(role, bucket()).get(role)
@@ -237,7 +248,7 @@ for (const heroId of Object.keys(kit)) {
 const out = {
   v: 2,
   generated: new Date().toISOString().slice(0, 10),
-  source: 'Собственная база матчей (Steam Web API, нормализация server/index.mjs). Роли — порядок фарма внутри команды.',
+  source: 'Собственная база матчей (Steam Web API, нормализация server/index.mjs). Роли — из разбора матча, где он есть.',
   metrics: METRICS,
   meta: {
     matches: used,
@@ -248,7 +259,7 @@ const out = {
     minPairGames: MIN_PAIR,
     /** средняя длительность: кумулятивные статы пересчитываются на неё */
     avgDurationSeconds: Math.round(durationSum / Math.max(1, used)),
-    roleOf: '1 керри, 2 мид, 3 оффлейн, 4 и 5 саппорты — по нетворсу в команде',
+    roleOf: '1 керри, 2 мид, 3 оффлейн, 4 и 5 саппорты — настоящая роль из разбора матча, а где её нет — порядок фарма в команде',
   },
   hero,
   baseline,

@@ -84,6 +84,8 @@ export type DraftRating = {
   heroes: HeroRating[]
   /** линии взяты из разобранного реплея, а не из порядка фарма */
   realLanes: boolean
+  /** в Draft-режимах контроль спелов не считается — способности не из кита героя */
+  kitOff: boolean
 }
 
 /** Коридор карты: наша лёгкая линия — это их сложная. */
@@ -115,6 +117,13 @@ const laningPhase = (p: MatchPlayer) => p.impactPhases?.find((x) => x.label.star
 const LANE_AXES = ['farm', 'fight', 'support', 'control', 'burst']
 
 /**
+ * В All Draft и Ability Draft способности героя заменены задрафченными, и наш
+ * расчёт контроля по файлам Valve описывает не этот матч. Такую линию считаем
+ * только по фарму, драке и поддержке и говорим об этом прямо.
+ */
+const KIT_MODES_OFF = new Set(['ALL_DRAFT', 'ABILITY_DRAFT'])
+
+/**
  * Чем линия выигрывается до фарма. Числа не максимальные: контроль и урон
  * берутся на тех уровнях умений, которые реально качают к 10-й минуте
  * (измерено по нашей базе), и нормированы на среднее по той же роли.
@@ -127,15 +136,18 @@ export const LANE_SPELLS: { key: string; label: string; detail: string }[] = [
 export function evaluateDraft(
   profile: Profile,
   players: MatchPlayer[],
-  match?: { durationSeconds: number; didRadiantWin: boolean | null },
+  match?: { durationSeconds: number; didRadiantWin: boolean | null; gameMode?: string },
   names?: (heroId: number) => string,
 ): DraftRating | null {
   const radiant = players.filter((p) => p.isRadiant)
   const dire = players.filter((p) => !p.isRadiant)
   if (radiant.length !== 5 || dire.length !== 5) return null
 
+  const kitOff = !!match?.gameMode && KIT_MODES_OFF.has(match.gameMode)
+  const laneAxes = kitOff ? LANE_AXES.filter((a) => a !== 'control' && a !== 'burst') : LANE_AXES
+
   const roles = new Map<MatchPlayer, number>()
-  for (const side of [radiant, dire]) for (const p of side) roles.set(p, roleOf(p, side))
+  for (const side of [radiant, dire]) for (const p of side) roles.set(p, roleOf(p, side, match?.durationSeconds ?? 0))
   const indexes = new Map<MatchPlayer, ReturnType<typeof heroIndex>>()
   for (const p of players) indexes.set(p, heroIndex(profile, p.heroId, roles.get(p)!))
   const name = (p: MatchPlayer) => names?.(p.heroId) ?? `герой #${p.heroId}`
@@ -172,7 +184,7 @@ export function evaluateDraft(
     const laneIndexOf = (p: MatchPlayer) => {
       const idx = indexes.get(p)
       if (!idx) return null
-      const values = LANE_AXES.map((a) => idx.axes[a]).filter((v): v is number => typeof v === 'number')
+      const values = laneAxes.map((a) => idx.axes[a]).filter((v): v is number => typeof v === 'number')
       return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
     }
     const value = (side: MatchPlayer[]) => {
@@ -214,11 +226,14 @@ export function evaluateDraft(
       const list = l.spells.slice(0, 3).map((s) => `${s.title} ${s.control} c (ур. ${s.level.toFixed(1)})`).join(', ')
       return `${name(p)}: ${l.control.toFixed(1)} c дизейбла к 10-й минуте — ${list}`
     }
-    const spellsOnLane = [...r, ...d].map(spellLine).filter((x): x is string => !!x)
-    const noControl = (side: MatchPlayer[]) => !side.some((p) => (laneKitOf(profile, p.heroId)?.control ?? 0) > 0)
-    const bareSide = [
-      ...(r.length && noControl(r) ? [`у ${SIDE.radiant} на этой линии хард-дизейбла нет`] : []),
-      ...(d.length && noControl(d) ? [`у ${SIDE.dire} на этой линии хард-дизейбла нет`] : []),
+    const spellsOnLane = kitOff ? [] : [...r, ...d].map(spellLine).filter((x): x is string => !!x)
+    const noControl = (side: MatchPlayer[]) => side.length > 0 && !side.some((p) => (laneKitOf(profile, p.heroId)?.control ?? 0) > 0)
+    const rBare = !kitOff && noControl(r)
+    const dBare = !kitOff && noControl(d)
+    // «Ни у кого нет дизейбла» — это не объяснение перевеса, а просто тишина.
+    const bareSide = rBare && dBare ? [] : [
+      ...(rBare ? [`у ${SIDE.radiant} на этой линии хард-дизейбла нет`] : []),
+      ...(dBare ? [`у ${SIDE.dire} на этой линии хард-дизейбла нет`] : []),
     ]
 
     // кого ожидали: сравнение пар по профилю, построчно
@@ -241,6 +256,7 @@ export function evaluateDraft(
         ? `по драфту линия равная: ${p}% против ${100 - p}%`
         : `по драфту линию должна была взять ${SIDE[expectedSide]}: ${p}% против ${100 - p}%`,
       lines: [
+        ...(kitOff ? ['режим Draft: способности задрафчены, поэтому контроль спелов не считаем — только фарм, драка и поддержка'] : []),
         ...pairLines,
         ...spellsOnLane.slice(0, 4),
         ...bareSide,
@@ -423,6 +439,7 @@ export function evaluateDraft(
     why,
     heroes,
     realLanes,
+    kitOff,
   }
 }
 

@@ -6,6 +6,7 @@ import type { HeroInfo, MatchPlayer } from '../../api/types'
 import { heroImageUrl } from '../../api/heroes'
 import { ATTR_RU, ATTACK_RU, TAG_ORDER, TAG_RU, getHeroMeta, type HeroMeta } from '../../api/heroMeta'
 import { draftNotes, teamProfile, type TeamProfile } from '../../api/draft'
+import { roleModelStats } from '../../api/roleModel'
 import { type DraftRating, type LaneCall } from '../../api/draftStrength'
 import RoleIcon from '../RoleIcon'
 
@@ -172,16 +173,21 @@ export default function DraftReview({ players, heroMap, rating }: {
         справа то, что стороны нафармили и получили за этот отрезок (добивания, опыт,
         золото), а линию отдаём той стороне, за которой большинство замеров. Слева —
         что обещал драфт: как эти герои на этих ролях стоят такие линии по нашей базе
-        ({rating ? rating.corpus : '…'} матчей) по осям фарма, драки и поддержки плюс
-        контроль и урон способностей. Числа способностей не максимальные: берётся тот
-        уровень умения, который этот герой реально качает к 10-й минуте (по прокачке из
-        наших матчей), поэтому шестисекундный ульт Бейна в линию не попадает — его там
-        просто ещё нет.
-        Числа за весь матч вынесены отдельно и линией не называются.
+        ({rating ? rating.corpus : '…'} матчей) по осям фарма, драки и поддержки
+        {rating?.kitOff
+          ? '. В Draft-режиме способности задрафчены, поэтому контроль спелов сюда не берём.'
+          : '. Контроль и урон спелов считаются не максимальными уровнями, а теми, до которых этот герой реально доходит к 10-й минуте (по прокачке из наших матчей), — шестисекундный ульт Бейна в линию не попадает, его там просто ещё нет.'}
+        {' '}Числа за весь матч вынесены отдельно и линией не называются.
         {rating?.model && (rating.model.lanesMeasured >= 50
           ? ` Предсказание проверено на ${rating.model.lanesMeasured} разобранных линиях — совпало в ${(rating.model.laneAccuracy * 100).toFixed(0)}% случаев.`
           : ` Проверить предсказание линии пока можно только на ${rating?.model ? rating.model.lanesMeasured : 0} разобранных линиях — это капля, выводом не называем.`)}
-        {rating && !rating.realLanes ? ' Линии этого матча взяты из порядка фарма, а не из разобранного реплея.' : ''}
+        {rating && (() => {
+          const known = rating.heroes.filter((h) => h.roleFromReplay).length
+          if (known === rating.heroes.length) return ' Роли всех игроков настоящие — из разобранного реплея или разбора матча.'
+          const pct = (x: number) => Math.round(x * 100)
+          return ` У ${rating.heroes.length - known} игроков роль в данных не указана — она оценена по экономике матча; на нашей размеченной базе модель угадывает роль в ${pct(roleModelStats.accuracy)}% случаев, а линию — в ${pct(roleModelStats.laneAccuracy)}% (простой порядок по нетворсу — ${pct(roleModelStats.farmOrderAccuracy)}%).`
+        })()}
+        {rating && !rating.realLanes ? ' То, кто на какой линии стоит, в этом матче тоже оценка: разобранного реплея с движением по карте нет.' : ''}
       </p>
 
       <div className="dr-block">

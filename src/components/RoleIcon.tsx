@@ -2,6 +2,8 @@
 // и лежащие локально в public/assets/roles/. Никакой подложки, рамки, щита
 // и фона: показываем иконку как есть, размер задаёт вызывающий код.
 
+import { roleModelStats } from '../api/roleModel'
+
 export const ROLE_LABEL: Record<number, string> = {
   1: 'Керри, лёгкая линия',
   2: 'Мид',
@@ -37,10 +39,11 @@ export default function RoleIcon({ position, source, lane, size = 40 }: {
   if (!source || position < 1 || position > 5) return null
 
   const measured = source !== 'stats'
+  const pct = (x: number) => `${Math.round(x * 100)}%`
   const provenance =
     source === 'replay' ? 'определена по движению на карте'
     : source === 'stratz' ? 'определена по разбору реплея (STRATZ)'
-    : 'оценка по экономике матча, может ошибаться'
+    : `оценка по экономике матча: роль угадывается в ${pct(roleModelStats.accuracy)} случаев, линия — в ${pct(roleModelStats.laneAccuracy)} (порядок по нетворсу — ${pct(roleModelStats.farmOrderAccuracy)}). Может ошибаться.`
   const label = `${ROLE_LABEL[position]} · ${provenance}`
 
   return (

@@ -15,7 +15,7 @@ export function useDraftRating(players: MatchPlayer[], match: MatchDetails | nul
       .then((profile) => {
         if (!alive) return
         if (!profile) { setState({ rating: null, failed: true, ready: true }); return }
-        const info = match ? { durationSeconds: match.durationSeconds, didRadiantWin: match.didRadiantWin } : undefined
+        const info = match ? { durationSeconds: match.durationSeconds, didRadiantWin: match.didRadiantWin, gameMode: match.gameMode } : undefined
         setState({ rating: evaluateDraft(profile, players, info, heroName), failed: false, ready: true })
       })
       .catch(() => alive && setState({ rating: null, failed: true, ready: true }))

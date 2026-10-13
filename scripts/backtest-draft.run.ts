@@ -13,24 +13,33 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const PROFILE_PATH = join(ROOT, 'server', 'data', 'constants', 'hero_profile.json')
 const MATCHES = join(ROOT, 'server', 'data', 'matches')
 const REPLAYS = join(ROOT, 'server', 'data', 'replays')
+const DRAFTS = join(ROOT, 'server', 'data', 'drafts')
 
 /**
- * «Чем закончилась линия» берётся из первых 10 минут разобранного реплея,
- * поэтому линии калибруются только на тех матчах, что мы разобрали сами.
+ * Готовим игроков ровно так, как их видит страница матча: первые 10 минут из
+ * разобранного реплея и настоящие роли из разбора матча. Без этого бэктест
+ * мерил бы модель на том, чего в проде почти не бывает, — на пустых позициях.
  */
-function withPhases(match: MatchDetails): MatchDetails['players'] {
+function hydrate(match: MatchDetails): MatchDetails['players'] {
   let replay: { players?: { player_slot: number }[] } | null = null
   try {
     replay = JSON.parse(readFileSync(join(REPLAYS, `${match.id}.json`), 'utf8'))
-  } catch {
-    return match.players
-  }
+  } catch { /* реплея нет */ }
+  let roles: Record<string, { position: number; lane?: string }> = {}
+  try {
+    roles = JSON.parse(readFileSync(join(DRAFTS, `${match.id}.json`), 'utf8')).roles ?? {}
+  } catch { /* разбора нет */ }
   const radiant = match.players.filter((p) => p.isRadiant)
   const dire = match.players.filter((p) => !p.isRadiant)
   return match.players.map((p) => {
     const slot = (p.isRadiant ? 0 : 128) + (p.isRadiant ? radiant : dire).indexOf(p)
     const parsed = replay?.players?.find((x) => Number(x.player_slot) === slot)
-    return { ...p, impactPhases: impactPhases(parsed, match.durationSeconds) }
+    const role = roles[`${p.isRadiant ? 'r' : 'd'}:${p.heroId}`]
+    return {
+      ...p,
+      impactPhases: impactPhases(parsed, match.durationSeconds),
+      ...(role ? { position: role.position, positionSource: 'stratz' as const, lane: role.lane } : {}),
+    }
   })
 }
 
@@ -65,7 +74,7 @@ for (const f of readdirSync(MATCHES)) {
     continue
   }
   if ((match.players ?? []).length !== 10 || match.didRadiantWin === null || match.didRadiantWin === undefined) continue
-  const rating = evaluateDraft(profile, withPhases(match), { durationSeconds: match.durationSeconds, didRadiantWin: match.didRadiantWin })
+  const rating = evaluateDraft(profile, hydrate(match), { durationSeconds: match.durationSeconds, didRadiantWin: match.didRadiantWin, gameMode: match.gameMode })
   if (!rating || !rating.axes.length) continue
   matches += 1
 
