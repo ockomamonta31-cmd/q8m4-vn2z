@@ -87,11 +87,24 @@ export type Matchup = {
   edge: number
 }
 
-const LANE_ORDER = [
-  { lane: 'safelane', label: 'Лёгкая линия' },
-  { lane: 'mid', label: 'Мид' },
-  { lane: 'offlane', label: 'Сложная линия' },
-] as const
+const LANE_ORDER: { key: string; positions: number[]; label: string }[] = [
+  { key: 'safelane', positions: [1, 5], label: 'Лёгкая линия' },
+  { key: 'mid', positions: [2], label: 'Мид' },
+  { key: 'offlane', positions: [3, 4], label: 'Сложная линия' },
+]
+
+/**
+ * Позицию 1–5 реплей выводит из линии (safe → 1 и 5, mid → 2, off → 3 и 4),
+ * поэтому при positionSource === 'replay' она несёт тот же смысл, что и lane.
+ * Поле lane при этом до фронтенда доходит не всегда, так что опираемся на
+ * позицию, а lane оставляем как уточнение.
+ */
+function laneKeyOf(p: MatchPlayer): string | null {
+  if (p.positionSource !== 'replay') return null
+  if (p.lane) return p.lane
+  const group = LANE_ORDER.find((l) => l.positions.includes(p.position))
+  return group ? group.key : null
+}
 
 function groupGaps(rGroup: MatchPlayer[], dGroup: MatchPlayer[], label: string, measured: boolean): Matchup {
   const sum = (g: MatchPlayer[], pick: (p: MatchPlayer) => number) => g.reduce((a, p) => a + pick(p), 0)
@@ -123,14 +136,14 @@ function groupGaps(rGroup: MatchPlayer[], dGroup: MatchPlayer[], label: string, 
  * несуществующие коридоры.
  */
 export function buildMatchups(players: MatchPlayer[]): { matchups: Matchup[]; basis: 'replay' | 'rank' } {
-  const hasLanes = players.some((p) => p.positionSource === 'replay' && p.lane)
+  const hasLanes = players.some((p) => laneKeyOf(p) !== null)
   const radiant = players.filter((p) => p.isRadiant)
   const dire = players.filter((p) => !p.isRadiant)
 
   if (hasLanes) {
-    const matchups = LANE_ORDER.map(({ lane, label }) => {
-      const r = radiant.filter((p) => p.positionSource === 'replay' && p.lane === lane)
-      const d = dire.filter((p) => p.positionSource === 'replay' && p.lane === lane)
+    const matchups = LANE_ORDER.map(({ key, label }) => {
+      const r = radiant.filter((p) => laneKeyOf(p) === key)
+      const d = dire.filter((p) => laneKeyOf(p) === key)
       if (!r.length && !d.length) return null
       return groupGaps(r, d, label, true)
     }).filter(Boolean) as Matchup[]
