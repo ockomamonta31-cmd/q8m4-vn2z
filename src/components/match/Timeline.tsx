@@ -1,10 +1,9 @@
-// Лента событий матча: ось времени с полосами тимфайтов и feed
-// убийств / строений / Рошана. Без реплея секция не показывается.
+// Лента событий матча: горизонтальная ось и feed убийств / строений / Рошана.
+// Без реплея секция не показывается.
 
 import { useMemo, useState } from 'react'
 import type { HeroInfo } from '../../api/types'
 import type { MatchTimeline } from '../../api/timeline'
-import { heroImageUrl } from '../../api/heroes'
 import { fmtDuration } from '../../api/formats'
 import { Icon } from '../Icons'
 
@@ -15,8 +14,6 @@ type FeedItem = {
   side: 'r' | 'd' | ''
   kind: 'kill' | 'tower' | 'barracks' | 'fort' | 'roshan' | 'blood'
   text: string
-  heroId?: number
-  victimId?: number
 }
 
 export default function Timeline({ timeline, heroMap, durationSec }: {
@@ -35,7 +32,6 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
         side: timeline.kills.find((k) => k.t === timeline.firstBlood.t)?.radiant ? 'r' : 'd',
         kind: 'blood',
         text: `Первая кровь — ${heroName(timeline.firstBlood.heroId)}`,
-        heroId: timeline.firstBlood.heroId ?? undefined,
       })
     }
     for (const s of timeline.structures) {
@@ -49,7 +45,6 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
           : s.kind === 'barracks'
             ? `Снесены казармы (${s.tier === 1 ? 'ближнего' : 'дальнего'} боя)${lane}`
             : 'Древний пал',
-        heroId: s.heroId ?? undefined,
       })
     }
     for (const r of timeline.roshans) {
@@ -57,14 +52,7 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
     }
     if (showKills) {
       for (const k of timeline.kills) {
-        items.push({
-          t: k.t,
-          side: k.radiant ? 'r' : 'd',
-          kind: 'kill',
-          text: `${heroName(k.heroId)} убивает ${heroName(k.victimHeroId)}`,
-          heroId: k.heroId,
-          victimId: k.victimHeroId,
-        })
+        items.push({ t: k.t, side: k.radiant ? 'r' : 'd', kind: 'kill', text: `${heroName(k.heroId)} убивает ${heroName(k.victimHeroId)}` })
       }
     }
     return items.sort((a, b) => a.t - b.t)
@@ -78,28 +66,25 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
   }
 
   return (
-    <section className="panel timeline-wrap">
-      <div className="chart-head">
+    <section className="chart">
+      <div className="chart-h">
         <div>
-          <div className="chart-title">Хронология матча</div>
-          <div className="chart-sub tally-row">
-            <span className="tally-cell">{marks.kills} убийств</span>
-            <span className="tally-cell">{marks.structures} строений</span>
-            <span className="tally-cell">{marks.roshans} Рошан</span>
-            <span className="tally-cell">{marks.fights} тимфайтов</span>
+          <div className="chart-t">Хронология матча</div>
+          <div className="chart-s">
+            {marks.kills} убийств · {marks.structures} строений · {marks.roshans} Рошан · {marks.fights} тимфайтов
           </div>
         </div>
-        <div className="tabs" role="group" aria-label="Показ убийств" style={{ margin: 0, padding: 2 }}>
-          <button type="button" className={`tab${!showKills ? ' active' : ''}`} style={{ padding: '5px 12px' }} aria-pressed={!showKills} onClick={() => setShowKills(false)}>
+        <div className="rail" role="group" aria-label="Показ убийств" style={{ height: 40, gap: 'var(--sp-24)' }}>
+          <button type="button" className={`rail-i${!showKills ? ' on' : ''}`} aria-selected={!showKills} onClick={() => setShowKills(false)}>
             Ключевые
           </button>
-          <button type="button" className={`tab${showKills ? ' active' : ''}`} style={{ padding: '5px 12px' }} aria-pressed={showKills} onClick={() => setShowKills(true)}>
+          <button type="button" className={`rail-i${showKills ? ' on' : ''}`} aria-selected={showKills} onClick={() => setShowKills(true)}>
             Все убийства
           </button>
         </div>
       </div>
 
-      <div className="timeline-axis" aria-hidden="true">
+      <div className="tl" aria-hidden="true">
         {timeline.teamfights.map((fight) => (
           <span
             key={fight.index}
@@ -108,57 +93,36 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
               left: `${(fight.t / durationSec) * 100}%`,
               width: `${(Math.max(fight.end - fight.t, 30) / durationSec) * 100}%`,
             }}
-            title={`Тимфайт ${fmtDuration(fight.t)}–${fmtDuration(fight.end)} · ${fight.deaths} смертей`}
           />
         ))}
-        <span className="tl-lane" style={{ top: '46px' }} />
+        <span className="tl-lane" />
         {timeline.structures.map((s, i) => (
           <span
             key={`s${i}`}
-            className={`tl-event ${s.radiant ? 'r' : s.radiant === false ? 'd' : ''}`}
-            style={{ left: `${(s.t / durationSec) * 100}%`, top: s.kind === 'fort' ? 58 : s.kind === 'barracks' ? 40 : 22 }}
+            className={`tl-e ${s.radiant ? 'r' : s.radiant === false ? 'd' : ''}`}
+            style={{ left: `${(s.t / durationSec) * 100}%`, top: s.kind === 'fort' ? '72%' : s.kind === 'barracks' ? '58%' : '34%' }}
             title={`${fmtDuration(s.t)} · ${s.kind === 'tower' ? `башня T${s.tier}` : s.kind === 'barracks' ? 'казарма' : 'древний'}${s.lane ? ` · ${LANE_RU[s.lane]}` : ''} · ${s.radiant ? 'снес Dire' : s.radiant === false ? 'снес Radiant' : 'крипы'}`}
           >
-            {s.kind === 'tower' ? <Icon.Tower size={11} /> : s.kind === 'barracks' ? <Icon.Shield size={11} /> : <Icon.Target size={11} />}
+            {s.kind === 'tower' ? <Icon.Tower size={20} /> : s.kind === 'barracks' ? <Icon.Shield size={20} /> : <Icon.Target size={20} />}
           </span>
         ))}
         {timeline.roshans.map((r, i) => (
           <span
             key={`r${i}`}
-            className={`tl-event ${r.radiant ? 'r' : 'd'}`}
-            style={{ left: `${(r.t / durationSec) * 100}%`, top: 70 }}
+            className={`tl-e ${r.radiant ? 'r' : 'd'}`}
+            style={{ left: `${(r.t / durationSec) * 100}%`, top: '86%' }}
             title={`${fmtDuration(r.t)} · Рошан — ${r.radiant ? 'Radiant' : 'Dire'}`}
           >
-            <Icon.Roshan size={11} />
+            <Icon.Roshan size={20} />
           </span>
         ))}
       </div>
 
       <div className="feed" role="list">
         {feed.map((item, i) => (
-          <div className="feed-row" role="listitem" key={`${item.t}-${i}`}>
-            <span className="feed-time">{fmtDuration(item.t)}</span>
-            <span className="feed-who left">
-              {item.side === 'r' && item.heroId && heroMap.get(item.heroId) && (
-                <img src={heroImageUrl(heroMap.get(item.heroId)!.shortName)} alt="" loading="lazy" width={26} height={18} />
-              )}
-              {item.side === 'r' && item.heroId && <span>{heroName(item.heroId)}</span>}
-            </span>
-            <span className={`feed-mark ${item.kind === 'roshan' || item.kind === 'fort' || item.kind === 'blood' ? 'milestone' : ''} ${item.side}`}>
-              {item.kind === 'kill' ? <Icon.Sword size={12} />
-                : item.kind === 'roshan' ? <Icon.Roshan size={12} />
-                : item.kind === 'blood' ? <Icon.Blood size={12} />
-                : item.kind === 'tower' ? <Icon.Tower size={12} />
-                : item.kind === 'fort' ? <Icon.Target size={12} />
-                : <Icon.Shield size={12} />}
-              {item.text}
-            </span>
-            <span className="feed-who right">
-              {item.side === 'd' && item.heroId && heroMap.get(item.heroId) && (
-                <img src={heroImageUrl(heroMap.get(item.heroId)!.shortName)} alt="" loading="lazy" width={26} height={18} />
-              )}
-              {item.side === 'd' && item.heroId && <span>{heroName(item.heroId)}</span>}
-            </span>
+          <div className="feed-r" role="listitem" key={`${item.t}-${i}`}>
+            <time>{fmtDuration(item.t)}</time>
+            <span className={item.side === 'r' ? 'pos' : item.side === 'd' ? 'neg' : 'dim'}>{item.text}</span>
           </div>
         ))}
       </div>

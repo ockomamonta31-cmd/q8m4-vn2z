@@ -95,7 +95,7 @@ export default function PositionIcon({
 
   return (
     <svg
-      className={`position-icon position-icon-${position}${source === 'stats' ? ' position-icon-estimated' : ''}`}
+      className={`role-g role-${position}${source === "stats" ? " est" : ""}`}
       viewBox={`0 0 ${GRID} ${GRID}`}
       width={size}
       height={size}

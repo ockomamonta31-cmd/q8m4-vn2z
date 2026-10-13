@@ -1,6 +1,6 @@
+import { Link } from 'react-router-dom'
 import type { Peer } from '../api/types'
 import { avatarImageUrl } from '../api/heroes'
-import { Link } from 'react-router-dom'
 import { fmtWinrate, winrate } from '../api/formats'
 import { EmptyState } from './States'
 
@@ -14,31 +14,18 @@ export default function PeersList({ peers }: { peers: Peer[] }) {
     )
   }
   return (
-    <div className="peer-list">
+    <div className="plist">
       {peers.map((p) => {
-        const losses = p.withMatchCount - p.withWinCount
         const wr = winrate(p.withWinCount, p.withMatchCount)
         return (
-          <Link key={p.steamAccountId} className="peer-row" to={`/player/${p.steamAccountId}`}>
-            <img className="peer-avatar" src={avatarImageUrl(p.avatar)} alt="" loading="lazy" />
-            <div className="peer-main">
-              <div className="peer-name" title={p.name}>{p.name}</div>
-              <div className="peer-stats">
-                <span>вместе <b>{p.withMatchCount}</b></span>
-                {p.againstMatchCount > 0 && <span>против <b>{p.againstMatchCount}</b></span>}
-                {p.againstMatchCount > 0 && <span>против них <b>{fmtWinrate(p.againstWinCount, p.againstMatchCount)}</b></span>}
-              </div>
-            </div>
-            <div className="peer-side">
-              <b>{fmtWinrate(p.withWinCount, p.withMatchCount)}</b>
-              <span
-                className="peer-split"
-                role="img"
-                aria-label={`С этим игроком: ${p.withWinCount} побед и ${losses} поражений, винрейт ${wr.toFixed(1)}%`}
-              >
-                <i style={{ width: `${wr}%` }} />
-              </span>
-            </div>
+          <Link key={p.steamAccountId} className="prow" to={`/player/${p.steamAccountId}`}>
+            <img src={avatarImageUrl(p.avatar)} alt="" loading="lazy" width={40} height={40} />
+            <span title={p.name}>{p.name}</span>
+            <span className="dim t14">
+              вместе {p.withMatchCount}
+              {p.againstMatchCount > 0 ? ` · против ${p.againstMatchCount}` : ''}
+            </span>
+            <span className={wr >= 50 ? 'pos' : 'neg'}>{fmtWinrate(p.withWinCount, p.withMatchCount)}</span>
           </Link>
         )
       })}

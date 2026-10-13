@@ -1,9 +1,16 @@
+import { useState } from 'react'
 import type { HeroInfo, HeroStat } from '../api/types'
 import { heroImageUrl } from '../api/heroes'
 import { fmtWinrate, winrate } from '../api/formats'
 import { EmptyState } from './States'
 
-export default function HeroesTable({ stats, heroMap, compact = false }: { stats: HeroStat[]; heroMap: Map<number, HeroInfo>; compact?: boolean }) {
+type Sort = 'matches' | 'wr'
+
+/** Сетка героев: портрет, матчи, винрейт цветом и полоска. Сортировка — по
+ *  матчам или по винрейту, других порядков здесь нет. */
+export default function HeroesTable({ stats, heroMap }: { stats: HeroStat[]; heroMap: Map<number, HeroInfo> }) {
+  const [sort, setSort] = useState<Sort>('matches')
+
   if (stats.length === 0) {
     return (
       <EmptyState title="Героев в истории нет">
@@ -11,50 +18,44 @@ export default function HeroesTable({ stats, heroMap, compact = false }: { stats
       </EmptyState>
     )
   }
+
+  const rows = [...stats].sort((a, b) =>
+    sort === 'matches' ? b.matchCount - a.matchCount : winrate(b.winCount, b.matchCount) - winrate(a.winCount, a.matchCount),
+  )
+
   return (
-    <div className={`table-wrap table-heroes${compact ? ' table-compact' : ''}`}>
-      <table className="table">
-        <thead>
-          <tr>
-            <th className="col-hero">Герой</th>
-            <th className="num">Матчи</th>
-            {!compact && <th className="num">Победы</th>}
-            {!compact && <th className="num">Поражения</th>}
-            <th>{compact ? 'WR' : 'Винрейт'}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {stats.map((s) => {
-            const hero = heroMap.get(s.heroId)
-            const losses = s.matchCount - s.winCount
-            const wr = winrate(s.winCount, s.matchCount)
-            const side = wr >= 50 ? 'hi' : 'lo'
-            return (
-              <tr key={s.heroId}>
-                <td>
-                  <div className="hero-cell">
-                    <span className="hero-portrait">
-                      {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
-                    </span>
-                    <span className="hero-name" title={hero?.name}>{hero?.name ?? `герой #${s.heroId}`}</span>
-                  </div>
-                </td>
-                <td className="num" data-label="матчей">{s.matchCount}</td>
-                {!compact && <td className="num green" data-label="побед">{s.winCount}</td>}
-                {!compact && <td className="num red" data-label="поражений">{losses}</td>}
-                <td data-label="винрейт">
-                  <span className="wr-cell">
-                    <b className={side}>{fmtWinrate(s.winCount, s.matchCount)}</b>
-                    <span className="wr-bar" role="img" aria-label={`${s.winCount} побед и ${losses} поражений`}>
-                      <i className={side} style={{ width: `${wr}%` }} />
-                    </span>
-                  </span>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
-    </div>
+    <>
+      <div className="rail" role="group" aria-label="Сортировка героев" style={{ height: 40, gap: 'var(--sp-24)', marginBottom: 'var(--sp-16)' }}>
+        <button type="button" className={`rail-i${sort === 'matches' ? ' on' : ''}`} aria-selected={sort === 'matches'} onClick={() => setSort('matches')}>
+          По матчам
+        </button>
+        <button type="button" className={`rail-i${sort === 'wr' ? ' on' : ''}`} aria-selected={sort === 'wr'} onClick={() => setSort('wr')}>
+          По винрейту
+        </button>
+      </div>
+
+      <div className="hgrid">
+        {rows.map((s) => {
+          const hero = heroMap.get(s.heroId)
+          const wr = winrate(s.winCount, s.matchCount)
+          return (
+            <div className="hcard" key={s.heroId}>
+              <span className={`port ${wr >= 50 ? 'r' : 'd'}`}>
+                {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+              </span>
+              <b title={hero?.name}>{hero?.name ?? `герой #${s.heroId}`}</b>
+              <div className="hcard-r">
+                <span>{s.matchCount} матчей</span>
+                <span className={wr >= 50 ? 'pos' : 'neg'}>{fmtWinrate(s.winCount, s.matchCount)}</span>
+              </div>
+              <span className="split" role="img" aria-label={`${s.winCount} побед и ${s.matchCount - s.winCount} поражений`}>
+                <i className="w" style={{ width: `${wr}%` }} />
+                <i className="l" style={{ width: `${100 - wr}%` }} />
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </>
   )
 }

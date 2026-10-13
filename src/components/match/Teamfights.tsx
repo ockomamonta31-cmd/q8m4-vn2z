@@ -53,50 +53,50 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
   const hasLines = fights.some((f) => f.lines?.length)
 
   return (
-    <section className="panel fights">
-      <div className="chart-head">
+    <section className="chart">
+      <div className="chart-h">
         <div>
-          <div className="chart-title">Тимфайты по важности</div>
-          <div className="chart-sub">
+          <div className="chart-t">Тимфайты по важности</div>
+          <div className="chart-s">
             {hasLines
               ? 'Отсортированы по золоту, которое стороны унесли из возни, — оно сходится со строками игроков. Нажми на драку — покажет вклад каждого.'
               : `${fights.length} драк от трёх смертей. Пересобери реплей, чтобы добавить вклад каждого игрока.`}
           </div>
         </div>
-        <div className="chart-legend">
-          <span className="legend-item"><i style={{ background: 'var(--radiant)' }} />Radiant</span>
-          <span className="legend-item"><i style={{ background: 'var(--dire)' }} />Dire</span>
+        <div className="legend">
+          <span className=""><i style={{ background: 'var(--radiant)' }} />Radiant</span>
+          <span className=""><i style={{ background: 'var(--dire)' }} />Dire</span>
         </div>
       </div>
 
-      <ol className="fight-list">
+      <ol className="flist">
         {fights.map((fight, rank) => {
           const expanded = open === fight.index
           const decisive = rank === 0
           const side = fight.winner === 'even' ? null : fight.winner === 'radiant' ? 'r' : 'd'
           return (
-            <li key={fight.index} className={`fight${expanded ? ' open' : ''}${decisive ? ' decisive' : ''}`}>
+            <li key={fight.index} className={`frow${expanded ? ' open' : ''}${decisive ? ' top' : ''}`}>
               <button
                 type="button"
-                className="fight-row"
+                className="fbtn"
                 aria-expanded={expanded}
                 onClick={() => setOpen(expanded ? null : fight.index)}
               >
-                <span className="fight-rank">{rank + 1}</span>
-                <span className="fight-time">
+                <span className="fr">{rank + 1}</span>
+                <span className="ft">
                   {fmtDuration(fight.t)}
                   <small>{fightLength(fight.end - fight.t)}</small>
                 </span>
-                <span className="fight-score">
-                  <b className="green">{fight.radiantKills}</b>
+                <span className="fs">
+                  <b className="pos">{fight.radiantKills}</b>
                   <span className="sep">:</span>
-                  <b className="red">{fight.direKills}</b>
+                  <b className="neg">{fight.direKills}</b>
                 </span>
-                <span className="fight-meta">
+                <span className="fm">
                   {plural(fight.deaths, 'смерть', 'смерти', 'смертей')}
                   {fight.buybacks ? ` · ${plural(fight.buybacks, 'байбек', 'байбека', 'байбеков')}` : ''}
                 </span>
-                <span className={`fight-swing ${side ?? ''}`}>
+                <span className={`fw ${side ?? ''}`}>
                   {fight.lines?.length
                     ? `${fight.fightGold >= 0 ? '+' : '−'}${fmtK(Math.abs(fight.fightGold))}`
                     : `${fight.deaths} ×`}
@@ -107,15 +107,15 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
                     </em>
                   )}
                 </span>
-                {decisive && <span className="fight-tag">решающая</span>}
-                <Icon.Chevron size={12} className="fight-caret" />
+                {decisive && <span className="badge">решающая</span>}
+                <Icon.Chevron size={12} className="c-go" />
               </button>
 
               {expanded && fight.lines?.length ? (
-                <div className="fight-lines">
+                <div className="fcols">
                   {[true, false].map((radiant) => (
-                    <div className="fight-col" key={radiant ? 'r' : 'd'}>
-                      <div className="fight-cols-head">
+                    <div className="fcol" key={radiant ? 'r' : 'd'}>
+                      <div className="fcolh">
                         <span />
                         <span />
                         <span title="Урон по героям в драке">урон</span>
@@ -129,18 +129,18 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
                           const person = who.get(l.slot)
                           const hero = person ? heroMap.get(person.heroId) : undefined
                           return (
-                            <div className={`fight-line ${radiant ? 'r' : 'd'}${l.slot === meSlot ? ' me' : ''}`} key={l.slot}>
+                            <div className={`fline ${radiant ? 'r' : 'd'}${l.slot === meSlot ? ' me' : ''}`} key={l.slot}>
                               {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" width={30} height={20} />}
-                              <span className="fight-who">
+                              <span className="fwho">
                                 <b>{person?.name ?? `слот ${l.slot}`}</b>
                                 <small>{l.kills}/{l.deaths}{l.buybacks ? ' · байбек' : ''}</small>
                               </span>
-                              <span className="fight-num">{l.damage ? fmtK(l.damage) : '—'}</span>
-                              <span className={`fight-num${l.healing ? '' : ' zero'}`}>{l.healing ? fmtK(l.healing) : '—'}</span>
-                              <span className={`fight-num ${l.gold >= 0 ? 'green' : 'red'}`}>
+                              <span className="fn">{l.damage ? fmtK(l.damage) : '—'}</span>
+                              <span className={`fn${l.healing ? '' : ' zero'}`}>{l.healing ? fmtK(l.healing) : '—'}</span>
+                              <span className={`fn ${l.gold >= 0 ? 'pos' : 'neg'}`}>
                                 {l.gold >= 0 ? '+' : '−'}{fmtK(Math.abs(l.gold))}
                               </span>
-                              {l.slot === meSlot && <span className="fight-me">ты</span>}
+                              {l.slot === meSlot && <span className="fme">ты</span>}
                             </div>
                           )
                         })}

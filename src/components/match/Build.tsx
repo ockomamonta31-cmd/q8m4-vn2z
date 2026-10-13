@@ -38,15 +38,13 @@ export function clock(seconds: number) {
 }
 
 export function ItemSlot({ id, itemMap, cls }: { id: number | null; itemMap: Map<number, ItemInfo>; cls?: string }) {
-  if (!id) return <span className={`item-slot empty${cls ? ` ${cls}` : ''}`} />
+  if (!id) return <span className={`slot empty${cls ? ` ${cls}` : ''}`} />
   const info = itemMap.get(id)
   return (
-    <span className={`item-slot${cls ? ` ${cls}` : ''}`} title={info ? info.name : `Предмет #${id}`}>
+    <span className={`slot${cls ? ` ${cls}` : ''}`} title={info ? info.name : `Предмет #${id}`}>
       {info?.shortName ? (
-        <img src={itemImageUrl(info.shortName)} alt={info.name} loading="lazy" width={29} height={23} />
-      ) : (
-        <span className="item-placeholder">?</span>
-      )}
+        <img src={itemImageUrl(info.shortName)} alt={info.name} loading="lazy" />
+      ) : null}
     </span>
   )
 }
@@ -66,48 +64,45 @@ export function BuildTimeline({ upgrades, heroId }: { upgrades: MatchPlayer['abi
     talent ? 'T' : ['Q', 'W', 'E', 'D', 'F', 'R'][Math.max(0, skillOrder.indexOf(ability))] ?? '•'
 
   return (
-    <section className="build">
-      <div className="build-head">
-        <strong>Раскачка</strong>
-        <span>{upgrades.length} очков · навыки и таланты</span>
+    <section className="bld">
+      <div className="bld-h">
+        <b>Раскачка</b>
+        <span className="dim">{upgrades.length} очков</span>
       </div>
-      <div className="build-body">
-        <div className="skill-legend">
-          {skills.map((id) => {
-            const info = book[String(id)]
-            return (
-              <span key={id} title={info?.name ?? `Способность ${id}`}>
-                <b>{key(id, false)}</b>
-                {info?.img && <img src={`https://cdn.steamstatic.com${info.img}`} alt="" loading="lazy" width={18} height={18} />}
-                {info?.name ?? `Способность ${id}`}
-              </span>
-            )
-          })}
-          {taken.some((u) => u.talent) && <span><b>T</b>Талант</span>}
-        </div>
-        <div className="skill-track">
-          {taken.map((u, i) => (
-            <span
-              className={`skill-cell${u.talent ? ' talent' : ''}`}
-              key={`${u.level}-${u.ability}-${i}`}
-              title={`${u.info?.name ?? `Способность ${u.ability}`} · уровень ${u.level} · ${clock(u.time)}`}
-            >
-              {u.info?.img ? <img src={`https://cdn.steamstatic.com${u.info.img}`} alt={u.info?.name ?? ''} loading="lazy" width={26} height={26} /> : null}
-              <i>{u.level}</i>
-              <b>{key(u.ability, u.talent)}</b>
+      <div className="bld-l">
+        {skills.map((id) => {
+          const info = book[String(id)]
+          return (
+            <span key={id} title={info?.name ?? `Способность ${id}`}>
+              <b className="gld">{key(id, false)}</b>
+              {info?.img && <img src={`https://cdn.steamstatic.com${info.img}`} alt="" loading="lazy" width={18} height={18} />}
+              {info?.name ?? `Способность ${id}`}
             </span>
-          ))}
-        </div>
-        <div className="build-note">Плитка показывает способность, уровень и время выбора.</div>
+          )
+        })}
+        {taken.some((u) => u.talent) && <span><b className="gld">T</b>Талант</span>}
+      </div>
+      <div className="track">
+        {taken.map((u, i) => (
+          <span
+            className={`cell${u.talent ? ' tal' : ''}`}
+            key={`${u.level}-${u.ability}-${i}`}
+            title={`${u.info?.name ?? `Способность ${u.ability}`} · уровень ${u.level} · ${clock(u.time)}`}
+          >
+            {u.info?.img ? <img src={`https://cdn.steamstatic.com${u.info.img}`} alt={u.info?.name ?? ''} loading="lazy" /> : null}
+            <i>{u.level}</i>
+          </span>
+        ))}
       </div>
     </section>
   )
 }
+
 export function PurchaseTimeline({ events, itemMap }: { events: MatchPlayer['purchaseEvents']; itemMap: Map<number, ItemInfo> }) {
   const empty = (text: string) => (
-    <section className="build">
-      <div className="build-head"><strong>Покупки</strong></div>
-      <div className="build-empty">{text}</div>
+    <section className="bld">
+      <div className="bld-h"><b>Покупки</b></div>
+      <p className="dim t14">{text}</p>
     </section>
   )
   if (events == null) return empty('Реплей этого матча ещё не разобран — таймлайн покупок появится после парсинга.')
@@ -115,23 +110,21 @@ export function PurchaseTimeline({ events, itemMap }: { events: MatchPlayer['pur
 
   const sorted = [...events].sort((a, b) => a.time - b.time)
   return (
-    <section className="build">
-      <div className="build-head">
-        <strong>Покупки</strong>
-        <span>{events.length} событий · от {clock(sorted[0].time)} до {clock(sorted[sorted.length - 1].time)}</span>
+    <section className="bld">
+      <div className="bld-h">
+        <b>Покупки</b>
+        <span className="dim">{events.length} событий · с {clock(sorted[0].time)} по {clock(sorted[sorted.length - 1].time)}</span>
       </div>
-      <div className="build-body">
-        <div className="buy-track">
-          {sorted.map((e, i) => {
-            const item = itemMap.get(e.itemId)
-            return (
-              <span className="buy" key={`${e.time}-${e.itemId}-${i}`} title={`${item?.name ?? `Предмет #${e.itemId}`} · ${clock(e.time)}`}>
-                {item?.shortName ? <img src={itemImageUrl(item.shortName)} alt={item.name} loading="lazy" width={29} height={29} /> : <span className="item-placeholder">?</span>}
-                <small className={e.time < 60 ? 'early' : undefined}>{clock(e.time)}</small>
-              </span>
-            )
-          })}
-        </div>
+      <div className="track">
+        {sorted.map((e, i) => {
+          const item = itemMap.get(e.itemId)
+          return (
+            <span className="cell buy" key={`${e.time}-${e.itemId}-${i}`} title={`${item?.name ?? `Предмет #${e.itemId}`} · ${clock(e.time)}`}>
+              {item?.shortName ? <img src={itemImageUrl(item.shortName)} alt={item.name} loading="lazy" /> : null}
+              <i>{clock(e.time)}</i>
+            </span>
+          )
+        })}
       </div>
     </section>
   )
@@ -141,33 +134,26 @@ export function ImpactPanel({ player, durationSec, score }: { player: MatchPlaye
   const details = personalImpactBreakdown({ ...player, position: 0 }, durationSec, null)
   const groups = ['Бой', 'Фарм', 'Урон и объекты']
   const phases = player.impactPhases ?? []
-  const columns = ['K / D', 'LH', 'XP', 'Нетворт', 'Урон героям', 'Башням', 'Золото']
+  const columns = ['K / D', 'LH', 'XP', 'Нетворс', 'Урон героям', 'Башням', 'Золото']
 
   return (
-    <section className="impact-panel" aria-label="Разбор оценки">
-      <header className="impact-head">
-        <h3>Почему {signed(score.value)}</h3>
-        <p>Сумма факторов равна оценке · сравнение с базлайном того же уровня</p>
-      </header>
-
-      <div className="factor-groups">
+    <section className="bld">
+      <div className="bld-h">
+        <b>Почему {signed(score.value)}</b>
+        <span className="dim">сумма факторов равна оценке</span>
+      </div>
+      <div className="impd">
         {groups.map((group) => {
           const factors = details?.factors.filter((factor) => factor.section === group) ?? []
           if (!factors.length) return null
           const groupScore = factors.reduce((sum, factor) => sum + factor.contribution, 0)
           return (
-            <div className="factor-group" key={group}>
-              <div className="factor-group-head">
-                <b>{group}</b>
-                <span className={groupScore >= 0 ? 'green' : 'red'}>{signed(groupScore)}</span>
-              </div>
+            <div key={group}>
+              <div className="det-r"><b>{group}</b><span className={groupScore >= 0 ? 'pos' : 'neg'}>{signed(groupScore)}</span></div>
               {factors.map((factor) => (
-                <div className="factor" key={factor.label}>
-                  <span className="factor-name">
-                    {factor.label}
-                    <small>факт {number(factor.actual)} · обычно {number(factor.baseline)}</small>
-                  </span>
-                  <span className={`factor-score${factor.contribution >= 0 ? ' pos' : ' neg'}`}>{signed(factor.contribution)}</span>
+                <div className="det-r" key={factor.label}>
+                  <span>{factor.label} <span className="dim t12">факт {number(factor.actual)} · обычно {number(factor.baseline)}</span></span>
+                  <b className={factor.contribution >= 0 ? 'pos' : 'neg'}>{signed(factor.contribution)}</b>
                 </div>
               ))}
             </div>
@@ -175,30 +161,19 @@ export function ImpactPanel({ player, durationSec, score }: { player: MatchPlaye
         })}
       </div>
 
-      <div className="phase-board">
-        <div className="phase phase-head">
-          <b>Этап</b>
-          {columns.map((label, i) => <span key={label} className={i >= 4 ? 'phase-extra' : undefined}>{label}</span>)}
+      {phases.length > 0 && (
+        <div className="impd" style={{ marginTop: 'var(--sp-16)' }}>
+          <div className="det-r"><b>Этап</b><span>{columns.join(' · ')}</span></div>
+          {phases.map((phase) => (
+            <div className="det-r" key={phase.label}>
+              <b>{phase.label}</b>
+              <span className="t14">
+                {phase.kills}/{phase.deaths} · +{number(phase.lastHits)} LH · +{number(phase.experience)} XP · +{number(phase.networth)} · +{number(phase.heroDamage)} · +{number(phase.towerDamage)} · +{number(phase.gold)} золота
+              </span>
+            </div>
+          ))}
         </div>
-        {phases.length ? phases.map((phase) => (
-          <div className="phase" key={phase.label}>
-            <b>{phase.label}</b>
-            <span>{phase.kills}/{phase.deaths}</span>
-            <span>+{number(phase.lastHits)}</span>
-            <span>+{number(phase.experience)}</span>
-            <span className="phase-extra">+{number(phase.networth)}</span>
-            <span className="phase-extra">+{number(phase.heroDamage)}</span>
-            <span className="phase-extra">+{number(phase.towerDamage)}</span>
-            <span>+{number(phase.gold)}</span>
-          </div>
-        )) : (
-          <div className="phase-empty">Событий реплея для разбивки по времени ещё нет — разбери матч по итоговым статам выше.</div>
-        )}
-      </div>
-
-      <div className="impact-foot">
-        Этапы — из реплея. Оценку считает по матчу целиком, чтобы сравнения между играми оставались сопоставимыми.
-      </div>
+      )}
     </section>
   )
 }

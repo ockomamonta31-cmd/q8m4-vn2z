@@ -15,7 +15,6 @@ import { TabBar } from '../components/primitives'
 import { Icon } from '../components/Icons'
 import HeroPlate from '../components/match/HeroPlate'
 import Insights from '../components/match/Insights'
-import PowerSpine from '../components/match/PowerSpine'
 import Rosters from '../components/match/Roster'
 import Draft from '../components/match/Draft'
 import TimelinePanel from '../components/match/Timeline'
@@ -88,24 +87,20 @@ export default function MatchPage() {
     return () => cancelAnimationFrame(raf)
   }, [loading, error, match])
 
-  if (loading) return <PageSkeleton rows={5} />
+  if (loading) return <div className="wrap"><PageSkeleton rows={5} /></div>
 
   if (error || !match || !board) {
     return (
-      <Notice kind="error" title={error ? 'Матч не загрузился' : 'Данные не получены'}>
-        {error ?? 'Ответ пришёл пустым.'}
-        <p>Матч мог быть скрыт или удалён. Проверь ID — и открой другой из истории профиля.</p>
-        <div className="notice-actions">
-          <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>
-            <Icon.Timeline size={16} />
-            Повторить
-          </button>
-          <a className="btn btn-ghost" href="/">
-            <Icon.ArrowLeft size={16} />
-            На главную
-          </a>
-        </div>
-      </Notice>
+      <div className="wrap">
+        <Notice kind="error" title="Матч не найден">
+          {error ?? 'Ответ пришёл пустым.'}
+          <p>Матч мог быть скрыт или удалён. Проверь ID — и открой другой из истории профиля.</p>
+          <div className="note-a">
+            <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>Повторить</button>
+            <a className="btn btn-q" href="/">На главную</a>
+          </div>
+        </Notice>
+      </div>
     )
   }
 
@@ -113,36 +108,35 @@ export default function MatchPage() {
   const meSlot = meId != null ? slotOfPlayer(match, meId) : null
   const hasEvents = Boolean(timeline && (timeline.structures.length || timeline.kills.length || timeline.roshans.length))
   const tabs = [
-    { id: 'overview' as const, label: 'Обзор', icon: <Icon.Spark size={15} /> },
-    { id: 'roster' as const, label: 'Игроки', icon: <Icon.Roster size={15} /> },
-    { id: 'charts' as const, label: 'Графики', icon: <Icon.Chart size={15} />, disabled: !timeline, hint: timeline ? undefined : 'Реплей ещё не разобран — кривые преимущества нет что строить' },
-    { id: 'timeline' as const, label: 'Таймлайн', icon: <Icon.Timeline size={15} />, disabled: !hasEvents, hint: hasEvents ? undefined : 'Событий реплея нет' },
-    { id: 'draft' as const, label: 'Драфт', icon: <Icon.Draft size={15} />, disabled: !match.picksBans.length },
+    { id: 'overview' as const, label: 'Обзор' },
+    { id: 'roster' as const, label: 'Игроки' },
+    { id: 'charts' as const, label: 'Графики', disabled: !timeline, hint: timeline ? undefined : 'Реплей ещё не разобран — кривой преимущества нет' },
+    { id: 'timeline' as const, label: 'Таймлайн', disabled: !hasEvents, hint: hasEvents ? undefined : 'Событий реплея нет' },
+    { id: 'draft' as const, label: 'Драфт', disabled: !match.picksBans.length },
   ]
 
   return (
-    <div className={`match${ready ? ' ready' : ''}`}>
-      <div className="stage-1">
+    <div className="mpage">
+      <div>
         <HeroPlate match={match} board={board} timeline={timeline} heroMap={heroMap} />
       </div>
 
-      <div className="stage-2">
-        <TabBar items={tabs} value={tab} onChange={setTab} className="subnav" />
+      <div>
+        <div className="mrail">
+          <TabBar items={tabs} value={tab} onChange={setTab} />
+        </div>
       </div>
 
-      <div className="stage-3">
+      <div className="mbody">
       {tab === 'overview' && (
-        <div className="tab-body" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
+        <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
           <Insights items={insights} />
 
-          {timeline && (
-            <PowerSpine timeline={timeline} durationSeconds={match.durationSeconds} />
-          )}
-
-          <div className="chart-grid">
+          <div className="sec">
+            {timeline && <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />}
             <CompareBars board={board} />
             <PlayerBars
-              title="Нетворт игроков"
+              title="Нетворс игроков"
               sub="Итоговое состояние на конец матча"
               players={allPlayers}
               pick={(p) => p.networth}
@@ -152,64 +146,64 @@ export default function MatchPage() {
           </div>
 
           {timeline && (
-            <div className="section">
+            <div className="sec">
               <Teamfights timeline={timeline} heroMap={heroMap} match={match} meSlot={meSlot} limit={3} />
             </div>
           )}
 
-          <div className="section">
-            <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
-          </div>
+          <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
         </div>
       )}
 
       {tab === 'roster' && (
-        <div className="tab-body" role="tabpanel" id="panel-roster" aria-labelledby="tab-roster">
+        <div role="tabpanel" id="panel-roster" aria-labelledby="tab-roster">
           <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
         </div>
       )}
 
       {tab === 'charts' && timeline && (
-        <div className="tab-body" role="tabpanel" id="panel-charts" aria-labelledby="tab-charts">
-          <div className="rosters">
-            <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />
+        <div role="tabpanel" id="panel-charts" aria-labelledby="tab-charts">
+          <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />
+          <div className="sec">
             <CompareBars board={board} />
-            <div className="chart-grid">
-              <PlayerBars
-                title="Урон по героям"
-                sub="Сырой урон без поправки на время матча"
-                players={allPlayers}
-                pick={(p) => p.heroDamage}
-                heroMap={heroMap}
-                format={(n) => n.toLocaleString('ru-RU')}
-              />
-              <PlayerBars
-                title="Лечение"
-                sub="Кто держал команду на плаву"
-                players={allPlayers}
-                pick={(p) => p.heroHealing}
-                heroMap={heroMap}
-                format={(n) => n.toLocaleString('ru-RU')}
-              />
-            </div>
-            <div className="chart-grid">
-              <PlayerBars
-                title="Золото в минуту"
-                sub="Эффективность фарма"
-                players={allPlayers}
-                pick={(p) => p.goldPerMinute}
-                heroMap={heroMap}
-                format={(n) => String(n)}
-              />
-              <PlayerBars
-                title="Опыт в минуту"
-                sub="Скорость набора уровней"
-                players={allPlayers}
-                pick={(p) => p.experiencePerMinute}
-                heroMap={heroMap}
-                format={(n) => String(n)}
-              />
-            </div>
+          </div>
+          <div className="sec">
+            <PlayerBars
+              title="Урон по героям"
+              sub="Сырой урон без поправки на время матча"
+              players={allPlayers}
+              pick={(p) => p.heroDamage}
+              heroMap={heroMap}
+              format={(n) => n.toLocaleString('ru-RU')}
+            />
+            <PlayerBars
+              title="Лечение"
+              sub="Кто держал команду на плаву"
+              players={allPlayers}
+              pick={(p) => p.heroHealing}
+              heroMap={heroMap}
+              format={(n) => n.toLocaleString('ru-RU')}
+            />
+          </div>
+          <div className="sec">
+            <PlayerBars
+              title="Золото в минуту"
+              sub="Эффективность фарма"
+              players={allPlayers}
+              pick={(p) => p.goldPerMinute}
+              heroMap={heroMap}
+              format={(n) => String(n)}
+            />
+            <PlayerBars
+              title="Опыт в минуту"
+              sub="Скорость набора уровней"
+              players={allPlayers}
+              pick={(p) => p.experiencePerMinute}
+              heroMap={heroMap}
+              format={(n) => String(n)}
+            />
+          </div>
+          <div className="sec">
             <PlayerBars
               title="Урон по строениям"
               sub="Давление на карту"
@@ -223,16 +217,16 @@ export default function MatchPage() {
       )}
 
       {tab === 'timeline' && timeline && (
-        <div className="tab-body" role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline">
-          <div className="rosters">
-            <Teamfights timeline={timeline} heroMap={heroMap} match={match} meSlot={meSlot} />
+        <div role="tabpanel" id="panel-timeline" aria-labelledby="tab-timeline">
+          <Teamfights timeline={timeline} heroMap={heroMap} match={match} meSlot={meSlot} />
+          <div className="sec">
             <TimelinePanel timeline={timeline} heroMap={heroMap} durationSec={match.durationSeconds} />
           </div>
         </div>
       )}
 
       {tab === 'draft' && (
-        <div className="tab-body" role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
+        <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
           <Draft picks={match.picksBans} heroMap={heroMap} match={match} />
         </div>
       )}

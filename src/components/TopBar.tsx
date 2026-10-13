@@ -1,4 +1,4 @@
-// Хедер: логотип, навигация, единый поиск матча/профиля и аккаунт Steam.
+// Хедер: щит с буквой L, навигация, единый поиск матча/профиля по центру, аккаунт справа.
 
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -9,11 +9,22 @@ import { addRecentSearch, readRecentSearches, type RecentSearch } from '../recen
 import type { Auth } from '../auth'
 import { Icon } from './Icons'
 
-function Logo() {
+function Brand() {
   return (
-    <svg className="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
-      <path className="m-r" d="M12.6 2 1.6 14l11 12z" />
-      <path className="m-d" d="M15.4 2l11 12-11 12z" />
+    <svg viewBox="0 0 24 28" aria-hidden="true" focusable="false">
+      <path
+        d="M12 1.5 22 5.4v9.1c0 5.6-4 9.6-10 12.1C6 24.1 2 20.1 2 14.5V5.4z"
+        fill="none"
+        stroke="var(--line)"
+        strokeWidth="1.5"
+      />
+      <path
+        d="M8.4 7.6v9.6h6.6"
+        fill="none"
+        stroke="var(--gold)"
+        strokeWidth="2.2"
+        strokeLinecap="square"
+      />
     </svg>
   )
 }
@@ -67,33 +78,30 @@ export default function TopBar({
     setOpen(false)
   }
 
+  const myPath = auth?.loggedIn && auth.steamAccountId ? `/player/${auth.steamAccountId}` : null
+
   return (
-    <header className="topbar">
-      <div className="topbar-inner">
+    <header className="hdr">
+      <div className="hdr-in">
         <a className="brand" href="/" onClick={(e) => { e.preventDefault(); navigate('/') }}>
-          <Logo />
-          <span className="brand-word">dota match<b>lab</b></span>
+          <Brand />
+          <span className="brand-t">Dota Match Lab</span>
         </a>
 
         <nav className="nav">
-          <button type="button" className={`nav-link${location.pathname === '/' ? ' active' : ''}`} onClick={() => navigate('/')}>
+          <button type="button" className={`nav-i${location.pathname === '/' ? ' on' : ''}`} onClick={() => navigate('/')}>
             Обзор
           </button>
-          {auth?.loggedIn && auth.steamAccountId ? (
-            <button
-              type="button"
-              className={`nav-link${location.pathname === `/player/${auth.steamAccountId}` ? ' active' : ''}`}
-              onClick={() => onSearch(`/player/${auth.steamAccountId}`)}
-            >
+          {myPath && (
+            <button type="button" className={`nav-i${location.pathname === myPath ? ' on' : ''}`} onClick={() => onSearch(myPath)}>
               Мой профиль
             </button>
-          ) : null}
+          )}
         </nav>
 
-        <form className="search" onSubmit={submit} role="search">
-          <Icon.Search size={16} className="search-glass" />
+        <form className="find" onSubmit={submit} role="search">
           <input
-            className="search-field"
+            className="find-in"
             value={value}
             onChange={(e) => setValue(e.target.value)}
             onFocus={() => setOpen(true)}
@@ -103,17 +111,17 @@ export default function TopBar({
             autoComplete="off"
             spellCheck={false}
           />
-          <span className="search-hint">Enter</span>
+          <Icon.Search className="find-g" size={18} />
           {open && recents.length > 0 && (
-            <div className="recents" role="listbox" aria-label="Недавние поиски">
-              <div className="recents-title">Недавние поиски</div>
+            <div className="find-list" role="listbox" aria-label="Недавние поиски">
+              <div className="find-h">Недавние поиски</div>
               {recents.map((item) => (
                 <button
                   key={`${item.kind}:${item.id}`}
                   type="button"
                   role="option"
                   aria-selected={false}
-                  className="recent-row"
+                  className="find-r"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => go(item)}
                 >
@@ -125,22 +133,22 @@ export default function TopBar({
           )}
         </form>
 
-        <div className="topbar-auth">
+        <div className="acct">
           {auth?.loggedIn ? (
             <>
-              <button className="auth-account" onClick={() => auth.steamAccountId && onSearch(`/player/${auth.steamAccountId}`)} aria-label="Открыть свой профиль">
-                <img src={avatarImageUrl(auth.avatar)} alt="" width={22} height={22} />
+              <button className="acct-me" onClick={() => myPath && onSearch(myPath)} aria-label="Открыть свой профиль">
+                <img src={avatarImageUrl(auth.avatar)} alt="" width={28} height={28} />
                 <span>{auth.name}</span>
               </button>
-              <button type="button" className="auth-button" onClick={onLogout}>
+              <button type="button" className="acct-out" onClick={onLogout}>
                 <span>Выйти</span>
-                <Icon.Logout size={15} />
+                <Icon.Logout size={16} />
               </button>
             </>
           ) : (
-            <a className="auth-button" href="/api/auth/steam">
-              <span>Войти через Steam</span>
-              <Icon.External size={15} />
+            <a className="btn btn-q" href="/api/auth/steam">
+              <Icon.Steam size={16} />
+              Войти через Steam
             </a>
           )}
         </div>

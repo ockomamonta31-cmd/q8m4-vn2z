@@ -48,40 +48,29 @@ export default function ActivityHeatmap({ matches }: { matches: PlayerMatch[] })
   const level = (count: number) => (count === 0 ? '' : count <= 1 ? 'l1' : count <= 3 ? 'l2' : count <= 6 ? 'l3' : 'l4')
 
   return (
-    <section className="panel heat-panel">
-      <div className="heat-summary">
-        <div className="hs-lead">
-          <span className="hs-label">Матчей в истории</span>
-          <b className="hs-value">{total}</b>
-          <span className="hs-note">со всех загруженных страниц</span>
-        </div>
-        <div className="hs-rows">
-          <div className="hs-row">
-            <span>Активных дней</span>
-            <b>{activeDays}</b>
-            <small>за {WEEKS} недель</small>
-          </div>
-          <div className="hs-row">
-            <span>Самый плотный день</span>
-            <b>{bestDay ? bestDay.count : '—'}</b>
-            <small>{bestDay ? new Date(bestDay.key).toLocaleDateString('ru-RU') : 'нет игранных дней'}</small>
-          </div>
+    <section>
+      <div className="psum" style={{ marginBottom: 'var(--sp-24)' }}>
+        <div className="psum-r"><span>Матчей в истории</span><b>{total}</b></div>
+        <div className="psum-r"><span>Активных дней за {WEEKS} недель</span><b>{activeDays}</b></div>
+        <div className="psum-r">
+          <span>Самый плотный день</span>
+          <b>{bestDay ? `${bestDay.count} — ${new Date(bestDay.key).toLocaleDateString('ru-RU')}` : '—'}</b>
         </div>
       </div>
 
-      <div className="heat-shell">
-        <div className="heat-days" aria-hidden="true">
+      <div className="heatwrap">
+        <div className="heatdays" aria-hidden="true">
           {DAY_LABELS.map((label, i) => <span key={i}>{label}</span>)}
         </div>
-        <div className="heat-scroll">
-          <div className="heat-months" aria-hidden="true">
+        <div style={{ minWidth: 0 }}>
+          <div className="heatmonths" aria-hidden="true">
             {weeks.map((label, i) => <span key={i}>{label}</span>)}
           </div>
           <div className="heat">
             {cells.map((c) => (
-              <span
+              <i
                 key={c.key}
-                className={`heat-cell ${level(c.count)}`}
+                className={level(c.count)}
                 title={`${new Date(c.key).toLocaleDateString('ru-RU')} — матчей: ${c.count}`}
               />
             ))}
@@ -89,14 +78,10 @@ export default function ActivityHeatmap({ matches }: { matches: PlayerMatch[] })
         </div>
       </div>
 
-      <div className="heat-legend">
-        <span>меньше</span>
-        <span className="heat-cell" />
-        <span className="heat-cell l1" />
-        <span className="heat-cell l2" />
-        <span className="heat-cell l3" />
-        <span className="heat-cell l4" />
-        <span>больше</span>
+      <div className="heatlegend">
+        <span className="dim t12">меньше</span>
+        <i /><i className="l1" /><i className="l2" /><i className="l3" /><i className="l4" />
+        <span className="dim t12">больше</span>
       </div>
     </section>
   )

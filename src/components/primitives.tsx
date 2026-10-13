@@ -17,12 +17,13 @@ export function useReducedMotion() {
 }
 
 /** Значение добегают до итога; при reduce-motion или нулевой длительности — просто ставится число. */
-export function Counter({ value, duration = 900, format = (n: number) => String(Math.round(n)), prefix = '', suffix = '' }: {
+export function Counter({ value, duration = 900, format = (n: number) => String(Math.round(n)), prefix = '', suffix = '', className }: {
   value: number
   duration?: number
   format?: (n: number) => string
   prefix?: string
   suffix?: string
+  className?: string
 }) {
   const reduced = useReducedMotion()
   const ref = useRef<HTMLSpanElement | null>(null)
@@ -55,7 +56,7 @@ export function Counter({ value, duration = 900, format = (n: number) => String(
     return () => { observer.disconnect(); cancelAnimationFrame(frame); window.clearTimeout(fallback) }
   }, [value, duration, reduced])
 
-  return <span ref={ref}>{prefix}{format(display)}{suffix}</span>
+  return <span className={className} ref={ref}>{prefix}{format(display)}{suffix}</span>
 }
 
 export function CopyButton({ text, label }: { text: string; label?: string }) {
@@ -81,8 +82,8 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
   }
 
   return (
-    <button type="button" className={`id-copy${done ? ' done' : ''}`} onClick={copy} aria-label={`Скопировать ${label ?? text}`}>
-      {done ? <Icon.Check size={13} /> : <Icon.Copy size={13} />}
+    <button type="button" className={`btn btn-q${done ? ' done' : ''}`} onClick={copy} aria-label={`Скопировать ${label ?? text}`}>
+      {done ? <Icon.Check size={16} /> : <Icon.Copy size={16} />}
       {done ? 'Скопировано' : label ?? text}
     </button>
   )
@@ -90,10 +91,10 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
 
 /** Переключатель разделов с ролью tablist и поддержкой стрелок с клавиатуры. */
 export function TabBar<T extends string>({ items, value, onChange, className }: {
-  items: { id: T; label: string; icon?: React.ReactNode; disabled?: boolean; hint?: string }[]
+  items: { id: T; label: string; icon?: React.ReactNode; disabled?: boolean; hint?: string; count?: string | null }[]
   value: T
   onChange: (id: T) => void
-  className: string
+  className?: string
 }) {
   const refs = useRef<Record<string, HTMLButtonElement | null>>({})
 
@@ -107,7 +108,7 @@ export function TabBar<T extends string>({ items, value, onChange, className }: 
   }
 
   return (
-    <div className={className} role="tablist" aria-orientation="horizontal" onKeyDown={(e) => {
+    <div className={`rail${className ? ` ${className}` : ''}`} role="tablist" aria-orientation="horizontal" onKeyDown={(e) => {
       const index = items.findIndex((item) => item.id === value)
       if (e.key === 'ArrowRight') { e.preventDefault(); moveFocus(index, 1) }
       if (e.key === 'ArrowLeft') { e.preventDefault(); moveFocus(index, -1) }
@@ -124,11 +125,12 @@ export function TabBar<T extends string>({ items, value, onChange, className }: 
           tabIndex={item.id === value ? 0 : -1}
           disabled={item.disabled}
           title={item.hint}
-          className="subnav-tab"
+          className="rail-i"
           onClick={() => onChange(item.id)}
         >
           {item.icon}
           {item.label}
+          {item.count && <span className="cnt">{item.count}</span>}
         </button>
       ))}
     </div>

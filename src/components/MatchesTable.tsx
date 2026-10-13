@@ -3,13 +3,14 @@ import { Link } from 'react-router-dom'
 import type { HeroInfo, PlayerMatch } from '../api/types'
 import { fetchMatch } from '../api'
 import { heroImageUrl } from '../api/heroes'
-import { fmtDuration, gameModeName, lobbyName, timeAgo, fmtKda } from '../api/formats'
+import { fmtDuration, fmtKda, gameModeName, lobbyName, timeAgo } from '../api/formats'
 import { fitImpEstimator } from '../api/performance'
 import { IMPACT_MODEL_READY, impactModelInfo } from '../api/impact'
 import { localImpact, resolveImpact, type ImpactScore } from '../api/score'
 import { ImpactMeter } from './Impact'
 import PositionIcon from './PositionIcon'
 import { EmptyState } from './States'
+import { Icon } from './Icons'
 
 export default function MatchesTable({
   matches,
@@ -42,68 +43,58 @@ export default function MatchesTable({
 
   return (
     <>
-      <div className="match-list" role="list">
+      <div className="mlist" role="list">
         {matches.map((m) => {
           const hero = heroMap.get(m.player.heroId)
           const p = m.player
+          const heroName = hero?.name ?? `Герой #${p.heroId}`
           return (
             <Link
               key={m.id}
               to={`/match/${m.id}`}
-              className={`match-row ${p.isVictory ? 'win' : 'loss'}`}
+              className={`mrow ${p.isVictory ? 'w' : 'l'}`}
               onMouseEnter={() => void fetchMatch(m.id)}
-              aria-label={`${p.isVictory ? 'Победа' : 'Поражение'} на ${hero?.name ?? `герой ${m.player.heroId}`}, матч ${m.id}`}
+              title={`${heroName} · ${p.numLastHits}/${p.numDenies} LH/DN · ${p.experiencePerMinute} XPM · матч ${m.id}`}
+              aria-label={`${p.isVictory ? 'Победа' : 'Поражение'} на ${heroName}, матч ${m.id}`}
             >
-              <span className="mr-outcome">
+              <span className="mrow-out">
                 <b>{p.isVictory ? 'Победа' : 'Поражение'}</b>
-                <small>{timeAgo(m.startDateTime)}</small>
+                <span>{timeAgo(m.startDateTime)}</span>
               </span>
-              <span className="mr-hero">
-                <span className="hero-portrait">
-                  {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
-                  <PositionIcon position={p.position} source={p.positionSource} />
-                </span>
-                <span>
-                  <strong>{hero?.name ?? `Герой #${p.heroId}`}</strong>
-                  <span className="mr-tags">
-                    <span>{gameModeName(m.gameMode)}</span>
-                    <span>{lobbyName(m.lobbyType)}</span>
-                  </span>
-                </span>
+
+              <span className={`port ${p.isVictory ? 'r' : 'd'}`}>
+                {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
               </span>
-              <span className="mr-kda">
-                <strong>
-                  <i>{p.kills}</i> / <u>{p.deaths}</u> / {p.assists}
-                </strong>
-                <small>KDA {fmtKda(p.kills, p.deaths, p.assists)}</small>
+              <PositionIcon position={p.position} source={p.positionSource} size={40} />
+
+              <span className="mrow-hero">
+                <b>{heroName}</b>
+                <span>{gameModeName(m.gameMode)} · {lobbyName(m.lobbyType)}</span>
               </span>
-              <ImpactMeter score={scoreOf(m)} />
-              <span className="mr-econ">
-                <strong>{p.goldPerMinute} <span className="unit">GPM</span></strong>
-                <span className="mr-tags">
-                  <span>{p.experiencePerMinute} XPM</span>
-                  <span>{p.numLastHits}/{p.numDenies} LH/DN</span>
-                </span>
+
+              <span className="mrow-kda">
+                <b>{p.kills} / <i>{p.deaths}</i> / {p.assists}</b>
+                <span>KDA {fmtKda(p.kills, p.deaths, p.assists)}</span>
               </span>
-              <span className="mr-time">
-                <strong>{fmtDuration(m.durationSeconds)}</strong>
-                <small>#{m.id}</small>
-              </span>
-              <svg className="mr-open" viewBox="0 0 20 20" aria-hidden="true"><path d="m7 4 6 6-6 6" /></svg>
+
+              <span className="mrow-imp"><ImpactMeter score={scoreOf(m)} /></span>
+              <span className="mrow-gpm">{p.goldPerMinute} GPM</span>
+              <span className="mrow-dur">{fmtDuration(m.durationSeconds)}</span>
+              <span className="mrow-go"><Icon.Chevron size={20} /></span>
             </Link>
           )
         })}
       </div>
-      <div className="list-foot">
-        Показано <b>{matches.length}</b> матчей, лобби: {lobbyName(matches[0]?.lobbyType ?? '').toLowerCase()}.
-        {' '}Импакт считает{' '}
+
+      <p className="pnote" style={{ marginTop: 'var(--sp-16)' }}>
+        Показано {matches.length} матчей. Импакт считает{' '}
         {modelInfo
           ? `модель на ${modelInfo.matches.toLocaleString('ru-RU')} матчах, AUC ${modelInfo.auc.toFixed(2)}`
           : estimator
             ? `локальная модель на ${estimator.samples} матчах этого профиля`
-            : 'оценка по линии статов'}
-        .
-      </div>
+            : 'оценка по линии статов'
+        }. Наведи на строку — покажет LH/DN, XPM и ID матча.
+      </p>
     </>
   )
 }

@@ -1,11 +1,5 @@
-// Табло матча — единственное смелое место на странице.
-//
-// Исходный арт героя на CDN Valve — 256×144. Раздувать его до размеров
-// половины экрана нельзя: мыло вместо арта. Поэтому герой живёт здесь как
-// затемнённое поле-подложка под скрима, а смелость держит типографика
-// результата: итог матча — самый крупный текст на странице, и он окрашен
-// лагерем ЦЕЛИКОМ, а не одним выделенным словом. Счёт и длительность ему
-// подчинены и стоят ниже собственными подписями, а не строкой через точку.
+// Шапка матча: id, режим, дата, ссылки наружу, итог и сравнение команд.
+// Полноэкранный hero с артом и «Противостоянием» собирается в M3.
 
 import { Link } from 'react-router-dom'
 import type { HeroInfo, MatchDetails, MatchPlayer } from '../../api/types'
@@ -19,18 +13,18 @@ import { CopyButton } from '../primitives'
 import { Icon } from '../Icons'
 import PositionIcon from '../PositionIcon'
 
-function Ribbon({ label, radiant, dire, format }: { label: string; radiant: number; dire: number; format: (n: number) => string }) {
+function Pair({ label, radiant, dire, format }: { label: string; radiant: number; dire: number; format: (n: number) => string }) {
   const total = radiant + dire
   const r = total > 0 ? (radiant / total) * 100 : 50
   return (
-    <div className="ribbon-row">
-      <span className="ribbon-name">{label}</span>
-      <span className={`ribbon-val r${r >= 50 ? ' lead' : ''}`}>{format(radiant)}</span>
-      <span className="ribbon-track" role="img" aria-label={`${label}: Radiant ${format(radiant)}, Dire ${format(dire)}`}>
-        <i className="f-r" style={{ width: `${r}%` }} />
-        <i className="f-d" style={{ width: `${100 - r}%` }} />
+    <div className="vs-row">
+      <span className="vs-lbl">{label}</span>
+      <span className={`v r${r >= 50 ? '' : ' sub'}`}>{format(radiant)}</span>
+      <span className="vs-bar" role="img" aria-label={`${label}: Radiant ${format(radiant)}, Dire ${format(dire)}`}>
+        <i className="a" style={{ width: `${r}%` }} />
+        <i className="b" style={{ width: `${100 - r}%` }} />
       </span>
-      <span className={`ribbon-val d${r < 50 ? ' lead' : ''}`}>{format(dire)}</span>
+      <span className={`v d${r < 50 ? '' : ' sub'}`}>{format(dire)}</span>
     </div>
   )
 }
@@ -48,19 +42,15 @@ function Structures({ match }: { match: MatchDetails }) {
   if (towers[0] === null && rax[0] === null) return null
   const pair = (label: string, r: number | null, d: number | null, max: number) =>
     r === null || d === null ? null : (
-      <span key={label} className="struct-cell" title={`${label}: целых — у Radiant ${r} из ${max}, у Dire ${d} из ${max}`}>
-        <span className="struct-label">{label}</span>
-        <span className="struct-fig"><b className="r">{r}</b> из {max}<i className="vs">против</i><b className="d">{d}</b></span>
-      </span>
+      <div className="mfact" key={label} title={`${label}: целых — у Radiant ${r} из ${max}, у Dire ${d} из ${max}`}>
+        <dt>{label}</dt>
+        <dd><span className="pos">{r}</span> из {max} · <span className="neg">{d}</span></dd>
+      </div>
     )
-  return <div className="axis-structures">{pair('башни', towers[0], towers[1], 11)}{pair('казармы', rax[0], rax[1], 6)}</div>
+  return <>{pair('башни', towers[0], towers[1], 11)}{pair('казармы', rax[0], rax[1], 6)}</>
 }
 
-/**
- * Состав лагеря читается за секунду: пять портретов строго по позициям 1→5,
- * каждый со своим глифом. Порядок фиксирован именно здесь, а не в модели,
- * потому что slotOfPlayer() считает слот по индексу массива.
- */
+/** Состав лагеря: пять портретов строго по позициям 1→5. */
 function Five({ players, radiant, heroMap }: { players: MatchPlayer[]; radiant: boolean; heroMap: Map<number, HeroInfo> }) {
   const ordered = [...players]
     .filter((p) => p.isRadiant === radiant)
@@ -72,13 +62,15 @@ function Five({ players, radiant, heroMap }: { players: MatchPlayer[]; radiant: 
     .slice(0, 5)
 
   return (
-    <ol className="five">
+    <ol className="mfive-l">
       {ordered.map((p) => {
         const hero = heroMap.get(p.heroId)
         return (
-          <li key={`${p.steamAccountId}:${p.heroId}`} className="five-slot">
-            <img src={heroImageUrl(hero?.shortName ?? '')} alt="" loading="lazy" width={44} height={25} />
-            <PositionIcon position={p.position} source={p.positionSource} size={15} />
+          <li key={`${p.steamAccountId}:${p.heroId}`}>
+            <span className={`port xs ${radiant ? 'r' : 'd'}`}>
+              {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+            </span>
+            <PositionIcon position={p.position} source={p.positionSource} size={24} />
           </li>
         )
       })}
@@ -104,106 +96,96 @@ export default function HeroPlate({ match, board, timeline, heroMap }: {
   ]
 
   return (
-    <header className={`hero${radiantWon ? ' hero-r' : ' hero-d'}`}>
-      <div className="hero-bar">
-        <nav className="crumbs" aria-label="Хлебные крошки">
-          <Link to="/" onClick={(e) => { if (window.history.length > 1) { e.preventDefault(); window.history.back() } }}>
-            <Icon.ArrowLeft size={14} />
-            Назад
-          </Link>
-          <span className="sep">/</span>
-          <b>Матч {match.id}</b>
-        </nav>
-
-        <div className="hero-tags">
-          <span className="tag tag-strong">{gameModeName(match.gameMode)}</span>
-          <span className="tag">{lobbyName(match.lobbyType)}</span>
-          <span className="tag">
-            {new Date(match.startDateTime * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })}
+    <header className="mhero">
+      <div className="mhero-in">
+        <div className="mhero-top">
+          <span className="sp">
+            <Link to="/" onClick={(e) => { if (window.history.length > 1) { e.preventDefault(); window.history.back() } }}>
+              Назад
+            </Link>
           </span>
-          {match.numHumanPlayers != null && <span className="tag">{match.numHumanPlayers} игроков</span>}
-          {match.actualRank > 0 && <span className="tag">средний ранг {match.actualRank}</span>}
-        </div>
+          <span className="dotsep" aria-hidden="true" />
+          <span className="sp"><b>Матч {match.id}</b></span>
+          <span className="dotsep" aria-hidden="true" />
+          <span className="sp">{gameModeName(match.gameMode)}</span>
+          <span className="dotsep" aria-hidden="true" />
+          <span className="sp">{lobbyName(match.lobbyType)}</span>
+          <span className="dotsep" aria-hidden="true" />
+          <span className="sp">{new Date(match.startDateTime * 1000).toLocaleDateString('ru-RU', { day: '2-digit', month: 'long', year: 'numeric' })}</span>
+          <span className="dotsep" aria-hidden="true" />
+          <span className="sp">{match.numHumanPlayers ?? match.players.length} игроков</span>
 
-        <div className="hero-actions">
-          <CopyButton text={String(match.id)} label={`Скопировать ID матча ${match.id}`} />
-          {links.map((link) => (
-            <a key={link.label} className="ext-link" href={link.href} target="_blank" rel="noreferrer">
-              {link.label}
-              <Icon.External size={11} />
-            </a>
-          ))}
-        </div>
-      </div>
-
-      <div className="hero-plate">
-        <div className="hero-art">
-          {leadHero && (
-            <img
-              className="hero-art-bg"
-              src={heroImageUrl(leadHero.shortName)}
-              alt=""
-              aria-hidden="true"
-            />
-          )}
-          <div className="hero-art-scrim" />
-          <p className="hero-art-note">
-            <span className="hero-art-name">{leadHero ? playerLabel(lead!.player, leadHero.name) : null}</span>
-            {lead && <span className="hero-art-impact">лучший вклад {signed(lead.score.value)}</span>}
-          </p>
-        </div>
-
-        <div className="hero-result">
-          <h1 className="result-outcome">
-            {radiantWon ? 'Radiant' : 'Dire'} {match.durationSeconds < 600 ? 'разгромил' : 'победил'}
-          </h1>
-
-          <div className="result-score">
-            <b className="r">{match.radiantScore ?? '—'}</b>
-            <span className="colon">:</span>
-            <b className="d">{match.direScore ?? '—'}</b>
-            <span className="result-score-note">убийств</span>
-          </div>
-
-          <dl className="result-facts">
-            <div className="fact">
-              <dt>Длительность</dt>
-              <dd className="num">{fmtDuration(match.durationSeconds)}</dd>
-            </div>
-            <div className="fact">
-              <dt>Первая кровь</dt>
-              <dd className="num">{match.firstBloodSeconds && match.firstBloodSeconds > 0 ? `на ${fmtDuration(match.firstBloodSeconds)}` : 'не было'}</dd>
-            </div>
-            <div className="fact">
-              <dt>Рошан</dt>
-              <dd className="num">
-                {timeline?.roshans.length
-                  ? `${timeline.roshans.filter((x) => x.radiant).length} : ${timeline.roshans.length - timeline.roshans.filter((x) => x.radiant).length}`
-                  : 'нет данных реплея'}
-              </dd>
-            </div>
-          </dl>
-
-          <Structures match={match} />
-
-          <div className="hero-fives">
-            <div className="five-group five-r">
-              <span className="five-name">Radiant</span>
-              <Five players={match.players} radiant heroMap={heroMap} />
-            </div>
-            <div className="five-group five-d">
-              <span className="five-name">Dire</span>
-              <Five players={match.players} radiant={false} heroMap={heroMap} />
-            </div>
+          <div className="mhero-acts">
+            <CopyButton text={String(match.id)} label={`Скопировать ID матча ${match.id}`} />
+            {links.map((link) => (
+              <a key={link.label} className="ext" href={link.href} target="_blank" rel="noreferrer">
+                {link.label}
+                <Icon.External size={14} />
+              </a>
+            ))}
           </div>
         </div>
-      </div>
 
-      <div className="hero-ribbon">
-        <Ribbon label="Убийства" radiant={board.radiant.kills} dire={board.dire.kills} format={(n) => String(n)} />
-        <Ribbon label="Нетворт" radiant={board.radiant.networth} dire={board.dire.networth} format={fmtK} />
-        <Ribbon label="Урон героям" radiant={board.radiant.heroDamage} dire={board.dire.heroDamage} format={fmtK} />
-        <Ribbon label="Опыт в минуту" radiant={board.radiant.experience} dire={board.dire.experience} format={(n) => String(Math.round(n))} />
+        <div className="mhero-grid">
+          <div>
+            <div className="mhero-art">
+              {leadHero && <img src={heroImageUrl(leadHero.shortName)} alt="" aria-hidden="true" />}
+            </div>
+            <p className="mhero-cap">
+              <b>{leadHero ? playerLabel(lead!.player, leadHero.name) : null}</b>
+              {lead && <span className="dim">лучший вклад {signed(lead.score.value)}</span>}
+            </p>
+          </div>
+
+          <div>
+            <h1 className="mhero-h1">{radiantWon ? 'Radiant' : 'Dire'} {match.durationSeconds < 600 ? 'разгромил' : 'победил'}</h1>
+
+            <div className="mhero-score">
+              <span className="r">{match.radiantScore ?? '—'}</span>
+              <span className="dim">:</span>
+              <span className="d">{match.direScore ?? '—'}</span>
+              <span className="dim t14">убийств</span>
+            </div>
+
+            <dl className="mfacts">
+              <div className="mfact">
+                <dt>Длительность</dt>
+                <dd className="n">{fmtDuration(match.durationSeconds)}</dd>
+              </div>
+              <div className="mfact">
+                <dt>Первая кровь</dt>
+                <dd className="n">{match.firstBloodSeconds && match.firstBloodSeconds > 0 ? `на ${fmtDuration(match.firstBloodSeconds)}` : 'не было'}</dd>
+              </div>
+              <div className="mfact">
+                <dt>Рошан</dt>
+                <dd className="n">
+                  {timeline?.roshans.length
+                    ? `${timeline.roshans.filter((x) => x.radiant).length} : ${timeline.roshans.length - timeline.roshans.filter((x) => x.radiant).length}`
+                    : 'нет данных реплея'}
+                </dd>
+              </div>
+              <Structures match={match} />
+            </dl>
+
+            <div className="mhero-fives">
+              <div className="mfive">
+                <span className="dim">Radiant</span>
+                <Five players={match.players} radiant heroMap={heroMap} />
+              </div>
+              <div className="mfive">
+                <span className="dim">Dire</span>
+                <Five players={match.players} radiant={false} heroMap={heroMap} />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="vs">
+          <Pair label="Убийства" radiant={board.radiant.kills} dire={board.dire.kills} format={(n) => String(n)} />
+          <Pair label="Нетворс" radiant={board.radiant.networth} dire={board.dire.networth} format={fmtK} />
+          <Pair label="Урон героям" radiant={board.radiant.heroDamage} dire={board.dire.heroDamage} format={fmtK} />
+          <Pair label="Опыт в минуту" radiant={board.radiant.experience} dire={board.dire.experience} format={(n) => String(Math.round(n))} />
+        </div>
       </div>
     </header>
   )

@@ -4,12 +4,13 @@ import { fetchHeroStats, fetchMatches, fetchMatchesPages, fetchPeers, fetchProfi
 import { ApiError, type HeroInfo, type HeroStat, type Peer, type PlayerMatch, type Profile } from '../api/types'
 import { getHeroMap } from '../api/heroes'
 import { kda, winrate } from '../api/formats'
-import PlayerHeader from '../components/PlayerHeader'
+import PlayerAside from '../components/PlayerAside'
 import MatchesTable from '../components/MatchesTable'
 import HeroesTable from '../components/HeroesTable'
 import PeersList from '../components/PeersList'
 import ActivityHeatmap from '../components/ActivityHeatmap'
 import { EmptyState, Notice, PageSkeleton } from '../components/States'
+import { TabBar } from '../components/primitives'
 
 const PAGE_SIZE = 25
 const TABS = ['Обзор', 'Матчи', 'Герои', 'Друзья', 'Активность'] as const
@@ -143,190 +144,134 @@ export default function PlayerPage() {
     }
   }, [recent])
 
-  const counts = useMemo(() => ({
+  const counts: Record<Tab, string | null> = {
     'Обзор': recent.length ? String(recent.length) : null,
     'Матчи': String(matches.length),
     'Герои': heroStats ? String(heroStats.length) : null,
     'Друзья': peers ? String(peers.length) : null,
     'Активность': null,
-  }), [recent.length, matches.length, heroStats, peers])
+  }
 
-  if (loading) return <PageSkeleton rows={7} variant="profile" />
+  if (loading) return <div className="wrap"><PageSkeleton rows={7} variant="profile" /></div>
 
   if (fatal) {
     return (
-      <Notice kind="error" title="Данные не загрузились">
-        {fatal}
-        <p>
-          Проверь <code className="code">STEAM_WEB_API_KEY</code> в <code className="code">.env</code>: бесплатный
-          ключ создаётся на{' '}
-          <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer">steamcommunity.com/dev/apikey</a>{' '}
-          и после перезапуска <code className="code">npm run dev</code> начинает работать.
-        </p>
-        <div className="notice-actions">
-          <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>
-            Запросить данные заново
-          </button>
-          <Link className="btn btn-ghost" to="/">Найти другой матч</Link>
-        </div>
-      </Notice>
+      <div className="wrap">
+        <Notice kind="error" title="Профиль не загрузился">
+          {fatal}
+          <p>
+            Проверь <code>STEAM_WEB_API_KEY</code> в <code>.env</code>: бесплатный ключ создаётся на{' '}
+            <a href="https://steamcommunity.com/dev/apikey" target="_blank" rel="noreferrer">steamcommunity.com/dev/apikey</a>{' '}
+            и после перезапуска <code>npm run dev</code> начинает работать.
+          </p>
+          <div className="note-a">
+            <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>Повторить</button>
+            <Link className="btn btn-q" to="/">Найти другой матч</Link>
+          </div>
+        </Notice>
+      </div>
     )
   }
 
   if (!profile) return null
 
   return (
-    <div className="player-page">
-      <PlayerHeader profile={profile} lastMatchTime={matches[0]?.startDateTime ?? null} />
+    <div className="wrap prof">
+      <PlayerAside
+        profile={profile}
+        averages={averages}
+        heroStats={heroStats}
+        heroMap={heroMap}
+        lastMatchTime={matches[0]?.startDateTime ?? null}
+      />
 
-      <nav className="tabs" role="tablist" aria-label="Разделы профиля">
-        {TABS.map((t) => (
-          <button key={t} role="tab" aria-selected={t === tab} className={`tab${t === tab ? ' active' : ''}`} onClick={() => setTab(t)}>
-            {t}
-            {counts[t] && <span className="tab-count">{counts[t]}</span>}
-          </button>
-        ))}
-      </nav>
+      <div className="pmain">
+        <div className="pmain-h">
+          <TabBar
+            items={TABS.map((t) => ({ id: t, label: t, count: counts[t] }))}
+            value={tab}
+            onChange={setTab}
+          />
+        </div>
 
-      <div className="tabpanel" key={tab}>
-        {tab === 'Обзор' && (
-          <div className="overview-grid">
-            <div className="overview-main">
-              {averages ? (
-                <section className="verdict" aria-label="Сводка по загруженным матчам">
-                  <div className="vd-outcome">
-                    <h2 className="vd-title">Как идут дела</h2>
-                    <span className="vd-window">по {averages.n} загруженным матчам</span>
-                    <div className={`vd-rate${averages.wr >= 50 ? ' hi' : ' lo'}`}>
-                      <b>{averages.wr.toFixed(1)}</b>
-                      <span>% побед</span>
+        <div key={tab}>
+          {tab === 'Обзор' && (
+            matches.length > 0 ? (
+              <section className="sec">
+                <div className="sec-h">
+                  <h2 className="sec-t">Последние матчи</h2>
+                  <span className="sec-n">10 из {matches.length}</span>
+                </div>
+                <MatchesTable matches={matches.slice(0, 10)} heroMap={heroMap} seasonRank={profile.rank} />
+              </section>
+            ) : (
+              <EmptyState title="Матчей в истории нет">
+                Steam не отдаёт историю скрытых аккаунтов. Проверь ID или открой матч, который помнишь, —
+                разбор соберётся по нему.
+              </EmptyState>
+            )
+          )}
+
+          {tab === 'Матчи' && (
+            <section className="sec">
+              <div className="sec-h">
+                <h2 className="sec-t">История матчей</h2>
+                <span className="sec-n">загружено {matches.length}</span>
+              </div>
+              <MatchesTable matches={matches} heroMap={heroMap} seasonRank={profile.rank} />
+              <div style={{ marginTop: 'var(--sp-24)' }}>
+                <button className="btn btn-q" onClick={loadMore} disabled={loadingMore}>
+                  {loadingMore ? 'Загружаем…' : 'Показать ещё матчи'}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {tab === 'Герои' && (
+            <section className="sec">
+              <div className="sec-h">
+                <h2 className="sec-t">Герои</h2>
+                {heroStats && <span className="sec-n">{heroStats.length} героев</span>}
+              </div>
+              {heroStats ? (
+                <>
+                  <HeroesTable stats={heroStats} heroMap={heroMap} />
+                  {heroStatsSource === 'matches' && (
+                    <div className="note" style={{ marginTop: 'var(--sp-24)' }}>
+                      <strong className="note-t">Посчитано по последним {recent.length} матчам</strong>
+                      <div className="note-b">Точных счётчиков по героям API не отдаёт, поэтому это оценка по доступной истории.</div>
                     </div>
-                    <div className="vd-foot">
-                      <div
-                        className="split-bar"
-                        role="img"
-                        aria-label={`Побед ${averages.wins}, поражений ${averages.n - averages.wins}, винрейт ${averages.wr.toFixed(1)}%`}
-                      >
-                        <i className="f-win" style={{ width: `${averages.wr}%` }} />
-                        <i className="f-loss" style={{ width: `${100 - averages.wr}%` }} />
-                      </div>
-                      <div className="vd-tally">
-                        <span className="t-r"><b>{averages.wins}</b> побед</span>
-                        <span className="t-d"><b>{averages.n - averages.wins}</b> поражений</span>
-                      </div>
-                    </div>
-                  </div>
+                  )}
+                </>
+              ) : <PageSkeleton rows={5} band={false} />}
+            </section>
+          )}
 
-                  <dl className="vd-rail">
-                    <div className="vr-row">
-                      <dt>Средний KDA</dt>
-                      <dd>{averages.kda.toFixed(2)}<small>{averages.avgK.toFixed(1)} / {averages.avgD.toFixed(1)} / {averages.avgA.toFixed(1)}</small></dd>
-                    </div>
-                    <div className="vr-row"><dt>Золото в минуту</dt><dd>{Math.round(averages.gpm)}</dd></div>
-                    <div className="vr-row"><dt>Опыт в минуту</dt><dd>{Math.round(averages.xpm)}</dd></div>
-                    <div className="vr-row"><dt>Убийства за матч</dt><dd>{averages.avgK.toFixed(1)}</dd></div>
-                    <div className="vr-row"><dt>Смерти за матч</dt><dd>{averages.avgD.toFixed(1)}</dd></div>
-                  </dl>
-                </section>
-              ) : (
-                <EmptyState title="Сводку считать не по чему">
-                  В этом профиле нет доступных матчей: Steam не отдаёт историю скрытых аккаунтов.
-                  Проверь ID или открой матч, который ты помнишь, — разбор соберётся по нему.
-                </EmptyState>
-              )}
-
-              {matches.length > 0 && (
-                <section className="section">
-                  <header className="section-head">
-                    <h2 className="section-title">Последние матчи</h2>
-                    <span className="section-note">10 из {matches.length}</span>
-                  </header>
-                  <MatchesTable matches={matches.slice(0, 10)} heroMap={heroMap} seasonRank={profile.rank} />
-                </section>
-              )}
-            </div>
-
-            <aside className="overview-aside">
-              {(!heroStats || heroStats.length > 0) && (
-                <section className="section section-aside">
-                  <header className="section-head">
-                    <h2 className="section-title">Чаще всего играет</h2>
-                    {heroStats?.length ? <span className="section-note">5 из {heroStats.length}</span> : null}
-                  </header>
-                  {heroStats ? <HeroesTable stats={heroStats.slice(0, 5)} heroMap={heroMap} compact /> : <PageSkeleton rows={5} band={false} />}
-                </section>
-              )}
-              {matches.length > 0 && (
-                <Notice kind="info" title="Что вошло в сводку">
-                  Все числа считаются по {matches.length} загруженным матчам
-                  {profile.matchCount != null ? ` из окна Valve в ${profile.matchCount.toLocaleString('ru-RU')} публичных игр` : ''}.
-                  Полная история, герои и активность догружаются на своих вкладках.
+          {tab === 'Друзья' && (
+            <section className="sec">
+              <div className="sec-h">
+                <h2 className="sec-t">Друзья, с которыми играл</h2>
+                {peers && <span className="sec-n">{peers.length} игроков</span>}
+              </div>
+              {peers ? <PeersList peers={peers} /> : (peersError ? (
+                <Notice kind="error" title="Друзья не загрузились">
+                  {peersError}
+                  <p>Без списка друзей профиль всё равно разбирается: пиры считаются по общим матчам, как только список откроют.</p>
                 </Notice>
-              )}
-            </aside>
-          </div>
-        )}
+              ) : <PageSkeleton rows={3} band={false} />)}
+            </section>
+          )}
 
-        {tab === 'Матчи' && (
-          <section className="section">
-            <header className="section-head">
-              <h2 className="section-title">История матчей</h2>
-              <span className="section-note">загружено {matches.length}</span>
-            </header>
-            <MatchesTable matches={matches} heroMap={heroMap} seasonRank={profile.rank} />
-            <button className="btn load-more" onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? 'Загружаем…' : 'Показать ещё матчи'}
-            </button>
-          </section>
-        )}
-
-        {tab === 'Герои' && (
-          <section className="section">
-            <header className="section-head">
-              <h2 className="section-title">Герои</h2>
-              {heroStats && <span className="section-note">{heroStats.length} героев</span>}
-            </header>
-            {heroStats ? (
-              <>
-                <HeroesTable stats={heroStats} heroMap={heroMap} />
-                {heroStatsSource === 'matches' && (
-                  <div className="notice">
-                    <span className="notice-mark" aria-hidden="true" />
-                    <div className="notice-body">
-                      <strong className="notice-title">Посчитано по последним {recent.length} матчам</strong>
-                      <div className="notice-text">Точных счётчиков по героям API не отдаёт, поэтому это оценка по доступной истории.</div>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : <PageSkeleton rows={5} band={false} />}
-          </section>
-        )}
-
-        {tab === 'Друзья' && (
-          <section className="section">
-            <header className="section-head">
-              <h2 className="section-title">Друзья, с которыми играл</h2>
-              {peers && <span className="section-note">{peers.length} игроков</span>}
-            </header>
-            {peers ? <PeersList peers={peers} /> : (peersError ? (
-              <Notice kind="error" title="Друзья не загрузились">
-                {peersError}
-                <p>Без списка друзей профиль всё равно разбирается: пиры считаются по общим матчам, как только список откроют.</p>
-              </Notice>
-            ) : <PageSkeleton rows={3} band={false} />)}
-          </section>
-        )}
-
-        {tab === 'Активность' && (
-          <section className="section">
-            <header className="section-head">
-              <h2 className="section-title">Активность</h2>
-              <span className="section-note">матчи по дням</span>
-            </header>
-            {activityLoading || !activityMatches ? <PageSkeleton rows={3} band={false} /> : <ActivityHeatmap matches={activityMatches} />}
-          </section>
-        )}
+          {tab === 'Активность' && (
+            <section className="sec">
+              <div className="sec-h">
+                <h2 className="sec-t">Активность</h2>
+                <span className="sec-n">матчи по дням</span>
+              </div>
+              {activityLoading || !activityMatches ? <PageSkeleton rows={3} band={false} /> : <ActivityHeatmap matches={activityMatches} />}
+            </section>
+          )}
+        </div>
       </div>
     </div>
   )

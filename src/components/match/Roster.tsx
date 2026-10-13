@@ -1,15 +1,16 @@
-// Ростер команды: сортируемая таблица, лучший показатель в колонке, MVP,
-// строка раскрывается в раскачку / покупки / разбор импакта.
+// Составы команд. Восемь колонок, строка 64px, детали — в раскрытии.
+// Порядок игроков внутри команды — по позициям 1→5, чтобы керри стоял
+// против керри; без данных о позиции порядок остаётся слотовым.
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { HeroInfo, ItemInfo, MatchPlayer } from '../../api/types'
 import { itemImageUrl } from '../../api'
 import { heroImageUrl } from '../../api/heroes'
 import { steamProfileUrl } from '../../api/formats'
 import { signed, type ImpactScore } from '../../api/score'
-import type { MatchBoard, StatKey, TeamSide } from '../../pages/match-model'
-import { ScoreBadge } from '../Impact'
+import type { MatchBoard, TeamSide } from '../../pages/match-model'
+import { ImpactMeter } from '../Impact'
 import PositionIcon from '../PositionIcon'
 import LaneMap from '../LaneMap'
 import { Icon } from '../Icons'
@@ -17,261 +18,181 @@ import { BuildTimeline, ImpactPanel, ItemSlot, PurchaseTimeline } from './Build'
 
 const number = (n: number) => n.toLocaleString('ru-RU')
 
-/** MatchPlayer + подготовленный импакт, чтобы сортировка не пересчитывала модель. */
 type Row = MatchPlayer & { __impact: number; __score: ImpactScore | null }
 
-type Column = {
-  key: string
-  label: string
-  title?: string
-  sort: (p: Row) => number | string
-  stat?: StatKey
-}
+const posOf = (p: MatchPlayer) => (p.positionSource && p.position >= 1 && p.position <= 5 ? p.position : 6)
 
-const COLUMNS: Column[] = [
-  {
-    key: 'position',
-    label: 'Позиция',
-    title: 'Порядок 1→5: керри против керри, мид против мида. Игроки без определённой позиции уходят в конец.',
-    sort: (p) => (p.positionSource && p.position >= 1 && p.position <= 5 ? p.position : 6),
-  },
-  { key: 'impact', label: 'Импакт', title: 'Насколько статы выше или ниже типичных для этой позиции и уровня: от −100 до +100', sort: (p) => p.__impact },
-  { key: 'kda', label: 'K / D / A', sort: (p) => (p.deaths === 0 ? p.kills + p.assists : (p.kills + p.assists) / p.deaths) },
-  { key: 'networth', label: 'Нетворт', stat: 'networth', sort: (p) => p.networth },
-  { key: 'gpm', label: 'GPM', stat: 'goldPerMinute', sort: (p) => p.goldPerMinute },
-  { key: 'xpm', label: 'XPM', stat: 'experiencePerMinute', sort: (p) => p.experiencePerMinute },
-  { key: 'lh', label: 'LH / DN', stat: 'numLastHits', sort: (p) => p.numLastHits },
-  { key: 'hd', label: 'Урон', title: 'Сырой урон по героям', stat: 'heroDamage', sort: (p) => p.heroDamage },
-  { key: 'td', label: 'Башни', title: 'Урон по башням', stat: 'towerDamage', sort: (p) => p.towerDamage },
-  { key: 'heal', label: 'Лечение', stat: 'heroHealing', sort: (p) => p.heroHealing },
-]
-
-function KdaCell({ p }: { p: MatchPlayer }) {
-  return (
-    <span className="kda-cell">
-      <span className="k">{p.kills}</span>
-      <span className="sep">/</span>
-      <span className="d">{p.deaths}</span>
-      <span className="sep">/</span>
-      <span>{p.assists}</span>
-    </span>
-  )
-}
-
-function PlayerRow({ p, heroMap, itemMap, won, board, isMvp, durationSec }: {
-  p: Row
-  heroMap: Map<number, HeroInfo>
-  itemMap: Map<number, ItemInfo>
-  won: boolean
-  board: MatchBoard
-  isMvp: boolean
-  durationSec: number
-}) {
-  const hero = heroMap.get(p.heroId)
-  const [open, setOpen] = useState(false)
-  const [impactOpen, setImpactOpen] = useState(false)
-  const hasBuild = p.abilityUpgrades.length > 0 || p.purchaseEvents !== undefined
-  const best = board.best
-
-  return (
-    <>
-      <tr
-        className={`mrow expandable${open ? ' open' : ''}${isMvp ? ' mvp' : ''}${won ? '' : ' lost'}`}
-        onClick={hasBuild ? () => setOpen((v) => !v) : undefined}
-        onKeyDown={hasBuild ? (e) => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v) }
-        } : undefined}
-        tabIndex={hasBuild ? 0 : undefined}
-        aria-expanded={hasBuild ? open : undefined}
-        title={hasBuild ? 'Показать раскачку и покупки' : undefined}
-      >
-        <td data-label="Игрок">
-          <div className="hero-cell">
-            {/* Роль читается двумя независимими признаками: глиф позиции и
-                мини-карта линии. Цвет — только третий, для дальтоника его нет. */}
-            <span className="role-stack">
-              <PositionIcon position={p.position} source={p.positionSource} size={20} />
-              {p.positionSource === 'replay' && p.lane && <LaneMap lane={p.lane} radiant={p.isRadiant} size={20} />}
-            </span>
-            <span className="hero-portrait lg">
-              {hero && <img src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" width={56} height={39} />}
-            </span>
-            <div className="who">
-              <span className="who-line">
-                {p.steamAccountId ? (
-                  <>
-                    <Link className="who-name" to={`/player/${p.steamAccountId}`} onClick={(e) => e.stopPropagation()}>
-                      {p.name ?? `#${p.steamAccountId}`}
-                    </Link>
-                    <a className="ext" href={steamProfileUrl(p.steamAccountId)} target="_blank" rel="noreferrer" aria-label="Открыть профиль в Steam" onClick={(e) => e.stopPropagation()}>
-                      <Icon.External size={11} />
-                    </a>
-                  </>
-                ) : (
-                  <span className="muted" title="Имя взято из доступных публичных данных матча">Приватный игрок</span>
-                )}
-                {isMvp && <span className="mvp-tag">MVP</span>}
-              </span>
-              <span className="who-hero">
-                {hero?.name ?? `герой #${p.heroId}`} · {p.level} ур.
-                {p.leaverStatus ? ' · покинул игру' : ''}
-              </span>
-            </div>
-          </div>
-        </td>
-
-        <td className="num stat" data-label="Импакт">
-          <span className="impact-cell">
-            <ScoreBadge score={p.__score} />
-            {p.__score?.source === 'model' && (
-              <button
-                type="button"
-                className="toggle-impact"
-                aria-expanded={impactOpen}
-                onClick={(e) => { e.stopPropagation(); setImpactOpen((v) => !v) }}
-                onKeyDown={(e) => e.stopPropagation()}
-              >
-                {impactOpen ? 'скрыть' : 'разбор'}
-              </button>
-            )}
-          </span>
-        </td>
-
-        <td className="num stat" data-label="KDA"><KdaCell p={p} /></td>
-        <td className="num stat" data-label="Нетворт">{best.networth === p.networth && <span className="best">1</span>}{number(p.networth)}</td>
-        <td className="num stat" data-label="GPM">{best.goldPerMinute === p.goldPerMinute && <span className="best">1</span>}{p.goldPerMinute}</td>
-        <td className="num stat" data-label="XPM">{best.experiencePerMinute === p.experiencePerMinute && <span className="best">1</span>}{p.experiencePerMinute}</td>
-        <td className="num stat" data-label="LH / DN">
-          {best.numLastHits === p.numLastHits && <span className="best">1</span>}
-          {p.numLastHits}<span className="muted"> / {p.numDenies}</span>
-        </td>
-        <td className="num stat" data-label="Урон" title={`С поправкой на время матча: ${number(p.scaledHeroDamage)}`}>
-          {best.heroDamage === p.heroDamage && <span className="best">1</span>}
-          {number(p.heroDamage)}
-        </td>
-        <td className="num stat" data-label="Башни" title={`С поправкой на время: ${number(p.scaledTowerDamage)}`}>
-          {best.towerDamage === p.towerDamage && <span className="best">1</span>}
-          {number(p.towerDamage)}
-        </td>
-        <td className="num stat" data-label="Лечение" title={`С поправкой на время: ${number(p.scaledHeroHealing)}`}>
-          {best.heroHealing === p.heroHealing && p.heroHealing > 0 && <span className="best">1</span>}
-          {number(p.heroHealing)}
-        </td>
-
-        <td className="items-cell" data-label="Предметы">
-          <div className="items-row">
-            {p.items.map((it, i) => <ItemSlot key={i} id={it} itemMap={itemMap} />)}
-          </div>
-          <div className="items-row items-backpack">
-            {p.backpack.map((it, i) => <ItemSlot key={i} id={it} itemMap={itemMap} />)}
-            <ItemSlot id={p.neutralItem} itemMap={itemMap} cls="neutral" />
-            <span className={`item-slot${p.aghanimsScepter ? ' scepter' : ' empty'}`} title={p.aghanimsScepter ? "Aghanim's Scepter" : 'без скипетра'}>
-              {p.aghanimsScepter ? <img src={itemImageUrl('ultimate_scepter')} alt="Скипетр Аганима" loading="lazy" width={29} height={23} /> : null}
-            </span>
-            <span className={`item-slot${p.aghanimsShard ? ' shard' : ' empty'}`} title={p.aghanimsShard ? "Aghanim's Shard" : 'без шарда'}>
-              {p.aghanimsShard ? <img src={itemImageUrl('aghanims_shard')} alt="Осколок Аганима" loading="lazy" width={29} height={23} /> : null}
-            </span>
-          </div>
-        </td>
-      </tr>
-
-      {(open || impactOpen) && (
-        <tr className="detail-row">
-          <td colSpan={COLUMNS.length + 2}>
-            <div className="detail-grid">
-              {impactOpen && p.__score && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
-              {open ? (
-                <>
-                  <BuildTimeline upgrades={p.abilityUpgrades} heroId={p.heroId} />
-                  <PurchaseTimeline events={p.purchaseEvents} itemMap={itemMap} />
-                </>
-              ) : null}
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
-  )
-}
-
-function TeamPanel({ side, board, heroMap, itemMap, durationSec, sort, onSort }: {
+function TeamTable({ side, board, heroMap, itemMap, durationSec }: {
   side: TeamSide
   board: MatchBoard
   heroMap: Map<number, HeroInfo>
   itemMap: Map<number, ItemInfo>
   durationSec: number
-  sort: { key: string; dir: 'asc' | 'desc' }
-  onSort: (next: { key: string; dir: 'asc' | 'desc' }) => void
 }) {
   const won = side.players.every((p) => p.isVictory) && side.players.length > 0
-  const rows = useMemo(() => {
-    const mapped: Row[] = side.players.map((p, i) => ({ ...p, __impact: side.scores[i]?.value ?? 0, __score: side.scores[i] ?? null }))
-    const column = COLUMNS.find((c) => c.key === sort.key)
-    if (!column) return mapped
-    const dir = sort.dir === 'desc' ? -1 : 1
-    return mapped.sort((a, b) => {
-      const av = column.sort(a)
-      const bv = column.sort(b)
-      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
-      return String(av).localeCompare(String(bv), 'ru') * dir
-    })
-  }, [side, sort])
-
+  const rows: Row[] = side.players
+    .map((p, i) => ({ ...p, __impact: side.scores[i]?.value ?? 0, __score: side.scores[i] ?? null }))
+    .sort((a, b) => posOf(a) - posOf(b))
   const mvpId = board.mvp ? `${board.mvp.player.steamAccountId}:${board.mvp.player.heroId}` : null
+  const maxDamage = Math.max(1, ...side.players.map((p) => p.heroDamage))
 
   return (
-    <section className={`team team-${side.radiant ? 'r' : 'd'}`}>
-      <header className="team-head">
-        <span className="team-flag" aria-hidden="true" />
-        <h2 className="team-name">{side.label}</h2>
-        <span className="team-result">{won ? 'Победа' : 'Поражение'}</span>
-        <span className="team-tally">
-          <span className="tally-cell"><b>{side.kills}</b> убийств</span>
-          <span className="tally-cell"><b>{number(side.networth)}</b> нетворта</span>
-          <span className="tally-cell">импакт <b className={side.impactTotal >= 0 ? 'green' : 'red'}>{signed(side.impactTotal)}</b></span>
+    <section className={`team ${side.radiant ? 'r' : 'd'}`}>
+      <header className="team-h">
+        <span className="flag" aria-hidden="true" />
+        <h2 className="team-n">{side.label}</h2>
+        <span className={`badge ${won ? 'badge-win' : 'badge-loss'}`}>{won ? 'Победа' : 'Поражение'}</span>
+        <span className="team-sum">
+          <span><b>{side.kills}</b> убийств</span>
+          <span><b>{number(side.networth)}</b> нетворс</span>
+          <span>импакт <b className={side.impactTotal >= 0 ? 'pos' : 'neg'}>{signed(side.impactTotal)}</b></span>
         </span>
       </header>
 
-      <div className="table-wrap">
-        <table className="table roster">
-          <thead>
-            <tr>
-              <th className="col-hero">Игрок</th>
-              {COLUMNS.map((column) => {
-                const active = sort.key === column.key
-                return (
-                  <th key={column.key} className="num" title={column.title} aria-sort={active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}>
-                    <button
-                      type="button"
-                      className="sort-btn"
-                      onClick={() => onSort({ key: column.key, dir: active && sort.dir === 'desc' ? 'asc' : 'desc' })}
-                    >
-                      {column.label}
-                      <Icon.Chevron size={10} />
-                    </button>
-                  </th>
-                )
-              })}
-              <th>Предметы</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((p) => (
-              <PlayerRow
-                key={`${p.steamAccountId}:${p.heroId}`}
-                p={p}
-                heroMap={heroMap}
-                itemMap={itemMap}
-                won={won}
-                board={board}
-                isMvp={mvpId === `${p.steamAccountId}:${p.heroId}`}
-                durationSec={durationSec}
-              />
-            ))}
-          </tbody>
-        </table>
+      <div className="thead">
+        <span>Игрок</span>
+        <span>Импакт</span>
+        <span>K / D / A</span>
+        <span>Нетворс</span>
+        <span>GPM / XPM</span>
+        <span>LH / DN</span>
+        <span>Урон</span>
+        <span>Предметы</span>
+        <span />
       </div>
+
+      {rows.map((p) => (
+        <PlayerRow
+          key={`${p.steamAccountId}:${p.heroId}`}
+          p={p}
+          heroMap={heroMap}
+          itemMap={itemMap}
+          maxDamage={maxDamage}
+          isMvp={mvpId === `${p.steamAccountId}:${p.heroId}`}
+          durationSec={durationSec}
+        />
+      ))}
     </section>
+  )
+}
+
+function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec }: {
+  p: Row
+  heroMap: Map<number, HeroInfo>
+  itemMap: Map<number, ItemInfo>
+  maxDamage: number
+  isMvp: boolean
+  durationSec: number
+}) {
+  const hero = heroMap.get(p.heroId)
+  const [open, setOpen] = useState(false)
+  const canOpen = p.abilityUpgrades.length > 0 || p.purchaseEvents !== undefined || p.__score?.source === 'model'
+
+  return (
+    <div className={`tgrp${open ? ' open' : ''}`}>
+      <div
+        className={`trow${isMvp ? ' mvp-row' : ''}`}
+        onClick={canOpen ? () => setOpen((v) => !v) : undefined}
+        onKeyDown={canOpen ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen((v) => !v) } } : undefined}
+        role={canOpen ? 'button' : undefined}
+        tabIndex={canOpen ? 0 : undefined}
+        aria-expanded={canOpen ? open : undefined}
+      >
+        <span className="c-who">
+          <span className="c-role">
+            <PositionIcon position={p.position} source={p.positionSource} size={40} />
+            {p.positionSource === 'replay' && p.lane && <LaneMap lane={p.lane} radiant={p.isRadiant} size={16} />}
+          </span>
+          <span className={`port ${p.isRadiant ? 'r' : 'd'}`}>
+            {hero && <img src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
+          </span>
+          <span className="c-name">
+            <span className="c-nm">
+              {p.steamAccountId ? (
+                <Link to={`/player/${p.steamAccountId}`} onClick={(e) => e.stopPropagation()}>
+                  {p.name ?? `#${p.steamAccountId}`}
+                </Link>
+              ) : (
+                <span className="dim" title="Имя взято из доступных публичных данных матча">Приватный игрок</span>
+              )}
+              {isMvp && <span className="mvp"><Icon.Crown size={14} /> MVP</span>}
+            </span>
+            <span className="dim">
+              {hero?.name ?? `герой #${p.heroId}`}, {p.level} ур.
+              {p.leaverStatus ? ' · покинул игру' : ''}
+            </span>
+          </span>
+        </span>
+
+        <span className="c-imp"><ImpactMeter score={p.__score} /></span>
+
+        <span className="c-kda">
+          <b>{p.kills} / <i>{p.deaths}</i> / {p.assists}</b>
+          <span className="dim">KDA {p.deaths === 0 ? (p.kills + p.assists).toFixed(2) : ((p.kills + p.assists) / p.deaths).toFixed(2)}</span>
+        </span>
+
+        <span className="c-nw">{number(p.networth)}</span>
+
+        <span className="c-gx">
+          <span>{p.goldPerMinute} <span className="dim">GPM</span></span>
+          <span>{p.experiencePerMinute} <span className="dim">XPM</span></span>
+        </span>
+
+        <span className="c-lh">{p.numLastHits} / {p.numDenies}</span>
+
+        <span className="c-dm">
+          <b>{number(p.heroDamage)}</b>
+          <span className="bar"><i style={{ width: `${(p.heroDamage / maxDamage) * 100}%` }} /></span>
+        </span>
+
+        <span className="c-items">
+          {p.items.map((it, i) => <ItemSlot key={i} id={it} itemMap={itemMap} />)}
+          <ItemSlot id={p.neutralItem} itemMap={itemMap} cls="neu" />
+        </span>
+
+        {canOpen && (
+          <button
+            type="button"
+            className="c-go"
+            aria-label={open ? 'Скрыть детали' : 'Показать детали'}
+            onClick={(e) => { e.stopPropagation(); setOpen((v) => !v) }}
+          >
+            <Icon.Chevron size={20} />
+          </button>
+        )}
+      </div>
+
+      {open && (
+        <div className="det">
+          <div>
+            <div className="det-t">Прочие числа</div>
+            <div className="det-r"><span>Урон башням</span><b>{number(p.towerDamage)}</b></div>
+            <div className="det-r"><span>Лечение</span><b>{number(p.heroHealing)}</b></div>
+            <div className="det-r"><span>Скипетр</span><b>{p.aghanimsScepter ? 'есть' : 'нет'}</b></div>
+            <div className="det-r"><span>Осколок</span><b>{p.aghanimsShard ? 'есть' : 'нет'}</b></div>
+            <div className="det-r"><span>Рюкзак</span><b>{p.backpack.filter(Boolean).length ? '' : 'пуст'}</b></div>
+            {p.backpack.some(Boolean) && (
+              <span className="c-items" style={{ marginTop: 'var(--sp-8)' }}>
+                {p.backpack.map((it, i) => <ItemSlot key={i} id={it} itemMap={itemMap} />)}
+              </span>
+            )}
+            <a
+              className="ext"
+              style={{ marginTop: 'var(--sp-12)' }}
+              href={p.steamAccountId ? steamProfileUrl(p.steamAccountId) : undefined}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Профиль в Steam
+              <Icon.External size={14} />
+            </a>
+          </div>
+          {p.__score?.source === 'model' && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
+          <BuildTimeline upgrades={p.abilityUpgrades} heroId={p.heroId} />
+          <PurchaseTimeline events={p.purchaseEvents} itemMap={itemMap} />
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -281,14 +202,10 @@ export default function Rosters({ board, heroMap, itemMap, durationSec }: {
   itemMap: Map<number, ItemInfo>
   durationSec: number
 }) {
-  // Порядок один на обе команды: иначе строки Radiant и Dire расходятся, и
-  // «керри против керри» перестаёт читаться по строкам.
-  const [sort, setSort] = useState({ key: 'position', dir: 'asc' as 'asc' | 'desc' })
-
   return (
-    <div className="rosters">
-      <TeamPanel side={board.radiant} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} sort={sort} onSort={setSort} />
-      <TeamPanel side={board.dire} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} sort={sort} onSort={setSort} />
+    <div>
+      <TeamTable side={board.radiant} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} />
+      <TeamTable side={board.dire} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} />
     </div>
   )
 }

@@ -36,7 +36,7 @@ export default function LaneMap({ lane, radiant, size = 22 }: {
 
   return (
     <svg
-      className="lane-map"
+      className="lane"
       viewBox="0 0 24 24"
       width={size}
       height={size}
@@ -45,12 +45,12 @@ export default function LaneMap({ lane, radiant, size = 22 }: {
       focusable="false"
     >
       <title>{`${LANE_RU[lane]}${radiant ? ', Radiant' : ', Dire'}`}</title>
-      <rect className="lane-map-field" x="1" y="1" width="22" height="22" rx="2" />
-      <path className="lane-map-river" d="M2 2 L22 22" />
+      <rect className="lane-f" x="1" y="1" width="22" height="22" rx="2" />
+      <path className="lane-r" d="M2 2 L22 22" />
       {all.map((d) => (
-        <path key={d} className={`lane-map-line${d === active ? ' on' : ''}`} d={d} />
+        <path key={d} className={`lane-l${d === active ? ' on' : ''}`} d={d} />
       ))}
-      <circle className={`lane-map-base${radiant ? ' r' : ' d'}`} cx={radiant ? 3 : 21} cy={radiant ? 21 : 3} r="1.8" />
+      <circle className={`lane-b${radiant ? ' r' : ' d'}`} cx={radiant ? 3 : 21} cy={radiant ? 21 : 3} r="1.8" />
     </svg>
   )
 }
