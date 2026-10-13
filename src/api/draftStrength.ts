@@ -98,7 +98,6 @@ const laneKey = (p: MatchPlayer, role: number): string =>
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
 
 const SIDE: Record<LaneSide, string> = { radiant: 'Radiant', dire: 'Dire', even: 'никто' }
-const pctOf = (v: number) => `${(v * 100).toFixed(0)}%`
 const group = (n: number) => Math.round(n).toLocaleString('ru-RU')
 /** больше 3% по замеру — уже перевес; меньше — «разницы нет» */
 const leadOf = (edge: number) =>
@@ -171,13 +170,15 @@ export function evaluateDraft(
       return [`${name(p.radiant)} ${ri.toFixed(2)}× против ${name(p.dire)} ${di.toFixed(2)}×${who ? ` — сильнее ${who}` : ' — равные'}`]
     })
     // Полоса «равных» узкая: по нашей базе 52% на линии — это уже 58% случаев
-    // взять её, называть такое равенством было бы враньём.
-    const expectedSide: LaneSide = share === null ? 'even' : share >= 0.52 ? 'radiant' : share <= 0.48 ? 'dire' : 'even'
+    // взять её, называть такое равенством было бы враньём. Считаем по
+    // округлённому проценту, чтобы подпись и цифра никогда не расходились.
+    const p = share === null ? 50 : Math.round(share * 100)
+    const expectedSide: LaneSide = share === null ? 'even' : p >= 52 ? 'radiant' : p <= 48 ? 'dire' : 'even'
     const expected = share === null ? null : {
       side: expectedSide,
       text: expectedSide === 'even'
-        ? `по драфту линия равная: ${pctOf(share)} против ${pctOf(1 - share)}`
-        : `по драфту линию должна была взять ${SIDE[expectedSide]}: ${pctOf(share)} против ${pctOf(1 - share)}`,
+        ? `по драфту линия равная: ${p}% против ${100 - p}%`
+        : `по драфту линию должна была взять ${SIDE[expectedSide]}: ${p}% против ${100 - p}%`,
       lines: pairLines,
     }
 
