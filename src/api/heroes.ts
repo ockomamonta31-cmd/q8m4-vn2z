@@ -60,6 +60,13 @@ export function heroImageUrl(shortName: string): string {
   return `https://cdn.steamstatic.com/apps/dota2/images/dota_react/heroes/${shortName}.png`
 }
 
+/** Рендер героя 1440×1440 на прозрачном фоне — единственный арт Valve,
+    который тянет full-bleed hero без мыла. Портрет 256×144 остаётся
+    запасным вариантом: у части героев рендера нет. */
+export function heroRenderUrl(shortName: string): string {
+  return `https://cdn.cloudflare.steamstatic.com/apps/dota2/videos/dota_react/heroes/renders/${shortName}.png`
+}
+
 export function avatarImageUrl(avatar: string | null | undefined): string {
   if (avatar) return avatar
   return 'https://steamcdn-a.akamaihd.net/steamcommunity/public/images/avatars/fe/fef49e7fa7e1997310d705b2a6158ff8dc1cdfeb_full.jpg'

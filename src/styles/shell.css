@@ -410,9 +410,9 @@
 }
 
 @media (max-width: 768px) {
-  .hdr-in { grid-template-columns: 1fr auto; padding: 0 var(--sp-16); }
-  .find { display: none; }
-  .brand-t { font-size: var(--fs-16); }
+  .hdr-in { grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--sp-12); padding: 0 var(--sp-16); }
+  .brand-t { display: none; }
+  .acct-me span { display: none; }
   .home { padding-top: var(--sp-48); }
   .home-t { font-size: var(--fs-44); }
   .home-form { flex-wrap: wrap; }

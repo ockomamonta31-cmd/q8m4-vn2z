@@ -59,7 +59,7 @@ export function Counter({ value, duration = 900, format = (n: number) => String(
   return <span className={className} ref={ref}>{prefix}{format(display)}{suffix}</span>
 }
 
-export function CopyButton({ text, label }: { text: string; label?: string }) {
+export function CopyButton({ text, label, primary }: { text: string; label?: string; primary?: boolean }) {
   const [done, setDone] = useState(false)
 
   async function copy() {
@@ -82,7 +82,7 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
   }
 
   return (
-    <button type="button" className={`btn btn-q${done ? ' done' : ''}`} onClick={copy} aria-label={`Скопировать ${label ?? text}`}>
+    <button type="button" className={`btn${primary ? '' : ' btn-q'}${done ? ' done' : ''}`} onClick={copy} aria-label={`Скопировать ${label ?? text}`}>
       {done ? <Icon.Check size={16} /> : <Icon.Copy size={16} />}
       {done ? 'Скопировано' : label ?? text}
     </button>
