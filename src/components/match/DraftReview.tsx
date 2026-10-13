@@ -6,7 +6,7 @@ import type { HeroInfo, MatchPlayer } from '../../api/types'
 import { heroImageUrl } from '../../api/heroes'
 import { ATTR_RU, ATTACK_RU, TAG_ORDER, TAG_RU, getHeroMeta, type HeroMeta } from '../../api/heroMeta'
 import { draftNotes, laneGaps, teamProfile, type TeamProfile } from '../../api/draft'
-import { callShare, type DraftRating, type LaneCall } from '../../api/draftStrength'
+import { type DraftRating, type LaneCall } from '../../api/draftStrength'
 import RoleIcon from '../RoleIcon'
 
 function Side({ team }: { team: TeamProfile }) {
@@ -54,12 +54,22 @@ function Hero({ player, heroMap, side }: { player: MatchPlayer | null; heroMap: 
 
 const fmt = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(0)}`
 
-const ratio = (share: number | null) => (share === null ? '—' : `${(share * 100).toFixed(0)} : ${((1 - share) * 100).toFixed(0)}`)
+function Call({ kind, call }: { kind: 'expected' | 'result'; call: LaneCall['expected'] | LaneCall['result'] }) {
+  return (
+    <div className={`lm-call ${kind}`}>
+      <span className="lm-call-k">{kind === 'expected' ? 'Что обещал драфт' : 'Что вышло в матче'}</span>
+      <b className="lm-call-t">{call ? call.text : 'предсказать нечего: профилей этих героев на этих ролях мало'}</b>
+      {!!call?.lines.length && (
+        <ul className="lm-call-l">
+          {call.lines.map((l) => <li key={l}>{l}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo> }) {
   const gaps = laneGaps(lane.radiant, lane.dire)
-  const call = callShare(lane.share)
-  const fact = lane.actual === 'radiant' ? 'взял Radiant' : lane.actual === 'dire' ? 'взяла Dire' : lane.actual === 'even' ? 'равная' : 'неизвестно'
   return (
     <section className="lm">
       <header className="lm-h">
@@ -67,19 +77,19 @@ function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo
           <h5 className="lm-t">{lane.label}</h5>
           <span className="dim t12">{lane.note}</span>
         </span>
-        <span className="lm-calls">
-          <span className="lm-call">
-            <span className="dim t12">по драфту</span>
-            <b>{ratio(lane.share)}</b>
-            <span className={`t12 ${call.tone}`}>{call.text}</span>
-          </span>
-          <span className="lm-call">
-            <span className="dim t12">по факту</span>
-            <b>{lane.actualEdge === null ? '—' : fmt(lane.actualEdge)}</b>
-            <span className="dim t12">{fact}{lane.hit === null ? '' : lane.hit ? ' · совпало' : ' · не совпало'}</span>
-          </span>
+        <span className={`lm-badge ${lane.expected?.side === 'even' ? 'dim' : lane.hit === null ? 'dim' : lane.hit ? 'pos' : 'neg'}`}>
+          {lane.expected?.side === 'even'
+            ? 'драфт обещал равную'
+            : lane.hit === null
+              ? 'сравнивать не с чем'
+              : lane.hit ? 'совпало' : 'не совпало'}
         </span>
       </header>
+
+      <div className="lm-calls">
+        <Call kind="expected" call={lane.expected} />
+        <Call kind="result" call={lane.result} />
+      </div>
 
       <ul className="lm-pairs">
         {lane.pairs.map((pair, i) => {
@@ -151,10 +161,11 @@ export default function DraftReview({ players, heroMap, rating }: {
       )}
 
       <p className="pnote">
-        «По драфту» — предсказание до матча: как такие герои на своих ролях стоят
-        такие линии по нашей базе ({rating ? rating.corpus : '…'} матчей). «По факту» —
-        что линия реально дала в этом матче: край по GPM, опыту, добиваниям и
-        нетворсу. {rating?.model ? `По нашей же базе такая модель берёт линию в ${(rating.model.laneAccuracy * 100).toFixed(0)}% случаев из ${rating.model.lanes} разобранных линий.` : ''}
+        Слева — что обещал драфт: как эти герои на этих ролях стоят такие линии по
+        нашей базе ({rating ? rating.corpus : '…'} матчей). Справа — что дала линия в
+        этом матче по четырём замерам; её берёт та сторона, которая выиграла
+        большинство замеров. {rating?.model ? `На нашей базе модель угадывает линию в ${(rating.model.laneAccuracy * 100).toFixed(0)}% случаев (${rating.model.lanes} линий).` : ''}
+        Ниже — сами пары и числа каждого героя.
         {rating && !rating.realLanes ? ' Линии этого матча взяты из порядка фарма, а не из разобранного реплея.' : ''}
       </p>
 

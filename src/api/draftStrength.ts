@@ -15,8 +15,10 @@
 //      выпадает из среднего, а не тянет его нулём.
 
 import type { MatchPlayer } from './types'
-import { EDGE_STRONG, laneGaps } from './draft'
+import { laneGaps } from './draft'
 import { AXES, calibrate, heroIndex, pairSynergy, realizedIndex, roleOf, type Profile } from './heroProfile'
+
+export type LaneSide = 'radiant' | 'dire' | 'even'
 
 export type LaneCall = {
   key: string
@@ -25,12 +27,13 @@ export type LaneCall = {
   radiant: MatchPlayer[]
   dire: MatchPlayer[]
   pairs: { radiant: MatchPlayer | null; dire: MatchPlayer | null }[]
-  /** предсказание: доля силы Radiant на линии, 0…1; null — героев с профилем мало */
+  /** доля силы Radiant, 0…1; null — героев с профилем слишком мало */
   share: number | null
-  /** что линия реально дала в матче, по четырём замерам, −100…100 */
-  actualEdge: number | null
-  actual: 'radiant' | 'dire' | 'even' | null
-  /** совпало ли предсказание с фактом */
+  /** кого и почему мы ожидали на линии ДО знания результата */
+  expected: { side: LaneSide; text: string; lines: string[] } | null
+  /** кто и почему забрал линию по факту */
+  result: { side: LaneSide; text: string; lines: string[] } | null
+  /** ожидался и получился один и тот же цвет */
   hit: boolean | null
   rIndex: number
   dIndex: number
@@ -94,6 +97,13 @@ const laneKey = (p: MatchPlayer, role: number): string =>
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
 
+const SIDE: Record<LaneSide, string> = { radiant: 'Radiant', dire: 'Dire', even: 'никто' }
+const pctOf = (v: number) => `${(v * 100).toFixed(0)}%`
+const group = (n: number) => Math.round(n).toLocaleString('ru-RU')
+/** больше 3% по замеру — уже перевес; меньше — «разницы нет» */
+const leadOf = (edge: number) =>
+  edge > 3 ? `Radiant впереди на ${edge.toFixed(0)}%` : edge < -3 ? `Dire впереди на ${Math.abs(edge).toFixed(0)}%` : 'разницы нет'
+
 export function evaluateDraft(
   profile: Profile,
   players: MatchPlayer[],
@@ -108,6 +118,7 @@ export function evaluateDraft(
   for (const side of [radiant, dire]) for (const p of side) roles.set(p, roleOf(p, side))
   const indexes = new Map<MatchPlayer, ReturnType<typeof heroIndex>>()
   for (const p of players) indexes.set(p, heroIndex(profile, p.heroId, roles.get(p)!))
+  const name = (p: MatchPlayer) => names?.(p.heroId) ?? `герой #${p.heroId}`
 
   const heroes: HeroRating[] = players.map((p) => {
     const idx = indexes.get(p)
@@ -149,8 +160,48 @@ export function evaluateDraft(
       ? rv.index / (rv.index + dv.index)
       : null
     const gaps = r.length && d.length ? laneGaps(r, d) : null
-    const actual: LaneCall['actual'] = !gaps ? null : gaps.edge >= EDGE_STRONG ? 'radiant' : gaps.edge <= -EDGE_STRONG ? 'dire' : 'even'
-    const predicted: LaneCall['actual'] = share === null ? null : share >= 0.57 ? 'radiant' : share <= 0.43 ? 'dire' : 'even'
+
+    // кого ожидали: сравнение пар по профилю, построчно
+    const pairLines = pairs.flatMap((p) => {
+      if (!p.radiant || !p.dire) return []
+      const ri = indexes.get(p.radiant)?.total ?? null
+      const di = indexes.get(p.dire)?.total ?? null
+      if (ri === null || di === null) return []
+      const who = ri - di >= 0.05 ? name(p.radiant) : di - ri >= 0.05 ? name(p.dire) : null
+      return [`${name(p.radiant)} ${ri.toFixed(2)}× против ${name(p.dire)} ${di.toFixed(2)}×${who ? ` — сильнее ${who}` : ' — равные'}`]
+    })
+    // Полоса «равных» узкая: по нашей базе 52% на линии — это уже 58% случаев
+    // взять её, называть такое равенством было бы враньём.
+    const expectedSide: LaneSide = share === null ? 'even' : share >= 0.52 ? 'radiant' : share <= 0.48 ? 'dire' : 'even'
+    const expected = share === null ? null : {
+      side: expectedSide,
+      text: expectedSide === 'even'
+        ? `по драфту линия равная: ${pctOf(share)} против ${pctOf(1 - share)}`
+        : `по драфту линию должна была взять ${SIDE[expectedSide]}: ${pctOf(share)} против ${pctOf(1 - share)}`,
+      lines: pairLines,
+    }
+
+    // кто взял: большинство из четырёх замеров линии, а не средняя каша
+    const metrics: { label: string; edge: number; r: number; d: number }[] = gaps ? [
+      { label: 'золото в минуту', edge: gaps.gpm, r: gaps.totals.r.gpm, d: gaps.totals.d.gpm },
+      { label: 'опыт в минуту', edge: gaps.xpm, r: gaps.totals.r.xpm, d: gaps.totals.d.xpm },
+      { label: 'добивания', edge: gaps.lh, r: gaps.totals.r.lh, d: gaps.totals.d.lh },
+      { label: 'нетворс', edge: gaps.networth, r: gaps.totals.r.nw, d: gaps.totals.d.nw },
+    ] : []
+    const metricLines = metrics.map((m) => `${m.label}: ${group(m.r)} против ${group(m.d)} — ${leadOf(m.edge)}`)
+    const rWins = metrics.filter((m) => m.edge > 3).length
+    const dWins = metrics.filter((m) => m.edge < -3).length
+    const actualSide: LaneSide = !metrics.length ? 'even' : rWins > dWins ? 'radiant' : dWins > rWins ? 'dire' : 'even'
+    const won = actualSide === 'radiant' ? rWins : actualSide === 'dire' ? dWins : 0
+    const lostBy = actualSide === 'radiant' ? dWins : rWins
+    const result = !gaps ? null : {
+      side: actualSide,
+      text: actualSide === 'even'
+        ? 'по матчу линия равная: ни одна сторона не выиграла большинства замеров'
+        : `по матчу линию взяла ${SIDE[actualSide]}: ${won} замера из 4 за неё, ${lostBy ? `${lostBy} за соперника` : 'ни одного за соперника'}`,
+      lines: metricLines,
+    }
+
     return {
       key: lane.key,
       label: lane.label,
@@ -159,9 +210,9 @@ export function evaluateDraft(
       dire: dSorted,
       pairs,
       share,
-      actualEdge: gaps ? gaps.edge : null,
-      actual,
-      hit: predicted && actual ? predicted === actual : null,
+      expected,
+      result,
+      hit: expected && result && expected.side !== 'even' && result.side !== 'even' ? expected.side === result.side : null,
       rIndex: rv.index ?? 0,
       dIndex: dv.index ?? 0,
       coverage: Math.min(rv.coverage, dv.coverage),
@@ -230,17 +281,16 @@ export function evaluateDraft(
     !match || match.didRadiantWin === null || match.didRadiantWin === undefined ? null : match.didRadiantWin ? 'radiant' : 'dire'
   const outcome = winner ? { winner, hit: winner === predicted } : null
 
-  // --- «что пошло не так»: только расхождения предикта и факта, с числами
+  // --- «что пошло не так»: только расхождения предикта и факта, человеческим языком
   const why: WhyLine[] = []
-  const label = (side: 'radiant' | 'dire' | 'even') => (side === 'radiant' ? 'Radiant' : side === 'dire' ? 'Dire' : 'равные')
   for (const lane of lanes) {
-    if (lane.hit === false && lane.actual && lane.share !== null) {
-      const expected = lane.share >= 0.5 ? 'radiant' : 'dire'
-      why.push({
-        text: `${lane.label}: ждали ${label(expected)}, по факту ${label(lane.actual)} — край ${lane.actualEdge!.toFixed(0)} по GPM/опыту/ЛХ/нетворсу.`,
-        tone: lane.actual === 'radiant' ? 'pos' : 'neg',
-      })
-    }
+    if (lane.hit !== false || !lane.expected || !lane.result) continue
+    const decided = lane.result.lines[0] ?? ''
+    const turned = lane.result.lines.find((l) => (lane.expected!.side === 'radiant' ? l.includes('Dire впереди') : l.includes('Radiant впереди'))) ?? decided
+    why.push({
+      text: `${lane.label}: ${lane.expected.text.toLowerCase()}, а ${lane.result.text.toLowerCase()}${turned ? ` — ${turned}` : ''}.`,
+      tone: lane.result.side === 'radiant' ? 'pos' : 'neg',
+    })
   }
   const deviations = heroes
     .filter((h) => h.index !== null && h.realized !== null)
@@ -250,14 +300,14 @@ export function evaluateDraft(
   for (const { h, diff } of deviations) {
     if (Math.abs(diff) < 0.12) continue
     why.push({
-      text: `${names?.(h.player.heroId) ?? `герой #${h.player.heroId}`} (${h.role}-я роль): профиль обещал ${h.index!.toFixed(2)}×, по матчу ${h.realized!.toFixed(2)}× — ${diff > 0 ? 'выше' : 'ниже'} на ${Math.abs(diff * 100).toFixed(0)}%.`,
+      text: `${name(h.player)} (${h.role}-я роль): по профилю ждали ${h.index!.toFixed(2)}×, по матчу ${h.realized!.toFixed(2)}× — сыграл${h.player.isRadiant ? '' : ''} ${diff > 0 ? 'сильнее' : 'слабее'} своего профиля на ${Math.abs(diff * 100).toFixed(0)}%.`,
       tone: diff > 0 === h.player.isRadiant ? 'pos' : 'neg',
     })
   }
   if (!why.length) {
     why.push({
       text: outcome?.hit === false
-        ? 'Линии взяты туда, куда и ждали — матч решился не линией, а тем, что было после неё.'
+        ? 'Все три линии ушли туда, куда обещал драфт, — матч решился не линией, а тем, что было после неё.'
         : 'Расхождений нет: линии и итог совпали с тем, что обещал драфт.',
       tone: 'dim',
     })
@@ -281,11 +331,11 @@ export function evaluateDraft(
   }
 }
 
-/** Вердикт по перевесу: до 57% против 43% считаем равным — спор о десятых долях бесполезен. */
+/** Вердикт по перевесу: полоса «равные» узкая — по нашей базе 52% уже выигрывает чаще. */
 export function callShare(share: number | null): { text: string; tone: 'pos' | 'neg' | 'dim' } {
   if (share === null) return { text: 'данных не хватает', tone: 'dim' }
   const pct = share * 100
-  if (pct >= 57) return { text: 'перевес Radiant', tone: 'pos' }
-  if (pct <= 43) return { text: 'перевес Dire', tone: 'neg' }
+  if (pct >= 52) return { text: 'перевес Radiant', tone: 'pos' }
+  if (pct <= 48) return { text: 'перевес Dire', tone: 'neg' }
   return { text: 'равные', tone: 'dim' }
 }

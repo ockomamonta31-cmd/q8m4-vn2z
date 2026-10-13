@@ -52,11 +52,12 @@ for (const f of readdirSync(MATCHES)) {
   put(calibration, rating.total.radiant / 100, match.didRadiantWin)
 
   for (const lane of rating.lanes) {
-    if (lane.share === null || !lane.actual || lane.actual === 'even') continue
+    const side = lane.result?.side
+    if (lane.share === null || !side || side === 'even') continue
     laneGames += 1
     const call = lane.share >= 0.5 ? 'radiant' : 'dire'
-    if (call === lane.actual) laneHits += 1
-    put(laneCalibration, lane.share, lane.actual === 'radiant')
+    if (call === side) laneHits += 1
+    put(laneCalibration, lane.share, side === 'radiant')
   }
 }
 

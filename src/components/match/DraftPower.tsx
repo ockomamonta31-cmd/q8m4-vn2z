@@ -49,12 +49,12 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
         </div>
         <div className="dp-facts">
           <div className="dp-fact">
-            <span className="dim t12">ожидалось</span>
+            <span className="dim t12">предсказание</span>
             <b>{rating.total.radiant.toFixed(0)} : {rating.total.dire.toFixed(0)}</b>
             <span className="dim t12">{pct(rating.prediction.probability)} — Radiant</span>
           </div>
           <div className="dp-fact">
-            <span className="dim t12">по факту</span>
+            <span className="dim t12">итог матча</span>
             <b>{winner ? (winner === 'radiant' ? 'Radiant' : 'Dire') : '—'}</b>
             <span className={hit === null ? 'dim t12' : hit ? 'pos t12' : 'neg t12'}>
               {hit === null ? 'исхода нет' : hit ? 'предсказание сработало' : 'предсказание не сработало'}
@@ -120,11 +120,11 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
                     </span>
                     <span className="dp-hnums">
                       <b>{h.index === null ? '—' : `${h.index.toFixed(2)}×`}</b>
-                      <span className="dim t12">ждали</span>
+                      <span className="dim t12">по профилю</span>
                     </span>
                     <span className="dp-hnums">
                       <b className={delta === null ? 'dim' : delta >= 0 ? 'pos' : 'neg'}>{h.realized === null ? '—' : `${h.realized.toFixed(2)}×`}</b>
-                      <span className="dim t12">вышло</span>
+                      <span className="dim t12">по матчу</span>
                     </span>
                   </li>
                 )
@@ -140,8 +140,9 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
         значит «делает свою работу как средний». Ось команды — среднее по её
         героям, итог — среднее по осям, где данных хватило обеим сторонам.
         Вероятность — не наша догадка: это частота побед в тех же {rating.corpus} матчах,
-        где модель выдавала такую же долю силы. Столбец «вышло» — что герой
-        показал в этом матче в тех же единицах; от него и считается расхождение.
+        где модель выдавала такую же долю силы. Столбцы «по профилю / по матчу» —
+        что герой обещает в среднем и что он выдал здесь, в одних и тех же
+        единицах; из разницы и сложен разбор расхождения.
         Это разбор драфта, а не ставка.
       </p>
     </section>

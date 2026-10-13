@@ -526,9 +526,15 @@
 .lm { display: grid; gap: var(--sp-12); min-width: 0; }
 .lm-h { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-12); padding-bottom: var(--sp-8); border-bottom: 1px solid var(--line); }
 .lm-t-wrap { display: grid; gap: var(--sp-4); min-width: 0; }
-.lm-calls { display: flex; gap: var(--sp-24); flex: none; }
-.lm-call { display: grid; gap: var(--sp-4); justify-items: end; text-align: right; }
-.lm-call b { font-size: var(--fs-20); font-weight: 700; line-height: 1; }
+.lm-badge { font-size: var(--fs-12); line-height: 1; padding: var(--sp-4) var(--sp-8); border-radius: var(--r-sm); background: var(--surface-2); color: var(--text-dim); flex: none; }
+.lm-badge.pos { background: var(--radiant-d); color: var(--text); }
+.lm-badge.neg { background: var(--dire-d); color: var(--text); }
+.lm-calls { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-16); margin-top: var(--sp-12); }
+.lm-call { display: grid; gap: var(--sp-8); align-content: start; min-width: 0; }
+.lm-call-k { font-size: var(--fs-12); color: var(--text-dim); }
+.lm-call-t { font-size: var(--fs-16); font-weight: 600; line-height: var(--lh-body); }
+.lm-call-l { display: grid; gap: var(--sp-4); font-size: var(--fs-12); color: var(--text-dim); list-style: none; }
+.lm-call-l li { overflow-wrap: anywhere; }
 .lm-t { font-family: var(--display); font-weight: 400; font-size: var(--fs-20); line-height: 1; }
 .lm-v { display: grid; gap: var(--sp-4); justify-items: end; text-align: right; }
 .lm-v b { font-size: var(--fs-16); font-weight: 700; }
@@ -637,5 +643,5 @@
   .dp-facts { grid-template-columns: minmax(0, 1fr); gap: var(--sp-12); }
   .dp-hnums { gap: var(--sp-8); }
   .lm-h { flex-direction: column; align-items: flex-start; gap: var(--sp-8); }
-  .lm-call { justify-items: start; text-align: left; }
+  .lm-calls { grid-template-columns: minmax(0, 1fr); }
 }
