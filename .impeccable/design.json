@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-13T06:22:11Z",
+  "title": "Design System: Dota Match Lab",
+  "extensions": {
+    "colorMeta": {
+      "riverbed": { "role": "surface", "displayName": "Riverbed Depth", "canonical": "#0a1e26", "note": "Root html background, footer/topbar, input wells, track off-state. Deepest field.", "tonalRamp": ["#0a1e26", "#12323c", "#19414d", "#1f4f5d", "#2a6273"] },
+      "river": { "role": "surface", "displayName": "River Water", "canonical": "#12323c", "note": "Page background and theme-color; 197deg / 55% saturation — an explicitly tinted surface, not black-with-a-hint. Light stop of the world gradient.", "contrastTextOn": "ink-3 on river = 5.60:1", "tonalRamp": ["#0a1e26", "#12323c", "#19414d", "#1f4f5d", "#2a6273"] },
+      "stone": { "role": "surface", "displayName": "Stone Rail", "canonical": "#19414d", "note": "Default panel/card/table ground; the surface every ink contrast ratio is measured on.", "tonalRamp": ["#0a1e26", "#12323c", "#19414d", "#1f4f5d", "#2a6273"] },
+      "stone-2": { "role": "surface", "displayName": "Lit Stone", "canonical": "#1f4f5d", "note": "Raised/hover/active surface: selected tab, hovered row, focused search fill, scrollbar thumb.", "tonalRamp": ["#0a1e26", "#12323c", "#19414d", "#1f4f5d", "#2a6273"] },
+      "ink": { "role": "text", "displayName": "Surface Ink", "canonical": "#eaf3f5", "contrastOnStone": "12.05:1", "legalUse": "any text", "tonalRamp": ["#4a6b77", "#89acb8", "#a9c4cc", "#eaf3f5"] },
+      "ink-2": { "role": "text", "displayName": "Second Ink", "canonical": "#a9c4cc", "contrastOnStone": "7.40:1", "legalUse": "secondary text, placeholders, ghost/chip labels", "tonalRamp": ["#4a6b77", "#89acb8", "#a9c4cc", "#eaf3f5"] },
+      "ink-3": { "role": "text", "displayName": "Quiet Ink", "canonical": "#89acb8", "contrastOnStone": "4.55:1", "contrastOnRiver": "5.60:1", "legalUse": "captions, section notes, table headers — the faintest legal text color", "tonalRamp": ["#4a6b77", "#89acb8", "#a9c4cc", "#eaf3f5"] },
+      "ink-4": { "role": "non-text", "displayName": "Hairline Ink", "canonical": "#4a6b77", "contrastOnStone": "2.37:1", "legalUse": "STROKES / SEPARATORS / ICONS ONLY — never a color: for text", "tonalRamp": ["#4a6b77", "#89acb8", "#a9c4cc", "#eaf3f5"] },
+      "radiant": { "role": "semantic-camp", "displayName": "Radiant Moss", "canonical": "#4fd18b", "note": "Left/top branch of the axis. Fills nodes, camp rails, win states. Meaning, never decoration.", "tonalRamp": ["#0d2a22", "#12432f", "#1c6b45", "#2f9463", "#4fd18b", "#68dd9f", "#7fe3b4", "#a8f0cb"] },
+      "radiant-ink": { "role": "semantic-camp", "displayName": "Radiant Ink", "canonical": "#7fe3b4", "contrastOnStone": "8.76:1", "legalUse": "Radiant values set as text (score, names, tallies)", "tonalRamp": ["#0d2a22", "#12432f", "#1c6b45", "#2f9463", "#4fd18b", "#68dd9f", "#7fe3b4", "#a8f0cb"] },
+      "dire": { "role": "semantic-camp", "displayName": "Dire Ember", "canonical": "#ef5f4f", "note": "Right/bottom branch. Pairs with radiant as a red/green pair the colorblind cannot separate — hence the Never-Only-Color rule.", "tonalRamp": ["#2b1210", "#5a1f18", "#8f3125", "#c14635", "#ef5f4f", "#ff7361", "#ff8a7a", "#ffb0a6"] },
+      "dire-ink": { "role": "semantic-camp", "displayName": "Dire Ink", "canonical": "#ff8a7a", "contrastOnStone": "5.93:1", "legalUse": "Dire values set as text", "tonalRamp": ["#2b1210", "#5a1f18", "#8f3125", "#c14635", "#ef5f4f", "#ff7361", "#ff8a7a", "#ffb0a6"] },
+      "aegis": { "role": "accent", "displayName": "Aegis Gold", "canonical": "#f0c46a", "contrastOnStone": "8.28:1", "textOnGold": "#1b1405 = 11.15:1", "note": "The one true accent. Actionable-or-won only: buttons, focus ring, caret, selection, minute-scrub, active sort, copy-ID, MVP, decisive fights, milestones, Roshan node.", "tonalRamp": ["#1b1405", "#2b2110", "#6a4f1e", "#a87e30", "#d0a247", "#f0c46a", "#f4d288", "#f8e0b0"] },
+      "shard": { "role": "borrowed", "displayName": "Aghanim Shard", "canonical": "#7fb6e8", "note": "The only blue in the system. Appears solely as the inset ring on scepter/shard item slots; it is the item's color, not the interface's.", "tonalRamp": ["#2b4a63", "#4f7ba0", "#7fb6e8", "#a9d0f2"] }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "The match outcome word (camp-colored) and home/profile headline. Rare and huge." },
+      "headline": { "displayName": "Headline", "purpose": "Section titles and the spine readout title. letter-spacing 0 — hierarchy from size/weight/air, not tracking or caps." },
+      "title": { "displayName": "Title", "purpose": "Panel/insight-lead/side titles, winning-hero art name." },
+      "stat-numeral": { "displayName": "Stat Numeral", "purpose": "The .num class and every KDA/gold/duration figure: PT Sans Narrow, tabular lining numerals, right-aligned so columns sum at the digit." },
+      "body": { "displayName": "Body", "purpose": "Golos Text prose, notes, descriptions. Measures capped near 62–72ch." },
+      "label": { "displayName": "Label", "purpose": "Table headers, section notes, chips. 500 weight, not uppercase." }
+    },
+    "shadows": [
+      { "name": "shadow-sm", "value": "0 1px 2px rgba(3, 12, 16, .5)", "purpose": "Minimal contact shadow." },
+      { "name": "shadow", "value": "0 1px 0 rgba(150, 202, 216, .06) inset, 0 12px 28px -18px rgba(3, 12, 16, .9)", "purpose": "Default panel lift at rest — the inset top hairline reads as ambient, the long low-alpha drop reads as resting height." },
+      { "name": "shadow-pop", "value": "0 2px 4px rgba(3, 12, 16, .45), 0 28px 56px -24px rgba(3, 12, 16, .95)", "purpose": "Floating state only: hero plate, recent-search dropdown, chart tooltip." },
+      { "name": "backdrop-blur", "value": "blur(12px) over color-mix(in oklab, var(--stone) 88%, transparent)", "purpose": "The ONLY translucency — sticky subnav. Everything else is opaque." },
+      { "name": "team-flag-glow", "value": "0 0 14px -1px var(--team)", "purpose": "The single deliberate glow exception (.team-flag 3px camp bar). Do not extend — depth stays tonal." }
+    ],
+    "motion": [
+      { "name": "ease", "value": "cubic-bezier(.2, 0, 0, 1)", "purpose": "Default easing for state transitions (hover, focus, color)." },
+      { "name": "ease-out", "value": "cubic-bezier(.16, 1, .3, 1)", "purpose": "Entrance/settle easing." },
+      { "name": "d-hit", "value": "70ms", "purpose": "Instant response for hover/scan states — data is scanned hundreds of times a session." },
+      { "name": "d-fast", "value": "110ms", "purpose": "Tab swap, subtle fades." },
+      { "name": "d-mid", "value": "200ms", "purpose": "The three-stage page entrance (stage-rise)." },
+      { "name": "d-load", "value": "620ms", "purpose": "The one orchestrated moment: hero-plate background + world-layer load." },
+      { "name": "keyframes:stage-rise", "value": "from { transform: translateY(12px); }", "purpose": "Transform-only entrance; intentionally NO opacity so content is never invisible on any frame. Staggered 0/70/140ms." },
+      { "name": "keyframes:tab-in", "value": "from { opacity: 0; }", "purpose": "Tab panel swap, --d-fast." },
+      { "name": "keyframes:draw", "value": "stroke-dashoffset: var(--len,2000) -> 0, 900ms", "purpose": "Chart line draw-on." },
+      { "name": "keyframes:shimmer", "value": "translateX(-100%) -> 100%, 1.5s linear infinite", "purpose": "Skeleton placeholder sweep." },
+      { "name": "keyframes:pop", "value": "from { opacity:0; transform: translateY(-5px) scale(.99); }", "purpose": "Recent-search dropdown entry, --d-hit." },
+      { "name": "keyframes:mark-spin", "value": "rotate -8deg scale 1.06 mid, 700ms", "purpose": "Brand mark nudge on hover." },
+      { "name": "prefers-reduced-motion", "value": "animation/transition-duration .001ms !important; stages flattened", "purpose": "Honored globally." }
+    ],
+    "browserSurfaces": [
+      { "name": "caret", "value": "caret-color: var(--aegis)", "purpose": "Text caret is gold." },
+      { "name": "selection", "value": "background: var(--aegis); color: #1b1405", "purpose": "::selection is gold on dark ink." },
+      { "name": "scrollbar", "value": "track --riverbed, thumb --stone-2 (hover #2a6273), 10px, --r-ctl", "purpose": "The browser scrollbar is themed to the world." },
+      { "name": "focus-visible", "value": "outline: 2px solid var(--aegis); outline-offset: 2px; border-radius: var(--r-node)", "purpose": "Global visible keyboard focus ring — gold." }
+    ],
+    "breakpoints": [
+      { "name": "shell", "value": "1360px" },
+      { "name": "shell-narrow", "value": "1080px" },
+      { "name": "topbar-h", "value": "60px" },
+      { "name": "bp-520", "value": "520px (brand wordmark hides, avatars 60px)" },
+      { "name": "bp-700", "value": "700px (fights collapse, spine field 132px, timeline axis hides)" },
+      { "name": "bp-720", "value": "720px (layout padding --s-4)" },
+      { "name": "bp-780", "value": "780px (draft/phase tighten)" },
+      { "name": "bp-900", "value": "900px (match-row folds, topbar nav hides)" },
+      { "name": "bp-980", "value": "980px (roster table -> labeled cards)" },
+      { "name": "bp-1080", "value": "1080px (hero plate folds result-first, charts/insights stack)" },
+      { "name": "bp-1180", "value": "1180px (profile overview single column; >=1181 home two-pane)" }
+    ],
+    "cornerRanking": [
+      { "name": "r-node", "value": "2px", "purpose": "Axis nodes, icons, numerals." },
+      { "name": "r-ctl", "value": "5px", "purpose": "Fields, buttons, chips." },
+      { "name": "r-panel", "value": "9px", "purpose": "Panels and tables." },
+      { "name": "r-plate", "value": "16px", "purpose": "Hero scoreboard plate only — largest corner in the system." },
+      { "name": "r-pill", "value": "999px", "purpose": "Tracks and scales, never cards." }
+    ],
+    "drift": [
+      { "claim": "OWN-WORLD ground #123039 / deepest #0b2229 / rails #1b3d47", "built": "--river #12323c / --riverbed #0a1e26 / --stone #19414d", "status": "teal ground retuned lighter/bluer; camp+gold hexes match exactly" },
+      { "claim": "Lane AND jungle surfaced additively from lane_pos and camps_stacked", "built": "lane only (safelane|mid|offlane) populated in server/gc/infer-replay-positions.mjs; LaneMap deliberately excludes jungle/roaming; camps_stacked survives only as an off-lane tiebreaker", "status": "jungle not built" },
+      { "claim": "tabs rail, extent-proportional", "built": "uniform content-width pills in a scrollable strip (--s-3/--s-4 padding)", "status": "not proportional" },
+      { "claim": "spine nodes filled-or-hollow, nothing labelled twice", "built": "filled-vs-hollow doctrine lives in the profile match-row win node; spine nodes are all filled, differentiated by shape (tower/barracks/roshan-diamond/fight-circle) + camp + vertical position", "status": "partial — shape, not hollow, on the spine" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Aegis-gold action button. Reserved for the actionable/won path by the Aegis Rule.",
+      "html": "<button class=\"ds-btn\">Смотреть репле<svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M13 6l6 6-6 6\"/></svg></button>",
+      "css": ".ds-btn { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:0; border-radius:var(--r-ctl,5px); background:var(--aegis,#f0c46a); color:#1b1405; font:600 14px/1 'Golos Text','Segoe UI',system-ui,sans-serif; white-space:nowrap; cursor:pointer; transition:filter 70ms cubic-bezier(.2,0,0,1), transform 70ms cubic-bezier(.2,0,0,1); } .ds-btn svg { width:16px; height:16px; stroke:currentColor; stroke-width:1.9; fill:none; stroke-linecap:round; stroke-linejoin:round; } .ds-btn:hover { filter:brightness(1.09); } .ds-btn:active { transform:translateY(1px); } .ds-btn:focus-visible { outline:2px solid var(--aegis,#f0c46a); outline-offset:2px; } .ds-btn:disabled { opacity:.45; cursor:progress; filter:none; }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary action, never gilded: transparent ground, hairline border, ink text.",
+      "html": "<button class=\"ds-btn-ghost\">Сравнить</button>",
+      "css": ".ds-btn-ghost { display:inline-flex; align-items:center; gap:8px; height:38px; padding:0 16px; border:1px solid var(--rule-2, rgba(150,202,216,.28)); border-radius:var(--r-ctl,5px); background:transparent; color:var(--ink-2,#a9c4cc); font:500 14px/1 'Golos Text','Segoe UI',system-ui,sans-serif; white-space:nowrap; cursor:pointer; transition:background 70ms cubic-bezier(.2,0,0,1), color 70ms cubic-bezier(.2,0,0,1), border-color 70ms cubic-bezier(.2,0,0,1); } .ds-btn-ghost:hover { background:var(--stone-2,#1f4f5d); color:var(--ink,#eaf3f5); border-color:var(--ink-4,#4a6b77); } .ds-btn-ghost:focus-visible { outline:2px solid var(--aegis,#f0c46a); outline-offset:2px; }"
+    },
+    {
+      "name": "Home Gate Field",
+      "kind": "input",
+      "refersTo": "gate-input",
+      "description": "The home search field — the product's opening object — a tall riverbed well that turns gold on focus.",
+      "html": "<input class=\"ds-gate\" type=\"text\" placeholder=\"Матч, Steam ID или ссылка\" />",
+      "css": ".ds-gate { width:100%; height:60px; padding:0 24px; background:var(--riverbed,#0a1e26); border:1px solid var(--rule-2, rgba(150,202,216,.28)); border-radius:var(--r-ctl,5px); color:var(--ink,#eaf3f5); font:400 18px 'PT Sans Narrow','Arial Narrow',sans-serif; font-variant-numeric:tabular-nums; transition:border-color 70ms cubic-bezier(.2,0,0,1), background 70ms cubic-bezier(.2,0,0,1); caret-color:var(--aegis,#f0c46a); } .ds-gate::placeholder { color:var(--ink-2,#a9c4cc); font-family:'Golos Text',system-ui,sans-serif; font-size:14px; } .ds-gate:focus { border-color:var(--aegis,#f0c46a); background:var(--stone,#19414d); outline:none; } .ds-gate:focus-visible { outline:2px solid var(--aegis,#f0c46a); outline-offset:2px; }"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The default content container: stone ground, hairline rule, soft resting shadow.",
+      "html": "<div class=\"ds-panel\"><div class=\"ds-panel-h\">Перевес по минутам</div><p>Полоса = минуты одного и того же перевеса.</p></div>",
+      "css": ".ds-panel { background:var(--stone,#19414d); border:1px solid var(--rule, rgba(150,202,216,.14)); border-radius:var(--r-panel,9px); box-shadow:0 1px 0 rgba(150,202,216,.06) inset, 0 12px 28px -18px rgba(3,12,16,.9); padding:24px; color:var(--ink,#eaf3f5); font:400 15px/1.55 'Golos Text','Segoe UI',system-ui,sans-serif; } .ds-panel-h { font:700 22px/1.12 'PT Sans Narrow','Arial Narrow',sans-serif; letter-spacing:0; margin-bottom:12px; }"
+    },
+    {
+      "name": "Subnav Tab",
+      "kind": "nav",
+      "refersTo": "subnav-tab",
+      "description": "Sticky match-tab rail pill. Selected state drops a 2px Aegis underline — the actionable/selected signal.",
+      "html": "<nav class=\"ds-subnav\"><button class=\"ds-tab\" aria-selected=\"true\">Игроки</button><button class=\"ds-tab\">Графики</button><button class=\"ds-tab\" disabled>Драфт</button></nav>",
+      "css": ".ds-subnav { position:relative; display:flex; gap:4px; padding:4px; border:1px solid var(--rule, rgba(150,202,216,.14)); border-radius:var(--r-panel,9px); background:var(--stone,#19414d); overflow-x:auto; scrollbar-width:none; } .ds-tab { position:relative; display:inline-flex; align-items:center; gap:8px; padding:12px 16px; border:0; border-radius:var(--r-ctl,5px); background:transparent; color:var(--ink-3,#89acb8); font:500 14px/1 'PT Sans Narrow','Arial Narrow',sans-serif; letter-spacing:.08em; white-space:nowrap; cursor:pointer; transition:color 70ms cubic-bezier(.2,0,0,1), background 70ms cubic-bezier(.2,0,0,1); } .ds-tab:hover { color:var(--ink,#eaf3f5); background:var(--stone-2,#1f4f5d); } .ds-tab[aria-selected=\"true\"] { color:var(--ink,#eaf3f5); background:var(--stone-2,#1f4f5d); } .ds-tab[aria-selected=\"true\"]::after { content:''; position:absolute; left:16px; right:16px; bottom:3px; height:2px; border-radius:2px; background:var(--aegis,#f0c46a); } .ds-tab:disabled { opacity:.35; cursor:not-allowed; } .ds-tab:focus-visible { outline:2px solid var(--aegis,#f0c46a); outline-offset:2px; }"
+    },
+    {
+      "name": "Chip",
+      "kind": "chip",
+      "refersTo": "chip",
+      "description": "Compact factual tag on stone; embedded strong lifts to Surface Ink.",
+      "html": "<span class=\"ds-chip\">Длительность <strong>42:18</strong></span>",
+      "css": ".ds-chip { display:inline-flex; align-items:center; gap:8px; height:26px; padding:0 12px; border:1px solid var(--rule, rgba(150,202,216,.14)); border-radius:var(--r-ctl,5px); background:var(--stone,#19414d); color:var(--ink-2,#a9c4cc); font:400 12.5px/1 'Golos Text',system-ui,sans-serif; white-space:nowrap; } .ds-chip strong { color:var(--ink,#eaf3f5); font-weight:600; font-family:'PT Sans Narrow',sans-serif; font-variant-numeric:tabular-nums; }"
+    },
+    {
+      "name": "Match Row (win / loss)",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "The Never-Only-Color rule in one row: outcome reads as a filled-vs-hollow node plus a camp wash, so hue is a second cue, not the only one.",
+      "html": "<div class=\"ds-mrow win\"><span class=\"ds-outcome\"><b>Победа</b></span><span class=\"ds-main\">Puppey · Mirana</span><span class=\"ds-num\">14 / 6 / 22</span></div><div class=\"ds-mrow loss\"><span class=\"ds-outcome\"><b>Поражение</b></span><span class=\"ds-main\">Solo ·Invoker</span><span class=\"ds-num\">3 / 11 / 8</span></div>",
+      "css": ".ds-mrow { display:grid; grid-template-columns:112px minmax(0,1fr) auto; align-items:center; gap:12px; padding:12px 16px; border:1px solid var(--rule, rgba(150,202,216,.14)); border-radius:var(--r-panel,9px); font:400 14px/1.3 'Golos Text',system-ui,sans-serif; color:var(--ink,#eaf3f5); } .ds-mrow.win { background:color-mix(in oklab, var(--radiant,#4fd18b) 6%, var(--stone,#19414d)); } .ds-mrow.loss { background:color-mix(in oklab, var(--dire,#ef5f4f) 6%, var(--stone,#19414d)); } .ds-outcome b { display:flex; align-items:center; gap:8px; font:500 18px/1.1 'PT Sans Narrow',sans-serif; } .ds-outcome b::before { content:''; width:9px; height:9px; border-radius:var(--r-node,2px); box-shadow:inset 0 0 0 1.5px currentColor; } .ds-mrow.win .ds-outcome b { color:var(--radiant-ink,#7fe3b4); } .ds-mrow.win .ds-outcome b::before { background:currentColor; } .ds-mrow.loss .ds-outcome b { color:var(--dire-ink,#ff8a7a); } .ds-num { font:700 15px/1 'PT Sans Narrow',sans-serif; font-variant-numeric:tabular-nums lining-nums; text-align:right; }"
+    },
+    {
+      "name": "Position Glyph (carry)",
+      "kind": "custom",
+      "refersTo": "button-primary",
+      "description": "Hand-drawn inline SVG on a 24x24 grid, one stroke weight, currentColor. Position 1 distinguished by SILHOUETTE (sword), not by color.",
+      "html": "<svg class=\"ds-pos\" viewBox=\"0 0 24 24\" width=\"20\" height=\"20\" role=\"img\" aria-label=\"Первая позиция — керри\"><g fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.8\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M12 2.6v12.2\"/><path d=\"M9.4 5.6 12 3l2.6 2.6\"/><path d=\"M7.2 14.8h9.6\"/><path d=\"M12 14.8v4.4\"/><path d=\"M10.2 19.6h3.6\"/></g></svg>",
+      "css": ".ds-pos { color:var(--ink-2,#a9c4cc); display:block; } .ds-pos.team-r { color:var(--radiant,#4fd18b); } .ds-pos.team-d { color:var(--dire,#ef5f4f); } .ds-pos.estimated { color:var(--ink-3,#89acb8); opacity:.75; }"
+    },
+    {
+      "name": "Lane Mini-Map",
+      "kind": "custom",
+      "refersTo": "button-primary",
+      "description": "Minimap schematic: field, river diagonal, three lanes, camp base dot. Held lane lit; sides mirrored for Dire. jungle/roaming intentionally absent.",
+      "html": "<svg class=\"ds-lane\" viewBox=\"0 0 24 24\" width=\"22\" height=\"22\" role=\"img\" aria-label=\"центральная линия, Radiant\"><rect class=\"lf\" x=\"1\" y=\"1\" width=\"22\" height=\"22\" rx=\"2\"/><path class=\"lr\" d=\"M2 2 L22 22\"/><path class=\"ll\" d=\"M3 21 H21 V3\"/><path class=\"ll\" d=\"M3 21 V3 H21\"/><path class=\"ll on\" d=\"M3 21 L21 3\"/><circle class=\"lb\" cx=\"3\" cy=\"21\" r=\"1.8\"/></svg>",
+      "css": ".ds-lane { display:block; } .lf { fill:var(--riverbed,#0a1e26); stroke:var(--rule, rgba(150,202,216,.14)); stroke-width:1; } .lr { stroke:var(--rule-2, rgba(150,202,216,.28)); stroke-width:1.4; fill:none; opacity:.5; } .ll { stroke:var(--ink-4,#4a6b77); stroke-width:1.6; fill:none; opacity:.38; stroke-linecap:round; } .ll.on { stroke:var(--ink,#eaf3f5); opacity:1; stroke-width:2.4; } .team-r .ll.on { stroke:var(--radiant,#4fd18b); } .team-d .ll.on { stroke:var(--dire,#ef5f4f); } .lb { fill:var(--ink-4,#4a6b77); } .team-r .lb { fill:var(--radiant,#4fd18b); } .team-d .lb { fill:var(--dire,#ef5f4f); }"
+    },
+    {
+      "name": "Power Spine (signature)",
+      "kind": "custom",
+      "refersTo": "button-primary",
+      "description": "One full-width minute axis: camp advantage runs whose width = minutes held, event nodes above/below the axis by camp, native range scrub that dims the field to a faint bar pattern.",
+      "html": "<div class=\"ds-spine\"><div class=\"ds-field\"><div class=\"ds-axis\"></div><span class=\"ds-run r\" style=\"left:0;width:34%;--peak:.82\"></span><span class=\"ds-run d\" style=\"left:34%;width:26%;--peak:.55\"></span><span class=\"ds-run r\" style=\"left:60%;width:40%;--peak:1\"></span><span class=\"node r n-tower\" style=\"left:22%\"></span><span class=\"node r n-roshan\" style=\"left:71%\"></span><span class=\"node d n-fight\" style=\"left:46%\"></span><input class=\"ds-scrub\" type=\"range\" min=\"0\" max=\"42\" value=\"28\" aria-label=\"Выбрать минуту матча\"></div><div class=\"ds-scale\"><span>0:00</span><span class=\"ds-at\">28:00</span><span>42:18</span></div></div>",
+      "css": ".ds-spine { margin-top:24px; padding:24px 24px 16px; border:1px solid var(--rule, rgba(150,202,216,.14)); border-radius:var(--r-panel,9px); background:var(--stone,#19414d); font-family:'Golos Text',system-ui,sans-serif; } .ds-field { position:relative; height:168px; } .ds-axis { position:absolute; left:0; right:0; top:50%; height:1px; background:var(--rule-2, rgba(150,202,216,.28)); } .ds-run { position:absolute; height:calc(74px * var(--peak,.3)); min-height:12px; opacity:.9; } .ds-run.r { bottom:50%; border-bottom:2px solid var(--radiant,#4fd18b); background:linear-gradient(180deg, rgba(79,209,139,.04), rgba(79,209,139,.30)); } .ds-run.d { top:50%; border-top:2px solid var(--dire,#ef5f4f); background:linear-gradient(0deg, rgba(239,95,79,.04), rgba(239,95,79,.30)); } .node { position:absolute; top:50%; width:6px; height:6px; margin-top:-3px; border-radius:var(--r-node,2px); transform:translateX(-50%); } .node.r { background:var(--radiant,#4fd18b); } .node.d { background:var(--dire,#ef5f4f); } .node.n-roshan { background:var(--aegis,#f0c46a); width:9px; height:9px; margin-top:-4.5px; transform:translateX(-50%) rotate(45deg); } .node.n-fight { border-radius:50%; } .ds-scrub { position:absolute; inset:0; width:100%; height:100%; margin:0; appearance:none; background:transparent; cursor:crosshair; } .ds-scrub::-webkit-slider-thumb { appearance:none; width:2px; height:168px; border:0; border-radius:0; background:var(--aegis,#f0c46a); cursor:crosshair; } .ds-scrub::-moz-range-thumb { width:2px; height:168px; border:0; background:var(--aegis,#f0c46a); } .ds-scale { display:flex; justify-content:space-between; margin-top:12px; color:var(--ink-3,#89acb8); font:400 11px/1 'PT Sans Narrow',sans-serif; font-variant-numeric:tabular-nums; } .ds-at { color:var(--aegis,#f0c46a); font-weight:700; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The River Spine",
+    "overview": "One minute axis runs across a river-teal field, and the whole product is drawn off it. The background is not dark — it is river water (#12323c, 197deg, 55% saturation), a genuinely colored surface, the deepest point where the two camps meet. Everything else — hero plate, rosters, charts, timeline — is arranged as branches of that axis. The world is monochrome-teal apart from three meaning pigments: the Radiant/Dire camp pair (state, never decoration), Aegis gold (the only actionable-or-won signal), and one borrowed blue for the Aghanim's Shard that arrives from the item, not the interface. Exactly one dark world; the light theme was removed on purpose.",
+    "keyCharacteristics": [
+      "One minute axis over colored water; the two camps are its two branches.",
+      "Camp color (green/red) is never the sole carrier of meaning — glyph shape, row order, and the lane map are independent cues.",
+      "Aegis gold appears only where something is actionable or was won; its rarity is the point.",
+      "Ranked radii, one per hierarchy tier — never a single blanket corner.",
+      "Ink is tinted from the river's own hue; there are no neutral grays on a colored ground.",
+      "Flat by default; tonal layering does the depth work, and two structural shadows are reserved for states."
+    ],
+    "rules": [
+      { "name": "The Never-Only-Color Rule", "body": "Camp color is never the sole carrier of meaning; a row's allegiance and outcome are legible from the position glyph, the fixed 1->5 order, and the lane map, plus a filled-vs-hollow node — because Radiant vs. Dire is a red/green pair.", "section": "colors" },
+      { "name": "The Aegis Rule", "body": "Gold appears only on things you can act on or things that were won. Its rarity is the point; secondary actions stay un-gilded.", "section": "colors" },
+      { "name": "The Tinted-Ink Rule", "body": "No neutral grays on colored water; every ink is mixed from the river's hue, and --ink-4 (#4a6b77, 2.37:1) is strokes/separators/icons only, never a color for text.", "section": "colors" },
+      { "name": "The One-Family-For-Numbers Rule", "body": "Every statistic numeral is PT Sans Narrow with tabular figures, right-aligned; a new number never introduces a mono font.", "section": "typography" },
+      { "name": "The Don't-Shout Rule", "body": "Section labels and headings do not use letter-spacing-as-noise or ALL-CAPS; hierarchy is carried by size, weight and air.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "Surfaces sit at the tone that means their depth; shadows answer state, not decoration; a node is filled or hollow, never lit.", "section": "elevation" },
+      { "name": "The No-Glow Rule (with one exception)", "body": "Camp and gold do not glow; the single legacy exception is the .team-flag camp bar. Do not extend it.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep one dark world; color-scheme: dark on :root, no light override to add.",
+      "Do treat camp color as one carrier among several (glyph, row order, lane map, filled-vs-hollow node).",
+      "Do reserve --aegis for actionable or won states only.",
+      "Do place --shard blue only on scepter/shard item rings.",
+      "Do use the ranked radii by tier (2/5/9/16/999px) and --r-pill on tracks/scales, never cards.",
+      "Do set every statistic numeral in PT Sans Narrow tabular-nums lining-nums, right-aligned.",
+      "Do convey depth tonally (riverbed->river->stone->stone-2 + hairline rules); reach for --shadow-pop only on a floating surface.",
+      "Do respect the contrast ledger: body at --ink/--ink-2, captions at --ink-3 (min).",
+      "Do keep hover feedback at 70ms and save the only long sequence for the three-stage page entrance.",
+      "Do honor prefers-reduced-motion: zero durations and flatten the staging."
+    ],
+    "donts": [
+      "Don't use --ink-4 (#4a6b77, 2.37:1) as text — strokes, separators, icon weights only.",
+      "Don't glow; filled-or-hollow beats lit, and the .team-flag glow should not spread.",
+      "Don't introduce a third typeface or a mono for numbers; don't resurrect Oswald or JetBrains Mono.",
+      "Don't reach for neon, decorative grids, or a blanket corner.",
+      "Don't fake data to fill the role system — render position/lane only where a real source exists and dim it when inferred.",
+      "Don't split the source of truth: --river/--stone/--radiant/--aegis/--shard are the project's own names; do not rename to generic design-system roles."
+    ]
+  }
+}

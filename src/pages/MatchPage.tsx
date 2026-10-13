@@ -2,7 +2,7 @@
 // Таймлайн реплея опционален: без него вкладки «Графики» и «Таймлайн» не показываются.
 
 import { useEffect, useMemo, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { fetchMatch, getItemMap } from '../api'
 import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails } from '../api/types'
 import { getHeroMap } from '../api/heroes'
@@ -11,10 +11,11 @@ import { resolveImpact } from '../api/score'
 import { buildBoard, buildInsights, playerLabel, slotOfPlayer } from './match-model'
 import { fetchAuth } from '../auth'
 import { Notice, PageSkeleton } from '../components/States'
-import { Reveal, TabBar } from '../components/primitives'
+import { TabBar } from '../components/primitives'
 import { Icon } from '../components/Icons'
 import HeroPlate from '../components/match/HeroPlate'
 import Insights from '../components/match/Insights'
+import PowerSpine from '../components/match/PowerSpine'
 import Rosters from '../components/match/Roster'
 import Draft from '../components/match/Draft'
 import TimelinePanel from '../components/match/Timeline'
@@ -22,19 +23,25 @@ import Teamfights from '../components/match/Teamfights'
 import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
 
 type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft'
+const TABS: TabId[] = ['overview', 'roster', 'charts', 'timeline', 'draft']
 
 export default function MatchPage() {
   const { id } = useParams()
   const matchId = Number(id)
+  const [params, setParams] = useSearchParams()
   const [match, setMatch] = useState<MatchDetails | null>(null)
   const [timeline, setTimeline] = useState<MatchTimeline | null>(null)
   const [heroMap, setHeroMap] = useState<Map<number, HeroInfo>>(new Map())
   const [itemMap, setItemMap] = useState<Map<number, ItemInfo>>(new Map())
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<TabId>('overview')
+  const [ready, setReady] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [meId, setMeId] = useState<number | null>(null)
+
+  // Вкладка живёт в URL: ссылка на «Графики» должна открывать «Графики».
+  const tab: TabId = (TABS as string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as TabId) : 'overview'
+  const setTab = (next: TabId) => setParams((p) => { p.set('tab', next); return p }, { replace: true })
 
   useEffect(() => {
     let alive = true
@@ -45,10 +52,10 @@ export default function MatchPage() {
   useEffect(() => {
     let alive = true
     setLoading(true)
+    setReady(false)
     setError(null)
     setMatch(null)
     setTimeline(null)
-    setTab('overview')
     Promise.all([getHeroMap(), getItemMap()]).then(([h, i]) => {
       if (!alive) return
       setHeroMap(h)
@@ -68,19 +75,18 @@ export default function MatchPage() {
     [match],
   )
 
-  const radiantWon = Boolean(match?.didRadiantWin)
-
-  useEffect(() => {
-    if (!match) return
-    const root = document.documentElement
-    root.style.setProperty('--stage-glow', radiantWon ? 'var(--radiant)' : 'var(--dire)')
-    return () => { root.style.removeProperty('--stage-glow') }
-  }, [match, radiantWon])
-
   const insights = useMemo(
     () => (match && board ? buildInsights(match, board, timeline, (p) => playerLabel(p, heroMap.get(p.heroId)?.name)) : []),
     [match, board, timeline, heroMap],
   )
+
+  // Единственный оркестрованный момент страницы: табло, затем ось, затем
+  // составы. Секции ниже по скроллу больше ничего не выезжают.
+  useEffect(() => {
+    if (loading || error || !match) return
+    const raf = requestAnimationFrame(() => setReady(true))
+    return () => cancelAnimationFrame(raf)
+  }, [loading, error, match])
 
   if (loading) return <PageSkeleton rows={5} />
 
@@ -89,7 +95,7 @@ export default function MatchPage() {
       <Notice kind="error" title={error ? 'Матч не загрузился' : 'Данные не получены'}>
         {error ?? 'Ответ пришёл пустым.'}
         <p>Матч мог быть скрыт или удалён. Проверь ID — и открой другой из истории профиля.</p>
-        <div style={{ display: 'flex', gap: 'var(--s-2)', marginTop: 'var(--s-4)' }}>
+        <div className="notice-actions">
           <button type="button" className="btn" onClick={() => setAttempt((n) => n + 1)}>
             <Icon.Timeline size={16} />
             Повторить
@@ -115,44 +121,45 @@ export default function MatchPage() {
   ]
 
   return (
-    <div className="match">
-      <HeroPlate match={match} board={board} timeline={timeline} heroMap={heroMap} />
+    <div className={`match${ready ? ' ready' : ''}`}>
+      <div className="stage-1">
+        <HeroPlate match={match} board={board} timeline={timeline} heroMap={heroMap} />
+      </div>
 
-      <TabBar items={tabs} value={tab} onChange={setTab} className="subnav" />
+      <div className="stage-2">
+        <TabBar items={tabs} value={tab} onChange={setTab} className="subnav" />
+      </div>
 
+      <div className="stage-3">
       {tab === 'overview' && (
         <div className="tab-body" role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
-          <Reveal>
-            <Insights items={insights} />
-          </Reveal>
+          <Insights items={insights} />
 
-          {timeline && timeline.series.length > 1 && (
-            <Reveal className="section" delay={60}>
-              <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />
-            </Reveal>
+          {timeline && (
+            <PowerSpine timeline={timeline} durationSeconds={match.durationSeconds} />
           )}
 
-          <Reveal className="section" delay={80}>
-            <div className="chart-grid">
-              <CompareBars board={board} />
-              <PlayerBars
-                title="Нетворт игроков"
-                sub="Итоговое состояние на конец матча"
-                players={allPlayers}
-                pick={(p) => p.networth}
-                heroMap={heroMap}
-                format={(n) => n.toLocaleString('ru-RU')}
-              />
+          <div className="chart-grid">
+            <CompareBars board={board} />
+            <PlayerBars
+              title="Нетворт игроков"
+              sub="Итоговое состояние на конец матча"
+              players={allPlayers}
+              pick={(p) => p.networth}
+              heroMap={heroMap}
+              format={(n) => n.toLocaleString('ru-RU')}
+            />
+          </div>
+
+          {timeline && (
+            <div className="section">
+              <Teamfights timeline={timeline} heroMap={heroMap} match={match} meSlot={meSlot} limit={3} />
             </div>
-          </Reveal>
+          )}
 
-          <Reveal className="section" delay={100}>
-            {timeline && <Teamfights timeline={timeline} heroMap={heroMap} match={match} meSlot={meSlot} limit={3} />}
-          </Reveal>
-
-          <Reveal className="section" delay={120}>
+          <div className="section">
             <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
-          </Reveal>
+          </div>
         </div>
       )}
 
@@ -229,6 +236,7 @@ export default function MatchPage() {
           <Draft picks={match.picksBans} heroMap={heroMap} match={match} />
         </div>
       )}
+      </div>
     </div>
   )
 }

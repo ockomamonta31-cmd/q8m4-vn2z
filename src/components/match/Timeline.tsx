@@ -82,8 +82,11 @@ export default function Timeline({ timeline, heroMap, durationSec }: {
       <div className="chart-head">
         <div>
           <div className="chart-title">Хронология матча</div>
-          <div className="chart-sub">
-            {marks.kills} убийств · {marks.structures} строений · {marks.roshans} Рошан · {marks.fights} тимфайтов
+          <div className="chart-sub tally-row">
+            <span className="tally-cell">{marks.kills} убийств</span>
+            <span className="tally-cell">{marks.structures} строений</span>
+            <span className="tally-cell">{marks.roshans} Рошан</span>
+            <span className="tally-cell">{marks.fights} тимфайтов</span>
           </div>
         </div>
         <div className="tabs" role="group" aria-label="Показ убийств" style={{ margin: 0, padding: 2 }}>

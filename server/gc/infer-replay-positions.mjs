@@ -59,7 +59,7 @@ export function inferReplayPositions(players, replayPlayers) {
       farmOrder(team).forEach((p, i) => positions.set(slots.find((x) => x.p === p).slot, { position: i + 1, positionSource: 'stats' }))
       continue
     }
-    positions.set(byMid[0].slot, { position: 2, positionSource: 'replay' })
+    positions.set(byMid[0].slot, { position: 2, positionSource: 'replay', lane: 'mid' })
     const other = slots.filter((x) => x.p !== byMid[0].p)
     const byLane = [...other].sort((a, b) => safeShare(b) - safeShare(a))
     if (safeShare(byLane[1]) < .5 || safeShare(byLane[2]) > .5) {
@@ -68,10 +68,10 @@ export function inferReplayPositions(players, replayPlayers) {
     }
     const safeLane = laneFarmOrder(byLane.slice(0, 2))
     const offLane = laneFarmOrder(byLane.slice(2))
-    positions.set(safeLane[0].slot, { position: 1, positionSource: 'replay' })
-    positions.set(safeLane[1].slot, { position: 5, positionSource: 'replay' })
-    positions.set(offLane[0].slot, { position: 3, positionSource: 'replay' })
-    positions.set(offLane[1].slot, { position: 4, positionSource: 'replay' })
+    positions.set(safeLane[0].slot, { position: 1, positionSource: 'replay', lane: 'safelane' })
+    positions.set(safeLane[1].slot, { position: 5, positionSource: 'replay', lane: 'safelane' })
+    positions.set(offLane[0].slot, { position: 3, positionSource: 'replay', lane: 'offlane' })
+    positions.set(offLane[1].slot, { position: 4, positionSource: 'replay', lane: 'offlane' })
   }
   return positions
 }

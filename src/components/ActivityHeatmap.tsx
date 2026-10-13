@@ -48,22 +48,24 @@ export default function ActivityHeatmap({ matches }: { matches: PlayerMatch[] })
   const level = (count: number) => (count === 0 ? '' : count <= 1 ? 'l1' : count <= 3 ? 'l2' : count <= 6 ? 'l3' : 'l4')
 
   return (
-    <section className="panel">
-      <div className="readout">
-        <div className="readout-cell">
-          <div className="cell-label">Матчей в истории</div>
-          <div className="cell-value">{total}</div>
-          <div className="cell-sub">со всех загруженных страниц</div>
+    <section className="panel heat-panel">
+      <div className="heat-summary">
+        <div className="hs-lead">
+          <span className="hs-label">Матчей в истории</span>
+          <b className="hs-value">{total}</b>
+          <span className="hs-note">со всех загруженных страниц</span>
         </div>
-        <div className="readout-cell">
-          <div className="cell-label">Активных дней</div>
-          <div className="cell-value">{activeDays}</div>
-          <div className="cell-sub">за {WEEKS} недель</div>
-        </div>
-        <div className="readout-cell">
-          <div className="cell-label">Самый плотный день</div>
-          <div className="cell-value">{bestDay ? bestDay.count : 0}</div>
-          <div className="cell-sub">{bestDay ? new Date(bestDay.key).toLocaleDateString('ru-RU') : 'нет данных'}</div>
+        <div className="hs-rows">
+          <div className="hs-row">
+            <span>Активных дней</span>
+            <b>{activeDays}</b>
+            <small>за {WEEKS} недель</small>
+          </div>
+          <div className="hs-row">
+            <span>Самый плотный день</span>
+            <b>{bestDay ? bestDay.count : '—'}</b>
+            <small>{bestDay ? new Date(bestDay.key).toLocaleDateString('ru-RU') : 'нет игранных дней'}</small>
+          </div>
         </div>
       </div>
 
@@ -80,7 +82,7 @@ export default function ActivityHeatmap({ matches }: { matches: PlayerMatch[] })
               <span
                 key={c.key}
                 className={`heat-cell ${level(c.count)}`}
-                title={`${new Date(c.key).toLocaleDateString('ru-RU')} — ${c.count} матч(ей)`}
+                title={`${new Date(c.key).toLocaleDateString('ru-RU')} — матчей: ${c.count}`}
               />
             ))}
           </div>

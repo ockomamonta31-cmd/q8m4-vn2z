@@ -9,6 +9,7 @@ import { IMPACT_MODEL_READY, impactModelInfo } from '../api/impact'
 import { localImpact, resolveImpact, type ImpactScore } from '../api/score'
 import { ImpactMeter } from './Impact'
 import PositionIcon from './PositionIcon'
+import { EmptyState } from './States'
 
 export default function MatchesTable({
   matches,
@@ -28,7 +29,12 @@ export default function MatchesTable({
   const modelInfo = IMPACT_MODEL_READY ? impactModelInfo() : null
 
   if (matches.length === 0) {
-    return <div className="notice">Матчей нет. Профиль мог быть скрыт, или ID неверный — проверь и попробуй другой.</div>
+    return (
+      <EmptyState title="Матчей в истории нет">
+        Steam не отдаёт матчи скрытых профилей. Проверь ID и открой другой профиль, а если ID верный —
+        начни с любого матча на странице разбора.
+      </EmptyState>
+    )
   }
 
   const scoreOf = (m: PlayerMatch): ImpactScore | null =>
@@ -48,7 +54,6 @@ export default function MatchesTable({
               onMouseEnter={() => void fetchMatch(m.id)}
               aria-label={`${p.isVictory ? 'Победа' : 'Поражение'} на ${hero?.name ?? `герой ${m.player.heroId}`}, матч ${m.id}`}
             >
-              <span className="mr-spine" aria-hidden="true" />
               <span className="mr-outcome">
                 <b>{p.isVictory ? 'Победа' : 'Поражение'}</b>
                 <small>{timeAgo(m.startDateTime)}</small>
@@ -60,7 +65,10 @@ export default function MatchesTable({
                 </span>
                 <span>
                   <strong>{hero?.name ?? `Герой #${p.heroId}`}</strong>
-                  <small>{gameModeName(m.gameMode)} · {lobbyName(m.lobbyType)}</small>
+                  <span className="mr-tags">
+                    <span>{gameModeName(m.gameMode)}</span>
+                    <span>{lobbyName(m.lobbyType)}</span>
+                  </span>
                 </span>
               </span>
               <span className="mr-kda">
@@ -71,8 +79,11 @@ export default function MatchesTable({
               </span>
               <ImpactMeter score={scoreOf(m)} />
               <span className="mr-econ">
-                <strong>{p.goldPerMinute} <span className="muted">GPM</span></strong>
-                <small>{p.experiencePerMinute} XPM · {p.numLastHits}/{p.numDenies} LH/DN</small>
+                <strong>{p.goldPerMinute} <span className="unit">GPM</span></strong>
+                <span className="mr-tags">
+                  <span>{p.experiencePerMinute} XPM</span>
+                  <span>{p.numLastHits}/{p.numDenies} LH/DN</span>
+                </span>
               </span>
               <span className="mr-time">
                 <strong>{fmtDuration(m.durationSeconds)}</strong>
@@ -84,11 +95,14 @@ export default function MatchesTable({
         })}
       </div>
       <div className="list-foot">
-        {lobbyName(matches[0]?.lobbyType ?? '')} · показано {matches.length} матчей
+        Показано <b>{matches.length}</b> матчей, лобби: {lobbyName(matches[0]?.lobbyType ?? '').toLowerCase()}.
+        {' '}Импакт считает{' '}
         {modelInfo
-          ? `. Импакт — модель на ${modelInfo.matches.toLocaleString('ru-RU')} матчах, AUC ${modelInfo.auc.toFixed(2)}`
-          : ''}
-        {estimator ? `. Импакт — локальная модель на ${estimator.samples} матчах профиля` : ''}.
+          ? `модель на ${modelInfo.matches.toLocaleString('ru-RU')} матчах, AUC ${modelInfo.auc.toFixed(2)}`
+          : estimator
+            ? `локальная модель на ${estimator.samples} матчах этого профиля`
+            : 'оценка по линии статов'}
+        .
       </div>
     </>
   )

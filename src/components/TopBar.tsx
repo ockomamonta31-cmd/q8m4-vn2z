@@ -1,11 +1,11 @@
-// Хедер: логотип, навигация, единый поиск матча/профиля, тема и аккаунт.
+// Хедер: логотип, навигация, единый поиск матча/профиля и аккаунт Steam.
 
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { fetchProfile } from '../api'
 import { avatarImageUrl } from '../api/heroes'
 import { parseQuery } from '../api/formats'
-import { addRecentSearch, readRecentSearches, readTheme, writeTheme, type RecentSearch } from '../recents'
+import { addRecentSearch, readRecentSearches, type RecentSearch } from '../recents'
 import type { Auth } from '../auth'
 import { Icon } from './Icons'
 
@@ -30,14 +30,8 @@ export default function TopBar({
   const [value, setValue] = useState('')
   const [recents, setRecents] = useState<RecentSearch[]>(readRecentSearches)
   const [open, setOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark'>(readTheme)
   const navigate = useNavigate()
   const location = useLocation()
-
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme
-    writeTheme(theme)
-  }, [theme])
 
   useEffect(() => setRecents(readRecentSearches()), [location.pathname])
 
@@ -132,15 +126,6 @@ export default function TopBar({
         </form>
 
         <div className="topbar-auth">
-          <button
-            type="button"
-            className="icon-btn"
-            aria-label={`Включить ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
-            title={`Включить ${theme === 'dark' ? 'светлую' : 'тёмную'} тему`}
-            onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
-          >
-            {theme === 'dark' ? <Icon.Sun size={17} /> : <Icon.Moon size={17} />}
-          </button>
           {auth?.loggedIn ? (
             <>
               <button className="auth-account" onClick={() => auth.steamAccountId && onSearch(`/player/${auth.steamAccountId}`)} aria-label="Открыть свой профиль">

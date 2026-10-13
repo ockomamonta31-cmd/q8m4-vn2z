@@ -12,17 +12,8 @@ import { fetchAuth, logoutAuth, type Auth } from './auth'
 import { readRecentSearches, type RecentSearch } from './recents'
 import { Icon } from './components/Icons'
 
-/** Декоративная кривая преимущества — единственный «живой» элемент главной. */
-function CurveLine() {
-  return (
-    <svg className="plate-curve" viewBox="0 0 900 200" preserveAspectRatio="none" aria-hidden="true">
-      <line className="c-zero" x1="0" y1="100" x2="900" y2="100" />
-      <path className="c-gold" d="M0 100 C 90 128, 140 60, 210 78 S 320 150, 400 128 S 520 30, 610 58 S 720 132, 800 96 L 900 40" />
-      <path className="c-xp" d="M0 108 C 100 140, 160 84, 240 96 S 350 158, 430 134 S 540 52, 630 74 S 740 128, 900 62" />
-    </svg>
-  )
-}
-
+/** Декоративных кривых на главной нет: линия преимущества строится только по
+ *  реальным минутам конкретного матча, на экране поиска данных ещё нет. */
 function HomePage({ auth, onSearch }: { auth: Auth | null; onSearch: (q: string) => void }) {
   const [value, setValue] = useState('')
   const [hint, setHint] = useState<string | null>(null)
@@ -32,7 +23,7 @@ function HomePage({ auth, onSearch }: { auth: Auth | null; onSearch: (q: string)
     e.preventDefault()
     const parsed = parseQuery(value)
     if (!parsed) {
-      setHint('Нужен ID матча или профиля — можно вставить ссылку на stratz, dotabuff, opendota или Steam.')
+      setHint('Нужен ID матча или профиля. Можно вставить ссылку на stratz, dotabuff, opendota или Steam.')
       return
     }
     setHint(null)
@@ -40,32 +31,25 @@ function HomePage({ auth, onSearch }: { auth: Auth | null; onSearch: (q: string)
   }
 
   const examples = [
-    { label: 'матч', value: '9040683473' },
-    { label: 'профиль', value: '1858036696' },
-    { label: 'steam64', value: '76561198146069424' },
+    { kind: 'матч', value: '9040683473' },
+    { kind: 'профиль', value: '1858036696' },
+    { kind: 'steam64', value: '76561198146069424' },
   ]
 
   return (
     <div className="home">
-      <section className="plate" aria-label="Поиск матча или профиля">
-        <CurveLine />
+      <section className="gate" aria-label="Поиск матча или профиля">
+        <div className="gate-body">
+          <h1 className="gate-h1">Что случилось<br />в этом матче</h1>
 
-        <div className="plate-body">
-          <div className="plate-kicker">
-            <span className="dot" />
-            <span>Разбор матчей Dota 2 на данных Valve и разобранных реплеях</span>
-          </div>
-
-          <h1 className="plate-h1">Что случилось<br />в этом матче</h1>
-
-          <p className="plate-lead">
+          <p className="gate-lead">
             Винрейт ничего не объясняет. Здесь видно, кто вытянул катку, кто просел относительно своего
             уровня, как качались и что покупали по ходу игры — и в какую минуту матч переломился.
           </p>
 
-          <form className="plate-form" onSubmit={submit}>
+          <form className="gate-form" onSubmit={submit}>
             <input
-              className="plate-input"
+              className="gate-input"
               value={value}
               onChange={(e) => { setValue(e.target.value); setHint(null) }}
               placeholder="ID матча или профиля, ссылка на stratz / dotabuff / Steam"
@@ -77,65 +61,105 @@ function HomePage({ auth, onSearch }: { auth: Auth | null; onSearch: (q: string)
               autoComplete="off"
               spellCheck={false}
             />
-            <button className="btn" type="submit">
-              Найти
-              <Icon.ArrowRight size={16} />
-            </button>
+            <button className="btn" type="submit">Найти</button>
           </form>
-          {hint && <p className="plate-error" id="search-hint-text" role="alert">{hint}</p>}
 
-          <div className="plate-suggest">
-            <span>Например:</span>
+          {hint && <p className="gate-error" id="search-hint-text" role="alert">{hint}</p>}
+        </div>
+
+        <div className="gate-base">
+          <div className="camp-axis" aria-hidden="true">
+            <span className="ca-side ca-r">Radiant</span>
+            <span className="ca-track" />
+            <span className="ca-side ca-d">Dire</span>
+          </div>
+
+          <div className="gate-suggest">
+            <span>Например</span>
             {examples.map((example) => (
               <button key={example.value} type="button" className="suggest-chip" onClick={() => setValue(example.value)}>
                 {example.value}
-                <span className="muted"> · {example.label}</span>
+                <span>{example.kind}</span>
               </button>
             ))}
-          </div>
-
-          {auth?.loggedIn && auth.steamAccountId ? (
-            <button type="button" className="quick-chip" onClick={() => onSearch(`/player/${auth.steamAccountId}`)}>
-              <img src={avatarImageUrl(auth.avatar)} alt="" width={30} height={30} />
-              Открыть свой профиль
-            </button>
-          ) : (
-            <a className="quick-chip" href="/api/auth/steam">
-              <Icon.Steam size={22} />
-              Войти через Steam и открыть свой профиль
-            </a>
-          )}
-        </div>
-
-        <div className="plate-foot">
-          <div className="foot-cell">
-            <h3><i className="swatch" />Вклад вместо KDA</h3>
-            <p>Оценка от −100 до +100: линия статов против типичной для этой позиции и уровня.</p>
-          </div>
-          <div className="foot-cell">
-            <h3><i className="swatch" />Кривая преимущества</h3>
-            <p>Золото и опыт по минутам, тимфайты, башни и Рошан на одной оси времени.</p>
-          </div>
-          <div className="foot-cell">
-            <h3><i className="swatch" />Решения по времени</h3>
-            <p>Прокачка и покупки привязаны к минутам матча, а не к итоговому списку предметов.</p>
           </div>
         </div>
       </section>
 
-      {recents.length > 0 && (
-        <section className="home-recent" aria-label="Недавние поиски">
-          <div className="half-title">Вы искали</div>
-          <div className="half-list">
-            {recents.map((item) => (
-              <button key={`${item.kind}:${item.id}`} type="button" className="recent-row" onClick={() => onSearch(item.kind === 'match' ? `/match/${item.id}` : `/player/${item.id}`)}>
-                <span>{item.name}</span>
-                <small>{item.kind === 'match' ? 'матч' : 'профиль'} · {item.id}</small>
+      <div className="home-side">
+        <section className="panel home-recent" aria-label="Недавние поиски">
+          <h2 className="side-title">Недавние поиски</h2>
+          {recents.length > 0 ? (
+            <div className="recent-list">
+              {recents.map((item) => (
+                <button
+                  key={`${item.kind}:${item.id}`}
+                  type="button"
+                  className="recent-row"
+                  onClick={() => onSearch(item.kind === 'match' ? `/match/${item.id}` : `/player/${item.id}`)}
+                >
+                  <span className="rr-name">{item.name}</span>
+                  <span className="rr-kind">{item.kind === 'match' ? 'матч' : 'профиль'}</span>
+                  <span className="rr-id">{item.id}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <p className="side-empty">
+              Здесь соберётся то, что ты открывал. Вставь ID матча или ссылку выше — и следующий заход
+              начнётся с этого списка.
+            </p>
+          )}
+        </section>
+
+        <section className="panel home-account" aria-label="Аккаунт Steam">
+          {auth?.loggedIn && auth.steamAccountId ? (
+            <>
+              <img className="ha-avatar" src={avatarImageUrl(auth.avatar)} alt="" width={46} height={46} />
+              <div className="ha-text">
+                <span className="ha-name">{auth.name}</span>
+                <span className="ha-note">Аккаунт подключён через Steam.</span>
+              </div>
+              <button type="button" className="btn btn-ghost" onClick={() => onSearch(`/player/${auth.steamAccountId}`)}>
+                Открыть свой профиль
               </button>
-            ))}
+            </>
+          ) : (
+            <>
+              <span className="ha-mark"><Icon.Steam size={22} /></span>
+              <div className="ha-text">
+                <span className="ha-name">Аккаунт Steam не подключён</span>
+                <span className="ha-note">Вход нужен, чтобы открыть свой профиль и друзей из истории матчей.</span>
+              </div>
+              <a className="btn btn-ghost" href="/api/auth/steam">Войти через Steam</a>
+            </>
+          )}
+        </section>
+
+        <section className="home-notes" aria-label="Что видно в разборе">
+          <h2 className="side-title">Что видно в разборе</h2>
+
+          <article className="note note-lead">
+            <h3>Вклад вместо KDA</h3>
+            <p>Оценка от −100 до +100: линия статов против типичной для этой позиции и уровня.</p>
+            <div className="scale" aria-hidden="true">
+              <span className="scale-track"><i className="scale-mid" /></span>
+              <span className="scale-ends"><b>−100</b><b>0</b><b>+100</b></span>
+            </div>
+          </article>
+
+          <div className="note-list">
+            <article className="note">
+              <h3>Кривая преимущества</h3>
+              <p>Золото и опыт по минутам, тимфайты, башни и Рошан на одной оси времени.</p>
+            </article>
+            <article className="note">
+              <h3>Решения по времени</h3>
+              <p>Прокачка и покупки привязаны к минутам матча, а не к итоговому списку предметов.</p>
+            </article>
           </div>
         </section>
-      )}
+      </div>
     </div>
   )
 }
@@ -168,7 +192,6 @@ export default function App() {
   return (
     <div className="app">
       <div className="world-layer" aria-hidden="true">
-        <div className="world-grid" />
         <div className="world-grain" />
       </div>
       <ScrollToTop />
@@ -200,10 +223,10 @@ export default function App() {
       </main>
       <footer className="footer">
         <div className="footer-inner">
-          <span>Dota Match Lab · разбор матчей на своих данных</span>
+          <span>Dota Match Lab: разбор одного матча на своих данных</span>
           <span>
             Источник — <a href="https://steamcommunity.com/dev/api" target="_blank" rel="noreferrer">Steam Web API</a>{' '}
-            и разобранные реплеи; оценки — локальная модель
+            и разобранные реплеи, оценки считает локальная модель
           </span>
         </div>
       </footer>

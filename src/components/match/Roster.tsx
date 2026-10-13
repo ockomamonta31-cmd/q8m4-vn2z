@@ -11,6 +11,7 @@ import { signed, type ImpactScore } from '../../api/score'
 import type { MatchBoard, StatKey, TeamSide } from '../../pages/match-model'
 import { ScoreBadge } from '../Impact'
 import PositionIcon from '../PositionIcon'
+import LaneMap from '../LaneMap'
 import { Icon } from '../Icons'
 import { BuildTimeline, ImpactPanel, ItemSlot, PurchaseTimeline } from './Build'
 
@@ -28,6 +29,12 @@ type Column = {
 }
 
 const COLUMNS: Column[] = [
+  {
+    key: 'position',
+    label: 'Позиция',
+    title: 'Порядок 1→5: керри против керри, мид против мида. Игроки без определённой позиции уходят в конец.',
+    sort: (p) => (p.positionSource && p.position >= 1 && p.position <= 5 ? p.position : 6),
+  },
   { key: 'impact', label: 'Импакт', title: 'Насколько статы выше или ниже типичных для этой позиции и уровня: от −100 до +100', sort: (p) => p.__impact },
   { key: 'kda', label: 'K / D / A', sort: (p) => (p.deaths === 0 ? p.kills + p.assists : (p.kills + p.assists) / p.deaths) },
   { key: 'networth', label: 'Нетворт', stat: 'networth', sort: (p) => p.networth },
@@ -80,9 +87,14 @@ function PlayerRow({ p, heroMap, itemMap, won, board, isMvp, durationSec }: {
       >
         <td data-label="Игрок">
           <div className="hero-cell">
+            {/* Роль читается двумя независимими признаками: глиф позиции и
+                мини-карта линии. Цвет — только третий, для дальтоника его нет. */}
+            <span className="role-stack">
+              <PositionIcon position={p.position} source={p.positionSource} size={20} />
+              {p.positionSource === 'replay' && p.lane && <LaneMap lane={p.lane} radiant={p.isRadiant} size={20} />}
+            </span>
             <span className="hero-portrait lg">
               {hero && <img src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" width={56} height={39} />}
-              <PositionIcon position={p.position} source={p.positionSource} />
             </span>
             <div className="who">
               <span className="who-line">
@@ -182,15 +194,15 @@ function PlayerRow({ p, heroMap, itemMap, won, board, isMvp, durationSec }: {
   )
 }
 
-function TeamPanel({ side, board, heroMap, itemMap, durationSec, defaultSort }: {
+function TeamPanel({ side, board, heroMap, itemMap, durationSec, sort, onSort }: {
   side: TeamSide
   board: MatchBoard
   heroMap: Map<number, HeroInfo>
   itemMap: Map<number, ItemInfo>
   durationSec: number
-  defaultSort: { key: string; dir: 'asc' | 'desc' }
+  sort: { key: string; dir: 'asc' | 'desc' }
+  onSort: (next: { key: string; dir: 'asc' | 'desc' }) => void
 }) {
-  const [sort, setSort] = useState(defaultSort)
   const won = side.players.every((p) => p.isVictory) && side.players.length > 0
   const rows = useMemo(() => {
     const mapped: Row[] = side.players.map((p, i) => ({ ...p, __impact: side.scores[i]?.value ?? 0, __score: side.scores[i] ?? null }))
@@ -214,8 +226,9 @@ function TeamPanel({ side, board, heroMap, itemMap, durationSec, defaultSort }: 
         <h2 className="team-name">{side.label}</h2>
         <span className="team-result">{won ? 'Победа' : 'Поражение'}</span>
         <span className="team-tally">
-          <b>{side.kills}</b> убийств · <b>{number(side.networth)}</b> нетворта · импакт{' '}
-          <b className={side.impactTotal >= 0 ? 'green' : 'red'}>{signed(side.impactTotal)}</b>
+          <span className="tally-cell"><b>{side.kills}</b> убийств</span>
+          <span className="tally-cell"><b>{number(side.networth)}</b> нетворта</span>
+          <span className="tally-cell">импакт <b className={side.impactTotal >= 0 ? 'green' : 'red'}>{signed(side.impactTotal)}</b></span>
         </span>
       </header>
 
@@ -231,7 +244,7 @@ function TeamPanel({ side, board, heroMap, itemMap, durationSec, defaultSort }: 
                     <button
                       type="button"
                       className="sort-btn"
-                      onClick={() => setSort({ key: column.key, dir: active && sort.dir === 'desc' ? 'asc' : 'desc' })}
+                      onClick={() => onSort({ key: column.key, dir: active && sort.dir === 'desc' ? 'asc' : 'desc' })}
                     >
                       {column.label}
                       <Icon.Chevron size={10} />
@@ -268,10 +281,14 @@ export default function Rosters({ board, heroMap, itemMap, durationSec }: {
   itemMap: Map<number, ItemInfo>
   durationSec: number
 }) {
+  // Порядок один на обе команды: иначе строки Radiant и Dire расходятся, и
+  // «керри против керри» перестаёт читаться по строкам.
+  const [sort, setSort] = useState({ key: 'position', dir: 'asc' as 'asc' | 'desc' })
+
   return (
     <div className="rosters">
-      <TeamPanel side={board.radiant} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} defaultSort={{ key: 'impact', dir: 'desc' }} />
-      <TeamPanel side={board.dire} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} defaultSort={{ key: 'impact', dir: 'desc' }} />
+      <TeamPanel side={board.radiant} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} sort={sort} onSort={setSort} />
+      <TeamPanel side={board.dire} board={board} heroMap={heroMap} itemMap={itemMap} durationSec={durationSec} sort={sort} onSort={setSort} />
     </div>
   )
 }

@@ -16,47 +16,6 @@ export function useReducedMotion() {
   return reduced
 }
 
-/**
- * Появление секции при попадании во вьюпорт — один раз.
- * Страховочный таймер раскрывает блок, если IntersectionObserver не успел
- * или не вызван (печать, headless, странные вкладки в фоне): контент не
- * имеет права оставаться невидимым.
- */
-export function Reveal({ children, className = '', as: Tag = 'section', delay = 0 }: {
-  children: React.ReactNode
-  className?: string
-  as?: 'section' | 'div' | 'article' | 'aside'
-  delay?: number
-}) {
-  const ref = useRef<HTMLElement | null>(null)
-  const [shown, setShown] = useState(false)
-
-  useEffect(() => {
-    const node = ref.current
-    if (!node) return
-    let done = false
-    const reveal = () => { if (!done) { done = true; setShown(true) } }
-    const timer = window.setTimeout(reveal, 1200)
-    if (!('IntersectionObserver' in window)) { reveal(); return () => window.clearTimeout(timer) }
-    const observer = new IntersectionObserver(
-      ([entry]) => { if (entry.isIntersecting) { reveal(); observer.disconnect() } },
-      { threshold: 0 },
-    )
-    observer.observe(node)
-    return () => { window.clearTimeout(timer); observer.disconnect() }
-  }, [])
-
-  return (
-    <Tag
-      ref={ref as never}
-      className={`reveal${shown ? ' in' : ''}${className ? ` ${className}` : ''}`}
-      style={shown && delay ? { transitionDelay: `${delay}ms` } : undefined}
-    >
-      {children}
-    </Tag>
-  )
-}
-
 /** Значение добегают до итога; при reduce-motion или нулевой длительности — просто ставится число. */
 export function Counter({ value, duration = 900, format = (n: number) => String(Math.round(n)), prefix = '', suffix = '' }: {
   value: number

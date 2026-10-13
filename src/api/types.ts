@@ -29,6 +29,8 @@ export interface PlayerMatch {
     position: number
     /** replay — detected from map movement; stats — estimate from match economy */
     positionSource?: 'replay' | 'stats'
+    /** линия известна только когда позиция взята из реплея; jungle и roaming не определяются */
+    lane?: 'safelane' | 'mid' | 'offlane'
     /** сезонный ранг игрока НА МОМЕНТ матча (0 — нет данных) */
     seasonRank: number
     isVictory: boolean
@@ -140,6 +142,8 @@ export interface MatchPlayer {
   position: number
   /** replay — detected from map movement; stats — estimate from match economy */
   positionSource?: 'replay' | 'stats'
+  /** линия известна только когда позиция взята из реплея; jungle и roaming не определяются */
+  lane?: 'safelane' | 'mid' | 'offlane'
   /** текущий сезонный ранг игрока, 0 — нет данных */
   seasonRank: number
   /** rich-stats для модели импакта (всегда null в своём API — Steam не отдаёт события; модель честно считает на base-признаках) */

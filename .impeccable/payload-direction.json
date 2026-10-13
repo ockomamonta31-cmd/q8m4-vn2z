@@ -1,0 +1,156 @@
+{
+  "title": "Выбор визуального мира",
+  "question": "Ролл назначил 6-ю по резонансу grounded-направление: «Лист способностей и талантов». Оставить его, взять альтернативу или перекатить.",
+  "options": [
+    {
+      "id": "assigned",
+      "label": "Лист способностей и талантов",
+      "kicker": "THE ROLL",
+      "lineage": "Внутриигровой экран прокачки Dota 2: вертикальная ось уровней, два штырька-ветви на каждом пороге, заполненный узел против пустого",
+      "thesis": "Матч читается как набор порогов силы: каждая разблокированная способность, талант, Аганим, Рошан и башня — узел на одной минутной оси, а два лагеря — две ветви этой оси.",
+      "palette": ["#0b2229", "#123039", "#1b3d47", "#4fd18b", "#ef5f4f", "#f0c46a"],
+      "materials": ["river-water teal ground", "camp-tinted filled nodes", "hollow locked nodes", "engraved stone rails"],
+      "viewport": "Шапка результата с тёмным артом лидера победителей, под ней во всю ширину минутная ось с узлами, и две команды-рельса над и под осью, выровненные по позициям 1-5.",
+      "risk": "При плотной сетке узлов ось может стать декорацией вместо инструмента — узлы обязаны кликабельно раскрывать минуту.",
+      "raised": [
+        { "from": "ikeda-datamatics", "raise": "Выбор минуты вытягивает её числа в фокус, а остальное поле гасит до бледного столбчатого рисунка." },
+        { "from": "rw-manual-acetate-tab-board", "raise": "Состояние — физическое изменение узла (заполнен/пуст), а не свечение; рельс вкладок несёт пропорцию объёма раздела." },
+        { "from": "digital-design-canon-warm-consumer-app-surface", "raise": "Насышенная краска появляется только там, где что-то реально можно сделать." },
+        { "from": "brand-identity-canon-saville-catalog-sleeve", "raise": "Один график владеет своим полем целиком, и ничего не подписано дважды." },
+        { "from": "vernacular-ephemera-jet-age-ticket-wallet", "raise": "Ничего не исчезает — оно гасится: недоступная вкладка показывает причину, а не прячется." },
+        { "from": "notation-diagram-systems-labanotation", "raise": "Длина полосы равна длительности состояния: перевес по золоту занимает ровно те минуты, что держался." }
+      ],
+      "comp": ".impeccable/mocks/decision/assigned.webp",
+      "wireframe": {
+        "cols": 12, "rows": 10,
+        "regions": [
+          { "label": "top bar", "x": 0, "y": 0, "w": 12, "h": 1 },
+          { "label": "hero art: winner's lead", "x": 0, "y": 1, "w": 5, "h": 4, "accent": true },
+          { "label": "result typography + duration", "x": 5, "y": 1, "w": 7, "h": 2 },
+          { "label": "camp rails pos1-5 portraits", "x": 5, "y": 3, "w": 7, "h": 2 },
+          { "label": "minute spine with unlock nodes", "x": 0, "y": 5, "w": 12, "h": 2, "accent": true },
+          { "label": "radiant rail (pos 1-5)", "x": 0, "y": 7, "w": 12, "h": 1 },
+          { "label": "dire rail (pos 1-5)", "x": 0, "y": 8, "w": 12, "h": 1 },
+          { "label": "tabs rail", "x": 0, "y": 9, "w": 12, "h": 1 }
+        ]
+      }
+    },
+    {
+      "id": "model-pick",
+      "label": "Миникарта как система обозначений",
+      "kicker": "IMPECCABLE’S PICK",
+      "lineage": "Квадрат миникарты: река по диагонали, три линии, туман войны, пины",
+      "thesis": "Экран — развёрнутая миникарта: диагональ реки делит страницу на два лагеря, а события ложатся на неё как пины.",
+      "palette": ["#0b2229", "#123039", "#4fd18b", "#ef5f4f", "#f0c46a"],
+      "materials": ["fog-darkened corners", "lane strokes", "ping markers", "square map crop"],
+      "viewport": "Диагональная река делит первый экран, арты героев в своих углах, события как пины на линии.",
+      "risk": "Самое очевидное попадание в тему: именно сюда приходит почти любой заход в этой категории, и на плотных таблицах диагональ начнёт мешать чтению.",
+      "comp": ".impeccable/mocks/decision/model-pick.webp",
+      "wireframe": {
+        "cols": 12, "rows": 10,
+        "regions": [
+          { "label": "top bar", "x": 0, "y": 0, "w": 12, "h": 1 },
+          { "label": "radiant corner art", "x": 0, "y": 1, "w": 6, "h": 4, "accent": true },
+          { "label": "dire corner art", "x": 6, "y": 1, "w": 6, "h": 4 },
+          { "label": "river diagonal divide", "x": 0, "y": 1, "w": 12, "h": 4, "accent": true },
+          { "label": "event pins", "x": 0, "y": 5, "w": 12, "h": 2 },
+          { "label": "camp tables", "x": 0, "y": 7, "w": 12, "h": 3 }
+        ]
+      }
+    },
+    {
+      "id": "challenger-ikeda",
+      "label": "Поле data-sublime",
+      "verdict": "competitive",
+      "lineage": "Моно-Хиро Икеда, data-matics",
+      "thesis": "Матч как плотное поле вертикальных столбцов: минута — колонка, выбор — фокус, остальное гаснет.",
+      "palette": ["#000000", "#ffffff", "#111111"],
+      "materials": ["hairline bar fields", "pixel-crisp bars", "monospace columns", "full-frame inversion"],
+      "viewport": "Стена волосяных вертикальных штрихов на всю ширину, моно-числа в плотных колонках, одна синусоида преимущества поверх.",
+      "case": "Сливается отлично: минута как колонка — это ровно то, как читают матч. Но его чистый чёрно-белый материал запрещён брифом, поэтому миром стать не может, а грамматика перешла назначению как донация.",
+      "risk": "Без цвета лагерей теряет главный смысл страницы; в чистом виде противоречит закреплённому миру Доты.",
+      "comp": ".impeccable/mocks/decision/challenger-ikeda.webp",
+      "hero": "https://impeccable.style/worlds/cards/ikeda-datamatics-hero.webp"
+    },
+    {
+      "id": "challenger-labanotation",
+      "label": "Партитура танца",
+      "verdict": "competitive",
+      "lineage": "Нотация Лабана",
+      "thesis": "Вертикальная ось читается снизу вверх, длина символа равна точной длительности.",
+      "palette": ["#ffffff", "#111111", "#d8d4cc"],
+      "materials": ["score paper", "solid/hatched/dotted fill for level", "banded current beat"],
+      "viewport": "Вертикальный стан по центру, два столбца симметрично, время идёт снизу вверх.",
+      "case": "Держит ясность продукта: длительность как длина — сильная дисциплина для таймлайна. Проигрывает по узнаванию: аудитория Доты не знает Лабана.",
+      "risk": "Вертикальное время ломает привычный горизонтальный скраб минуты.",
+      "comp": ".impeccable/mocks/decision/challenger-labanotation.webp",
+      "hero": "https://impeccable.style/worlds/cards/notation-diagram-systems-labanotation-hero.webp"
+    },
+    {
+      "id": "challenger-rw-manual",
+      "label": "Справочник в коробке с ацетатом",
+      "verdict": "declined",
+      "kept": "Словарь состояний, где выбор — физический слой, а не подсветка; рельс вкладок с высотой по объёму раздела.",
+      "lineage": "Системная графика IBM/Zeimples, трафаретные разделители",
+      "palette": ["#e8892b", "#f2c41f", "#2f7d5f", "#1f4f8f"],
+      "materials": ["milk acetate leaves", "die-cut overlays", "section hue boards"],
+      "viewport": "Открытый справочник: цветная доска раздела и прозрачный лист с цифрами миллиметром выше.",
+      "case": "Сливается плохо: игрок не опознаёт себя в инженерном справочнике, а режим Operate прямо запрещает костюм инструмента.",
+      "risk": "Читается как косплей документа, а не рабочий экран.",
+      "hero": "https://impeccable.style/worlds/cards/rw-manual-acetate-tab-board-hero.webp"
+    },
+    {
+      "id": "challenger-warm-app",
+      "label": "Тёплая потребительская апп-поверхность",
+      "verdict": "declined",
+      "kept": "Насыщенная краска только там, где можно действовать.",
+      "lineage": "Канон цифрового дизайна потребительских приложений",
+      "palette": ["#f6f1e8", "#ffffff", "#2f6fed"],
+      "materials": ["soft large radii", "white cards", "persistent bottom bar"],
+      "viewport": "Одна колонка мягких карточек и нижняя панель, доступная большим пальцем.",
+      "case": "Сливается плохо и прямо противоречит брифу: тёплый кремовый фон запрещён как признак генерации.",
+      "risk": "Это и есть тот шаблон, от которого уходят.",
+      "hero": "https://impeccable.style/worlds/cards/digital-design-canon-warm-consumer-app-surface-hero.webp"
+    },
+    {
+      "id": "challenger-saville",
+      "label": "Каталог-конверт Factory Records",
+      "verdict": "declined",
+      "kept": "Один график владеет полем целиком; ничего не подписано дважды.",
+      "lineage": "Дизайн Питера Савилла, каталоги FAC",
+      "palette": ["#000000", "#ffffff", "#d0d0d0"],
+      "materials": ["matte black sleeve", "white hairline plot", "coded hue strip"],
+      "viewport": "Матовый чёрный конверт: безымянный, только номер FAC, белый пульс-график и полоса цветовых блоков.",
+      "case": "Сливается плохо: минимал-обложка винила не помогает сравнить десять игроков, а чёрный фон запрещён брифом.",
+      "risk": "Становится постером вместо продукта.",
+      "hero": "https://impeccable.style/worlds/cards/brand-identity-canon-saville-catalog-sleeve-hero.webp"
+    },
+    {
+      "id": "challenger-ticket",
+      "label": "Портмоне авиабилетов эпохи джетов",
+      "verdict": "declined",
+      "kept": "Ничего не исчезает — оно гасится: недоступный раздел показывает причину.",
+      "lineage": "Carbon-copy купоны, baggage stubs, штамп VOID",
+      "palette": ["#12235c", "#c8102e", "#ffffff", "#4b2b7a"],
+      "materials": ["carbon coupons", "hairline fare boxes", "rubber stamps"],
+      "viewport": "Купонная книжка: один сегмент листа, отрыв по линии, штамп на погашенном.",
+      "case": "Сливается плохо: ностальгический костюм, и режим Operate запрещает миру задавать навигацию.",
+      "risk": "Читается как ретро-реквизит.",
+      "hero": "https://impeccable.style/worlds/cards/vernacular-ephemera-jet-age-ticket-wallet-hero.webp"
+    },
+    {
+      "id": "canon",
+      "label": "Категорийный стандарт",
+      "thesis": "Тёмная киберспортивная панель двух лагерей, исполненная безупречно.",
+      "palette": ["#0f1418", "#1a2027", "#4fd18b", "#ef5f4f"],
+      "materials": ["rounded cards", "team-color bars", "condensed numerals"],
+      "viewport": "Табло сверху, карточки секций одинаковой ширины, графики библиотеки по умолчанию.",
+      "risk": "Отличимо от конкурента только логотипом — ровно то, от чего идёт этот бриф.",
+      "comp": ".impeccable/mocks/decision/canon.webp"
+    }
+  ],
+  "reroll": { "registers": ["safer", "bolder"] },
+  "buildPath": { "value": "code", "toggle": true },
+  "canon": true,
+  "steer": true
+}

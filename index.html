@@ -3,27 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#06090d" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#12323c" />
     <meta name="description" content="Разбор матчей Dota 2: кто вытянул катку, как качались и что покупали, кривая преимущества и лента событий реплея." />
     <title>Dota Match Lab · разбор матчей</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://cdn.steamstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Golos+Text:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=PT+Sans+Narrow:wght@400;700&family=Golos+Text:wght@400..900&display=swap"
       rel="stylesheet"
     />
-    <script>
-      // Тема ставится до первой отрисовки, чтобы не было вспышки другого фона.
-      try {
-        const t = localStorage.getItem('matchlab.theme.v1')
-        document.documentElement.dataset.theme =
-          t === 'dark' || t === 'light' ? t : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
-      } catch {
-        document.documentElement.dataset.theme = 'dark'
-      }
-    </script>
   </head>
   <body>
     <div id="root"></div>
