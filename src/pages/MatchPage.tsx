@@ -108,13 +108,16 @@ export default function MatchPage() {
   const allPlayers = match.players
   const meSlot = meId != null ? slotOfPlayer(match, meId) : null
   const hasEvents = Boolean(timeline && (timeline.structures.length || timeline.kills.length || timeline.roshans.length))
+  // Черновик без банов — это не драфт: в Turbo Valve пишет только взятых героев.
+  const hasDraft = match.picksBans.some((a) => !a.isPick)
+  const hasBuilds = allPlayers.some((p) => p.abilityUpgrades.length > 0)
   const tabs = [
     { id: 'overview' as const, label: 'Обзор' },
     { id: 'roster' as const, label: 'Игроки' },
     { id: 'charts' as const, label: 'Графики', disabled: !timeline, hint: timeline ? undefined : 'Реплей ещё не разобран — кривой преимущества нет' },
     { id: 'timeline' as const, label: 'Таймлайн', disabled: !hasEvents, hint: hasEvents ? undefined : 'Событий реплея нет' },
-    { id: 'draft' as const, label: 'Драфт', disabled: !match.picksBans.length },
-    { id: 'builds' as const, label: 'Билды', disabled: !allPlayers.some((p) => p.abilityUpgrades.length) },
+    { id: 'draft' as const, label: 'Драфт', disabled: !hasDraft, hint: hasDraft ? undefined : 'В этом режиме нет драфта: герои выбираются свободно' },
+    { id: 'builds' as const, label: 'Билды', disabled: !hasBuilds, hint: hasBuilds ? undefined : 'Ни у одного игрока нет записей прокачки' },
   ]
 
   return (
@@ -227,7 +230,7 @@ export default function MatchPage() {
         </div>
       )}
 
-      {tab === 'draft' && (
+      {tab === 'draft' && hasDraft && (
         <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
           <Draft picks={match.picksBans} heroMap={heroMap} match={match} />
         </div>

@@ -170,6 +170,19 @@ disables all of it.
   `networth_t` per player, but surfacing them means changing normalisation and
   the API, which the brief puts out of scope. Networth across ten players is
   shown as horizontal team-coloured bars instead.
+- **Draft order is not chronological in Valve's data.** `picks_bans` arrives
+  grouped (all picks first, then all bans), so the UI never shows a global
+  "pick N" sequence: `splitDraft()` puts bans in an «Автобаны» block and cuts
+  the picks into phases of at most two heroes per team. Verified against
+  STRATZ's own grouping for match 9040683473 (auto-bans, then phases 4/4/2).
+- **Steam Web API returns an incomplete auto-ban list for All Draft.** On match
+  9040683473 it reports 7 bans where the game had 16 (8 per team) — STRATZ shows
+  all 16 because it reads the GC response, not the Web API. The draft block
+  states that it shows only what the API returned rather than implying
+  completeness.
+- **The «Драфт» tab is disabled for modes without bans** (Turbo records only
+  picks), and «Билды» is disabled with an explanation when no player has
+  ability-upgrade records.
 - **Lane badge covers safe / mid / off only.** STRATZ's own bundle also has
   `Roaming` and `Jungle` lane glyphs, but `infer-replay-positions.mjs` never
   distinguishes them, so those two are not shipped.
