@@ -2,12 +2,14 @@
 //
 // Два правила. Первое: состав описываем тегами Valve — это публикуемые
 // свойства героя, а не наша классификация. Второе: силу линии считаем только
-// из замеренных чисел матча (GPM, XPM, LH, нетворс) и никогда не называем
-// линией то, чего не знаем: без разобранного реплея линий в данных нет.
+// из замеренных чисел матча (GPM, опыт, добивания, нетворс) и никогда не
+// называем линией то, чего не знаем: без разобранного реплея линий в данных нет.
 //
-// Рейтинга «этот драфт сильнее» здесь нет намеренно: на 465 наших играх
+// «Насколько драфт лучше» — не здесь: это считает src/api/draftStrength.ts по
+// измеренным винрейтам STRATZ. Здесь только то, что видно из самого матча.
+// Собственный рейтинг по тегам Valve мы не строили: на 465 наших играх
 // All Draft медианы исхода плоские по каждому тегу (убийства по числу
-// инициаторов 44/43/42/44, GPM по числу керри 2546 против 2529), то есть
+// инициаторов 44/43/42/44, GPM по числу керри 2546 против 2529) — то есть
 // предсказательной силы у этих признаков не обнаружено.
 
 import { TAG_ORDER, type HeroMeta } from './heroMeta'
@@ -66,25 +68,33 @@ export function teamProfile(players: MatchPlayer[], radiant: boolean, meta: Map<
   }
 }
 
-/** Разница четырёх замеров, равные веса, в процентах от большего. */
+/** Разница двух чисел в процентах от большего. */
 function relativeEdge(a: number, b: number) {
   const top = Math.max(Math.abs(a), Math.abs(b))
   if (!top) return 0
   return ((a - b) / top) * 100
 }
 
+export type LaneTotals = { gpm: number; xpm: number; lh: number; nw: number }
+
+export type LanePair = { radiant: MatchPlayer | null; dire: MatchPlayer | null }
+
 export type Matchup = {
+  key: string
   label: string
-  /** линия известна из реплея, а не предположена */
+  /** линия известна из разобранного реплея, а не предположена */
   measured: boolean
   radiant: MatchPlayer[]
   dire: MatchPlayer[]
+  /** кто против кого внутри линии: совпавшие по номеру позиции герои */
+  pairs: LanePair[]
   gpm: number
   xpm: number
   lh: number
   networth: number
   /** сводный край Radiant по четырём замерам, −100…100 */
   edge: number
+  totals: { r: LaneTotals; d: LaneTotals }
 }
 
 const LANE_ORDER: { key: string; positions: number[]; label: string }[] = [
@@ -93,67 +103,88 @@ const LANE_ORDER: { key: string; positions: number[]; label: string }[] = [
   { key: 'offlane', positions: [3, 4], label: 'Сложная линия' },
 ]
 
+const LANE_LABEL: Record<string, string> = Object.fromEntries(LANE_ORDER.map((l) => [l.key, l.label]))
+
+export const laneLabel = (key: string) => LANE_LABEL[key] ?? key
+
 /**
  * Позицию 1–5 реплей выводит из линии (safe → 1 и 5, mid → 2, off → 3 и 4),
- * поэтому при positionSource === 'replay' она несёт тот же смысл, что и lane.
- * Поле lane при этом до фронтенда доходит не всегда, так что опираемся на
- * позицию, а lane оставляем как уточнение.
+ * поэтому она несёт тот же смысл, что и поле lane. До фронтенда lane доходит
+ * не всегда, так что опираемся на позицию, а lane оставляем уточнением.
  */
 function laneKeyOf(p: MatchPlayer): string | null {
-  if (p.positionSource !== 'replay') return null
+  if (p.positionSource !== 'replay' && p.positionSource !== 'stratz') return null
   if (p.lane) return p.lane
   const group = LANE_ORDER.find((l) => l.positions.includes(p.position))
   return group ? group.key : null
 }
 
-function groupGaps(rGroup: MatchPlayer[], dGroup: MatchPlayer[], label: string, measured: boolean): Matchup {
-  const sum = (g: MatchPlayer[], pick: (p: MatchPlayer) => number) => g.reduce((a, p) => a + pick(p), 0)
-  const r = { gpm: sum(rGroup, (p) => p.goldPerMinute), xpm: sum(rGroup, (p) => p.experiencePerMinute), lh: sum(rGroup, (p) => p.numLastHits), nw: sum(rGroup, (p) => p.networth) }
-  const d = { gpm: sum(dGroup, (p) => p.goldPerMinute), xpm: sum(dGroup, (p) => p.experiencePerMinute), lh: sum(dGroup, (p) => p.numLastHits), nw: sum(dGroup, (p) => p.networth) }
-  const gpm = relativeEdge(r.gpm, d.gpm)
-  const xpm = relativeEdge(r.xpm, d.xpm)
-  const lh = relativeEdge(r.lh, d.lh)
-  const networth = relativeEdge(r.nw, d.nw)
-  // группа из двух героев против группы из двух сравнивается по среднему,
-  // иначе линия с лишним героем выглядит автоматически сильнее
-  const norm = (v: number, g: MatchPlayer[]) => (g.length > 1 ? v / 2 : v)
+export const laneOf = laneKeyOf
+
+const totalsOf = (g: MatchPlayer[]): LaneTotals => ({
+  gpm: g.reduce((a, p) => a + p.goldPerMinute, 0),
+  xpm: g.reduce((a, p) => a + p.experiencePerMinute, 0),
+  lh: g.reduce((a, p) => a + p.numLastHits, 0),
+  nw: g.reduce((a, p) => a + p.networth, 0),
+})
+
+function matchup(rGroup: MatchPlayer[], dGroup: MatchPlayer[], key: string, measured: boolean): Matchup {
+  const byPosition = (a: MatchPlayer, b: MatchPlayer) => a.position - b.position
+  const r = [...rGroup].sort(byPosition)
+  const d = [...dGroup].sort(byPosition)
+  const totals = { r: totalsOf(r), d: totalsOf(d) }
+  const taken = new Set<MatchPlayer>()
+  const pairs: LanePair[] = r.map((p) => {
+    // пара — враг с тем же номером позиции: керри против керри, саппорт
+    // против саппорта; если такого нет, герой остаётся в линии без пары
+    const q = d.find((x) => x.position === p.position && !taken.has(x)) ?? null
+    if (q) taken.add(q)
+    return { radiant: p, dire: q }
+  })
+  for (const q of d) if (!taken.has(q)) pairs.push({ radiant: null, dire: q })
+  const gpm = relativeEdge(totals.r.gpm, totals.d.gpm)
+  const xpm = relativeEdge(totals.r.xpm, totals.d.xpm)
+  const lh = relativeEdge(totals.r.lh, totals.d.lh)
+  const networth = relativeEdge(totals.r.nw, totals.d.nw)
   return {
-    label,
+    key,
+    label: LANE_LABEL[key] ?? key,
     measured,
-    radiant: rGroup,
-    dire: dGroup,
-    gpm: norm(gpm, rGroup),
-    xpm: norm(xpm, rGroup),
-    lh: norm(lh, rGroup),
-    networth: norm(networth, rGroup),
-    edge: (norm(gpm, rGroup) + norm(xpm, rGroup) + norm(lh, rGroup) + norm(networth, rGroup)) / 4,
+    radiant: r,
+    dire: d,
+    pairs,
+    gpm,
+    xpm,
+    lh,
+    networth,
+    edge: (gpm + xpm + lh + networth) / 4,
+    totals,
   }
 }
 
 /**
- * Линии берём только там, где их действительно определил реплей. Иначе
+ * Линии берём там, где их дал разобранный реплей — свой или STRATZ. Без него
  * честнее сравнивать по месту в порядке фарма внутри команды, чем рисовать
  * несуществующие коридоры.
  */
-export function buildMatchups(players: MatchPlayer[]): { matchups: Matchup[]; basis: 'replay' | 'rank' } {
-  const hasLanes = players.some((p) => laneKeyOf(p) !== null)
-  const radiant = players.filter((p) => p.isRadiant)
-  const dire = players.filter((p) => !p.isRadiant)
-
-  if (hasLanes) {
-    const matchups = LANE_ORDER.map(({ key, label }) => {
-      const r = radiant.filter((p) => laneKeyOf(p) === key)
-      const d = dire.filter((p) => laneKeyOf(p) === key)
+export function buildMatchups(players: MatchPlayer[]): { matchups: Matchup[]; basis: 'replay' | 'stratz' | 'rank' } {
+  const lanced = players.filter((p) => laneKeyOf(p) !== null)
+  if (lanced.length >= 6) {
+    const matchups = LANE_ORDER.map(({ key }) => {
+      const r = lanced.filter((p) => p.isRadiant && laneKeyOf(p) === key)
+      const d = lanced.filter((p) => !p.isRadiant && laneKeyOf(p) === key)
       if (!r.length && !d.length) return null
-      return groupGaps(r, d, label, true)
+      return matchup(r, d, key, true)
     }).filter(Boolean) as Matchup[]
-    if (matchups.length) return { matchups, basis: 'replay' }
+    if (matchups.length) {
+      return { matchups, basis: players.some((p) => p.positionSource === 'replay') ? 'replay' : 'stratz' }
+    }
   }
 
   const byNw = (a: MatchPlayer, b: MatchPlayer) => b.networth - a.networth
-  const r = [...radiant].sort(byNw)
-  const d = [...dire].sort(byNw)
-  const matchups = r.map((p, i) => groupGaps([p], d[i] ? [d[i]] : [], `${i + 1}-й по фарму`, false))
+  const r = [...players.filter((p) => p.isRadiant)].sort(byNw)
+  const d = [...players.filter((p) => !p.isRadiant)].sort(byNw)
+  const matchups = r.map((p, i) => matchup([p], d[i] ? [d[i]] : [], `${i + 1}-й по фарму`, false))
   return { matchups, basis: 'rank' }
 }
 

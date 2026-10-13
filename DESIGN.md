@@ -172,22 +172,41 @@ disables all of it.
   shown as horizontal team-coloured bars instead.
 - **Draft order is not chronological in Valve's data.** `picks_bans` arrives
   grouped (all picks first, then all bans), so the UI never shows a global
-  "pick N" sequence: `splitDraft()` puts bans in an «Автобаны» block and cuts
-  the picks into phases of at most two heroes per team. Verified against
-  STRATZ's own grouping for match 9040683473 (auto-bans, then phases 4/4/2).
-- **Steam Web API returns an incomplete auto-ban list for All Draft.** On match
-  9040683473 it reports 7 bans where the game had 16 (8 per team) — STRATZ shows
-  all 16 because it reads the GC response, not the Web API. The draft block
-  states that it shows only what the API returned rather than implying
-  completeness.
-- **The «Драфт» tab is disabled for modes without bans** (Turbo records only
-  picks), and «Билды» is disabled with an explanation when no player has
-  ability-upgrade records.
+  "pick N" sequence: `draftView()` puts bans in an «Автобаны» block and cuts
+  the picks into phases of at most two heroes per team. When the pick order runs
+  team-by-team (Turbo), the block is one «Выбор» group instead of five phases
+  with empty halves.
+- **Steam Web API returns a broken draft; STRATZ completes it.** On match
+  8707790624 the Web API reports 6 bans and 11 "picks" — one of them a hero
+  nobody played, because Valve mislabels part of the auto-ban list — while
+  STRATZ's GC-derived record shows 17 bans and exactly 10 picks. `/api/matches/:id`
+  therefore merges `draft` (full ban list + picks) and per-player `lane` /
+  `position` from STRATZ, and only accepts the draft when its ten picks are
+  exactly the ten heroes played. Bans in All Draft are simultaneous and
+  unattributed in both sources, so they render as one list, not per team.
+  Without a STRATZ record the Steam answer is repaired locally (phantom picks
+  become bans, unlisted picks are recovered from the lineup) and the block says
+  how complete it is.
+- **The «Драфт» tab needs a draft**, i.e. bans or at least one recorded pick;
+  «Билды» is disabled with an explanation when no player has ability-upgrade
+  records.
 - **Lane badge covers safe / mid / off only.** STRATZ's own bundle also has
-  `Roaming` and `Jungle` lane glyphs, but `infer-replay-positions.mjs` never
-  distinguishes them, so those two are not shipped.
-- **Position coverage is ~0.8% of the cached library** (7 parsed replays of 907
-  matches), so the role system is empty on most matches by design.
+  `Roaming` and `Jungle` lane glyphs, but neither our parser nor the STRATZ
+  `lane` field distinguishes them, so those two are not shipped.
+- **Role coverage is now near-total, but from two sources.** `positionSource`
+  is `replay` for matches we parsed ourselves, `stratz` for the rest (their
+  replay parse), and `stats` never — an estimate from economy was judged too
+  easy to mistake for a fact. The tooltip says which one it is.
+- **«Кто сильнее на бумаге» is the only draft verdict, and it is borrowed
+  arithmetic.** Five axes (laning, lane synergy, team synergy, counters, growth
+  to minute 35) come from STRATZ's measured winrates in
+  `server/data/constants/draft_data.json`, rebuilt by
+  `scripts/build-draft-data.mjs`; the file is a lazy chunk loaded on the draft
+  tab. Every axis shows how many pairs and measurements stand behind it, axes
+  with no pairs are dropped, and the total is a coverage-weighted mean — the
+  only judgement made here. We still do not rate drafts from Valve's hero tags:
+  across 465 All Draft games the outcome medians are flat per tag (kills with
+  two initiators 44/43/42/44, GPM with three carries 2546 vs 2529).
 - **The detector flags five "side-tab" strips.** All five are mandated by the
   brief (tab underline, portrait camp strip, row outcome strip); they encode
   data, not decoration, and the brief overrides the skill.

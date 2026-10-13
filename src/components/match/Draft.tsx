@@ -1,120 +1,141 @@
-// Драфт. Valve отдаёт picks_bans отсортированными по типу, а не по времени,
-// поэтому здесь нет «очерёди хода»: сначала автобаны, потом фазы выбора.
+// Драфт. Порядок показывает ровно то, что есть в данных: сначала автобаны
+// (в этом режиме они одновременные), затем фазы выбора по `order`.
 
+import type { ReactNode } from 'react'
 import type { HeroInfo, MatchDetails } from '../../api/types'
 import { heroImageUrl } from '../../api/heroes'
 import RoleIcon from '../RoleIcon'
-import { splitDraft, type DraftAction, type DraftGroup } from '../../pages/draft-model'
+import { draftView, type DraftItem, type DraftPhase } from '../../pages/draft-model'
 
-function Tile({ hero, radiant, ban }: { hero: HeroInfo | undefined; radiant: boolean; ban: boolean }) {
+function Item({ hero, radiant, ban }: { hero: HeroInfo | undefined; radiant: boolean | null; ban: boolean }) {
   const name = hero?.name ?? 'герой'
   return (
-    <span className={`drf-c ${radiant ? 'r' : 'd'}${ban ? ' ban' : ''}`} title={`${name} · ${ban ? 'бан' : 'выбор'} · ${radiant ? 'Radiant' : 'Dire'}`}>
-      {hero && <img src={heroImageUrl(hero.shortName)} alt={name} loading="lazy" />}
-    </span>
+    <li className={`drf-i${radiant === null ? ' n' : radiant ? ' r' : ' d'}${ban ? ' ban' : ''}`}>
+      <span className="drf-c">
+        {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+      </span>
+      <span className="drf-n">{name}</span>
+    </li>
   )
 }
 
-function Row({ label, actions, radiant, ban, heroMap }: { label: string; actions: DraftAction[]; radiant: boolean; ban: boolean; heroMap: Map<number, HeroInfo> }) {
+function Side({ label, radiant, items, ban, heroMap }: {
+  label: string; radiant: boolean; items: DraftItem[]; ban: boolean; heroMap: Map<number, HeroInfo>
+}) {
   return (
     <div className="drf-side">
       <span className={`drf-team ${radiant ? 'r' : 'd'}`}>{label}</span>
-      <div className="drf-cells">
-        {actions.length
-          ? actions.map((a) => <Tile key={`${a.order}-${a.heroId}`} hero={heroMap.get(a.heroId)} radiant={radiant} ban={ban} />)
-          : <span className="dim t14">нет</span>}
-      </div>
+      <ul className="drf-cells">
+        {items.length
+          ? items.map((a) => <Item key={`${a.heroId}`} hero={heroMap.get(a.heroId)} radiant={radiant} ban={ban} />)
+          : <li className="dim t14 drf-empty">нет</li>}
+      </ul>
     </div>
   )
 }
 
-function Group({ title, note, group, ban, heroMap }: {
-  title: string; note?: string; group: DraftGroup; ban: boolean; heroMap: Map<number, HeroInfo>
+function Block({ title, count, children }: {
+  title: string; count: string; children: ReactNode
 }) {
   return (
     <section className="drf-g">
       <header className="drf-gh">
         <h3 className="drf-gt">{title}</h3>
-        <span className="dim t14">{note ?? `${group.radiant.length + group.dire.length} ${ban ? 'бана' : 'героя'}`}</span>
+        <span className="dim t14">{count}</span>
       </header>
-      <div className="drf-cols">
-        <Row label="Radiant" actions={group.radiant} radiant ban={ban} heroMap={heroMap} />
-        <Row label="Dire" actions={group.dire} radiant={false} ban={ban} heroMap={heroMap} />
-      </div>
+      {children}
     </section>
   )
 }
 
-export default function Draft({ picks, heroMap, match }: {
-  picks: MatchDetails['picksBans']
-  heroMap: Map<number, HeroInfo>
+export default function Draft({ match, heroMap }: {
   match: MatchDetails
+  heroMap: Map<number, HeroInfo>
 }) {
-  if (!picks.length) return null
-  const { autoBans, phases, hasBans } = splitDraft(picks)
-  const extraPicks = phases.reduce((n, g) => n + g.radiant.length + g.dire.length, 0) - 10
+  const draft = draftView(match)
+  if (!draft) return null
+  const banned = (items: DraftItem[], radiant: boolean) => items.filter((b) => b.radiant === radiant)
 
   return (
     <section className="chart">
       <div className="chart-h">
         <div>
           <div className="chart-t">Драфт</div>
-          <div className="chart-s">Автобаны идут до выборов, внутри фазы команда берёт не больше двух героев</div>
+          <div className="chart-s">
+            {draft.bans.length} банов · {draft.picksTotal} выборов · {match.gameMode}
+          </div>
         </div>
       </div>
 
-      {hasBans && (
-        <>
-          <Group title="Автобаны" group={autoBans} ban heroMap={heroMap}
-            note={`${autoBans.radiant.length} + ${autoBans.dire.length}`} />
-          <p className="pnote" style={{ marginTop: 'var(--sp-8)' }}>
-            В этом режиме автобаны идут одновременно у обеих команд до первого выбора,
-            а их порядок в ответе не сохранён. Показано ровно то, что отдал Steam Web API.
-          </p>
-        </>
+      {draft.bans.length > 0 && (
+        <Block title="Автобаны" count={`${draft.bans.length}`}>
+          {draft.bansTeamKnown ? (
+            <div className="drf-cols">
+              <Side label="Radiant" radiant items={banned(draft.bans, true)} ban heroMap={heroMap} />
+              <Side label="Dire" radiant={false} items={banned(draft.bans, false)} ban heroMap={heroMap} />
+            </div>
+          ) : (
+            <ul className="drf-cells drf-allban">
+              {draft.bans.map((b) => <Item key={b.heroId} hero={heroMap.get(b.heroId)} radiant={null} ban />)}
+            </ul>
+          )}
+        </Block>
       )}
 
       <div className="drf-phases">
-        {phases.map((g, i) => (
-          <Group key={i} title={`Выбор · фаза ${i + 1}`} group={g} ban={false} heroMap={heroMap}
-            note={`${g.radiant.length} + ${g.dire.length}`} />
+        {draft.phases.map((g: DraftPhase, i) => (
+          <Block key={i} title={draft.simultaneous ? 'Выбор' : `Выбор · фаза ${i + 1}`} count={`${g.radiant.length} + ${g.dire.length}`}>
+            {draft.simultaneous && (
+              <p className="pnote drf-note">Команды выбирали параллельно: порядок идёт сначала по одной стороне, потом по другой.</p>
+            )}
+            <div className="drf-cols">
+              <Side label="Radiant" radiant items={g.radiant} ban={false} heroMap={heroMap} />
+              <Side label="Dire" radiant={false} items={g.dire} ban={false} heroMap={heroMap} />
+            </div>
+          </Block>
         ))}
       </div>
 
-      {extraPicks > 0 && (
-        <p className="pnote" style={{ marginTop: 'var(--sp-16)' }}>
-          Выборов больше десяти на {extraPicks}: в одновременной фазе обе команды заявили одного героя,
-          поэтому пришлось выбирать заново.
+      {draft.source === 'steam' && (
+        <p className="pnote">
+          Разбора этого матча у STRATZ нет, а Steam присылает драфт обрезанным: банов здесь
+          столько, сколько он успел отдать{draft.picksUnordered ? `, а ${draft.picksUnordered} выбор(а) восстановлены по составу — их порядка в ответе нет` : ''}.
         </p>
       )}
 
-      <div className="lu-board">
-        {([true, false] as const).map((radiant) => {
-          const players = match.players
-            .filter((p) => p.isRadiant === radiant)
-            .sort((a, b) => (a.positionSource ? a.position : 6) - (b.positionSource ? b.position : 6))
-          return (
-            <div className={`lu${radiant ? ' r' : ' d'}`} key={radiant ? 'r' : 'd'}>
-              <span className="lu-h">{radiant ? 'Radiant' : 'Dire'}</span>
-              {players.map((p) => {
-                const h = heroMap.get(p.heroId)
-                return (
-                  <div className="lu-r" key={`${p.steamAccountId}:${p.heroId}`}>
-                    <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} size={40} />
-                    <span className={`port ${radiant ? 'r' : 'd'}`}>
-                      {h && <img src={heroImageUrl(h.shortName)} alt="" loading="lazy" />}
-                    </span>
-                    <span className="lu-n">
-                      <b>{h?.name ?? `герой #${p.heroId}`}</b>
-                      <span className="dim">{p.name ?? (p.steamAccountId ? `#${p.steamAccountId}` : 'приватный')}</span>
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          )
-        })}
-      </div>
+      <section className="drf-g">
+        <header className="drf-gh">
+          <h3 className="drf-gt">Состав</h3>
+          <span className="dim t14">{match.players.filter((p) => p.positionSource).length} из 10 позиций</span>
+        </header>
+        <div className="lu-board">
+          {([true, false] as const).map((radiant) => {
+            const players = match.players
+              .filter((p) => p.isRadiant === radiant)
+              .sort((a, b) => (a.positionSource ? a.position : 6) - (b.positionSource ? b.position : 6))
+            return (
+              <div className={`lu${radiant ? ' r' : ' d'}`} key={radiant ? 'r' : 'd'}>
+                <span className="lu-h">{radiant ? 'Radiant' : 'Dire'}</span>
+                {players.map((p) => {
+                  const h = heroMap.get(p.heroId)
+                  return (
+                    <div className="lu-r" key={`${p.steamAccountId}:${p.heroId}`}>
+                      <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} size={40} />
+                      <span className={`port ${radiant ? 'r' : 'd'}`}>
+                        {h && <img src={heroImageUrl(h.shortName)} alt="" loading="lazy" />}
+                      </span>
+                      <span className="lu-n">
+                        <b>{h?.name ?? `герой #${p.heroId}`}</b>
+                        <span className="dim">{p.name ?? (p.steamAccountId ? `#${p.steamAccountId}` : 'приватный')}</span>
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })}
+        </div>
+      </section>
     </section>
   )
 }

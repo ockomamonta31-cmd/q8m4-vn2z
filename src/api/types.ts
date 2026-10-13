@@ -27,9 +27,9 @@ export interface PlayerMatch {
     heroHealing: number
     /** позиция 1–5 (0 — Steam не отдаёт позицию) */
     position: number
-    /** replay — detected from map movement; stats — estimate from match economy */
-    positionSource?: 'replay' | 'stats'
-    /** линия известна только когда позиция взята из реплея; jungle и roaming не определяются */
+    /** replay — своё движение по карте; stratz — разбор реплея STRATZ; stats — оценка по экономике */
+    positionSource?: 'replay' | 'stats' | 'stratz'
+    /** линия известна, когда позиция взята из разобранного реплея; jungle и roaming не определяются */
     lane?: 'safelane' | 'mid' | 'offlane'
     /** сезонный ранг игрока НА МОМЕНТ матча (0 — нет данных) */
     seasonRank: number
@@ -96,7 +96,20 @@ export interface MatchDetails {
   barracksStatusRadiant: number | null
   barracksStatusDire: number | null
   picksBans: { isPick: boolean; isRadiant: boolean; heroId: number; order: number }[]
+  /**
+   * Полный драфт, если его удалось получить целиком: Steam отдаёт `picksBans`
+   * обрезанным и часть банов помечает как пики. Проверяется по составу матча,
+   * поэтому либо список полный и согласованный, либо поля нет.
+   */
+  draft?: MatchDraft | null
   players: MatchPlayer[]
+}
+
+export interface MatchDraft {
+  source: 'stratz'
+  /** автобаны: в этом режиме команды банят одновременно, порядка в данных нет */
+  bans: { heroId: number; radiant: boolean | null }[]
+  picks: { heroId: number; radiant: boolean; order: number }[]
 }
 
 export interface MatchPlayer {
@@ -140,9 +153,9 @@ export interface MatchPlayer {
   impactPhases?: { label: string; kills: number; deaths: number; gold: number; networth: number; lastHits: number; experience: number; heroDamage: number; towerDamage: number }[]
   /** позиция 1–5 (0 — неизвестно) */
   position: number
-  /** replay — detected from map movement; stats — estimate from match economy */
-  positionSource?: 'replay' | 'stats'
-  /** линия известна только когда позиция взята из реплея; jungle и roaming не определяются */
+  /** replay — своё движение по карте; stratz — их разбор реплея; stats — оценка по экономике */
+  positionSource?: 'replay' | 'stats' | 'stratz'
+  /** линия известна, когда позиция взята из разобранного реплея; jungle и roaming не отдаются */
   lane?: 'safelane' | 'mid' | 'offlane'
   /** текущий сезонный ранг игрока, 0 — нет данных */
   seasonRank: number

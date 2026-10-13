@@ -95,6 +95,51 @@ async function purchaseEvents(env:Env,id:number):Promise<Record<string,{time:num
 async function replayData(env:Env,id:number):Promise<Record<string,any>|null> {
   return cached<Record<string,any>>(env,`replay-data:v1:${id}`)
 }
+type StratzDraft={bans:{heroId:number;radiant:boolean|null}[];picks:{heroId:number;radiant:boolean;order:number}[];roles:Record<string,{lane:string;position:number}>}
+/**
+ * Полный драфт и линии. Steam отдаёт `picks_bans` обрезанным (из 16 автобанов
+ * приходит 5–8) и часть банов помечает как пики, поэтому список берётся из
+ * разбора STRATZ и сверяется с составом матча перед показом.
+ */
+async function matchDraft(env:Env,id:number):Promise<StratzDraft|null> {
+  if (!env.STRATZ_API_TOKEN) return null
+  const key=`match-draft:v1:${id}`
+  const hit=await cached<StratzDraft&{missing?:number}>(env,key,7*24*3600_000)
+  if(hit) return hit.missing?null:hit
+  try {
+    const res=await fetch('https://api.stratz.com/graphql',{method:'POST',headers:{Authorization:`Bearer ${env.STRATZ_API_TOKEN}`,'Content-Type':'application/json','User-Agent':'STRATZ_API'},body:JSON.stringify({query:`query { match(id: ${id}) { pickBans { isPick order heroId bannedHeroId isRadiant } players { isRadiant heroId lane position } } }`})})
+    if(!res.ok) { console.error('STRATZ draft query HTTP',res.status); return null }
+    const data=await res.json<any>()
+    const m=data.data?.match
+    if(!m) { console.error('STRATZ draft query returned no match',JSON.stringify(data.errors??[])); return null }
+    const out:StratzDraft={bans:[],picks:[],roles:{}}
+    for(const b of m.pickBans??[]) {
+      if(b.isPick&&Number.isInteger(b.heroId)) out.picks.push({heroId:b.heroId,radiant:Boolean(b.isRadiant),order:Number.isInteger(b.order)?b.order:out.picks.length})
+      else if(!b.isPick&&Number.isInteger(b.bannedHeroId)) out.bans.push({heroId:b.bannedHeroId,radiant:b.isRadiant===true?true:b.isRadiant===false?false:null})
+    }
+    out.picks.sort((a,b)=>a.order-b.order)
+    const lanes:Record<string,string>={SAFE_LANE:'safelane',MID_LANE:'mid',OFF_LANE:'offlane'}
+    for(const p of m.players??[]) {
+      const position=/^POSITION_[1-5]$/.test(p.position??'')?Number(p.position.slice(9)):0
+      if(!position) continue
+      out.roles[`${p.isRadiant?'r':'d'}:${p.heroId}`]={lane:lanes[p.lane]??'',position}
+    }
+    if(!out.picks.length&&!Object.keys(out.roles).length) { await save(env,key,{...out,missing:1}); return null }
+    await save(env,key,out)
+    return out
+  } catch(e) { console.error('STRATZ draft query failed',e instanceof Error?e.message:'unknown error'); return null }
+}
+/** драфт принимается, только если его пики — ровно те 10 героев, что сыграны */
+function withDraft(x:any,d:StratzDraft|null) {
+  if(!d||d.picks.length!==10) return {...x,draft:null}
+  const picked=x.players.every((p:any)=>d.picks.some(k=>k.heroId===p.heroId&&k.radiant===p.isRadiant))
+  const clash=d.bans.some((b)=>x.players.some((p:any)=>p.heroId===b.heroId))
+  return {...x,draft:picked&&!clash?{source:'stratz',bans:d.bans,picks:d.picks}:null}
+}
+function stratzRole(d:StratzDraft|null,team:'r'|'d',heroId:number) {
+  const role=d?.roles[`${team}:${heroId}`]
+  return role?{position:role.position,positionSource:'stratz' as const,lane:(role.lane||undefined) as 'safelane'|'mid'|'offlane'|undefined}:null
+}
 /**
  * Матчи, которым нужен парсинг реплея. Незавершённым считается и тот, у кого
  * таймлайн лежит в кэше, но собран старой сборкой без вкладов игроков — иначе
@@ -281,7 +326,13 @@ export default {
     m=p.match(/^\/api\/player\/(\d+)\/matches$/)
     if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),role=(await replayData(env,x.id))?.[String(slot)];return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:role?.position??0,positionSource:role?.positionSource,seasonRank:0,isVictory:me.isVictory,imp:null}}}))) }
     m=p.match(/^\/api\/matches\/(\d+)$/)
-    if(m) {const id=Number(m[1]),x=await match(env,id),[ps,replay]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id)]),purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0};return json({...x,players:x.players.map((p:any)=>{const team=p.isRadiant?'r':'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)];return {...p,position:parsed?.position??p.position,positionSource:parsed?.positionSource??p.positionSource,lane:parsed?.lane??p.lane,name:ps.get(p.steamAccountId)?.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases}})})}
+    if(m) {
+      const id=Number(m[1]),x=await match(env,id)
+      const [ps,replay,draft]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id),matchDraft(env,id)])
+      const purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0}
+      const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases}})
+      return json(withDraft({...x,players},draft))
+    }
     m=p.match(/^\/api\/matches\/(\d+)\/timeline$/)
     if(m){const id=Number(m[1]),t=await cached<unknown>(env,`replay-timeline:v1:${id}`);if(!t)return json({error:'Реплей этого матча ещё не разобран'},404);return json(t)}
     m=p.match(/^\/api\/player\/(\d+)\/heroes$/)

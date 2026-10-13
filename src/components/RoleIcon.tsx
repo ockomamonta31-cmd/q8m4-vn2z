@@ -30,19 +30,23 @@ export function roleIconUrl(position: number): string {
     хуже пустого поля. */
 export default function RoleIcon({ position, source, lane, size = 40 }: {
   position: number
-  source?: 'replay' | 'stats'
+  source?: 'replay' | 'stats' | 'stratz'
   lane?: string
   size?: number
 }) {
   if (!source || position < 1 || position > 5) return null
 
-  const provenance = source === 'replay' ? 'определена по движению на карте' : 'оценка по экономике матча, может ошибаться'
+  const measured = source !== 'stats'
+  const provenance =
+    source === 'replay' ? 'определена по движению на карте'
+    : source === 'stratz' ? 'определена по разбору реплея (STRATZ)'
+    : 'оценка по экономике матча, может ошибаться'
   const label = `${ROLE_LABEL[position]} · ${provenance}`
 
   return (
     <span className={`roleicon${source === 'stats' ? ' est' : ''}`} style={{ width: size, height: size }}>
       <img className="roleicon-g" src={roleIconUrl(position)} width={size} height={size} alt={label} title={label} />
-      {source === 'replay' && lane && LANE_FILE[lane] && (
+      {measured && lane && LANE_FILE[lane] && (
         <img className="roleicon-lane" src={LANE_FILE[lane]} width={16} height={16} alt={LANE_LABEL[lane]} title={LANE_LABEL[lane]} />
       )}
     </span>

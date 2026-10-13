@@ -183,8 +183,9 @@ export default function App() {
         <div className="ftr-in">
           <span>Dota Match Lab — разбор одного матча на своих данных</span>
           <span>
-            Источник — <a href="https://steamcommunity.com/dev/api" target="_blank" rel="noreferrer">Steam Web API</a> и
-            разобранные реплеи, оценки считает локальная модель
+            Источник — <a href="https://steamcommunity.com/dev/api" target="_blank" rel="noreferrer">Steam Web API</a>,
+            разобранные реплеи и <a href="https://www.stratz.com/api" target="_blank" rel="noreferrer">STRATZ</a> для
+            полного драфта, линий и винрейтов героев; оценки считает локальная модель
           </span>
         </div>
       </footer>

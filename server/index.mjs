@@ -18,7 +18,8 @@
 // он не разворачивается (ошибка линейной оценки — до 90k записей фида).
 //
 // Своё хранилище (server/data/): матчи неизменяемы → кэш навсегда на диске.
-// Мы ничем не зависим: никаких сторонних парсеров, только Valve и диск.
+// Кроме Valve ни от чего не зависим; единственная внешняя доводка — полный
+// список банов и линии (см. stratzDraft): Steam отдаёт picks_bans обрезанным.
 //
 // Запуск:  node server/index.mjs          (порт 8787, свой API_BASE)
 // Или:    npm run dev                     (встроится в Vite как middleware,
@@ -421,6 +422,65 @@ function ensureMatch(matchId, seq) {
 }
 
 /**
+ * Полный драфт и линии. Steam отдаёт `picks_bans` обрезанным: из 16–18
+ * автобанов доходит 5–8, а часть недосчитанных банов помечается как пики —
+ * из-за этого в списке появлялся «выбранный» герой, которого в матче не было.
+ * Целиком список лежит в разборе STRATZ; берём его только когда он сходится
+ * с составом матча (10 пикированных героев = 10 сыгранных).
+ */
+const STRATZ_TOKEN = process.env.VITE_STRATZ_TOKEN || ''
+
+async function stratzDraft(matchId) {
+  if (!STRATZ_TOKEN) return null
+  const path = join(DATA, 'drafts', `${matchId}.json`)
+  const hit = readJson(path, null)
+  if (hit) return hit.missing ? null : hit
+  try {
+    const res = await fetch('https://api.stratz.com/graphql', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${STRATZ_TOKEN}`, 'Content-Type': 'application/json', 'User-Agent': 'STRATZ_API' },
+      body: JSON.stringify({ query: `query { match(id: ${Number(matchId)}) { pickBans { isPick order heroId bannedHeroId isRadiant } players { isRadiant heroId lane position } } }` }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    if (!res.ok) { console.error('[draft] HTTP', res.status, (await res.text()).slice(0, 120)); return null }
+    const json = await res.json()
+    const m = json.data?.match
+    if (!m) return null
+    const draft = { bans: [], picks: [], roles: {} }
+    for (const b of m.pickBans ?? []) {
+      if (b.isPick && Number.isInteger(b.heroId)) draft.picks.push({ heroId: b.heroId, radiant: Boolean(b.isRadiant), order: Number.isInteger(b.order) ? b.order : draft.picks.length })
+      else if (!b.isPick && Number.isInteger(b.bannedHeroId)) draft.bans.push({ heroId: b.bannedHeroId, radiant: b.isRadiant === true ? true : b.isRadiant === false ? false : null })
+    }
+    draft.picks.sort((a, b) => a.order - b.order)
+    const lanes = { SAFE_LANE: 'safelane', MID_LANE: 'mid', OFF_LANE: 'offlane' }
+    for (const p of m.players ?? []) {
+      const position = /^POSITION_[1-5]$/.test(p.position ?? '') ? Number(p.position.slice(9)) : 0
+      if (!position) continue
+      draft.roles[`${p.isRadiant ? 'r' : 'd'}:${p.heroId}`] = { lane: lanes[p.lane] ?? '', position }
+    }
+    if (!draft.picks.length && !Object.keys(draft.roles).length) { writeJson(path, { missing: 1 }); return null }
+    writeJson(path, draft)
+    return draft
+  } catch (e) {
+    console.error('[draft] failed', e?.name, e?.message)
+    return null
+  }
+}
+
+/** драфт принимается, только если его пики — ровно те 10 героев, что сыграны */
+function withDraft(match, draft) {
+  if (!draft || draft.picks.length !== 10) return { ...match, draft: null }
+  const picked = match.players.every((p) => draft.picks.some((k) => k.heroId === p.heroId && k.radiant === p.isRadiant))
+  const clash = draft.bans.some((b) => match.players.some((p) => p.heroId === b.heroId))
+  return { ...match, draft: picked && !clash ? { source: 'stratz', bans: draft.bans, picks: draft.picks } : null }
+}
+
+function stratzRole(draft, team, heroId) {
+  const role = draft?.roles?.[`${team}:${heroId}`]
+  return role ? { position: role.position, positionSource: 'stratz', lane: role.lane || undefined } : null
+}
+
+/**
  * История матчей. Valve отдаёт окно последних ~500 публичных матчей и листает
  * его курсором start_at_match_id; за раз — не больше 100. Раньше брали только
  * первую сотню, из-за чего «Активность» и一半 статистик жили по 100 матчам.
@@ -589,21 +649,32 @@ const handlers = {
   async match(params) {    const id = Number(params.id)
     if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный ID матча')
     const match = await ensureMatch(id)
-    const profiles = await resolveProfiles(match.players.map((p) => p.steamAccountId))
+    const [profiles, draft] = await Promise.all([
+      resolveProfiles(match.players.map((p) => p.steamAccountId)),
+      stratzDraft(id),
+    ])
     const positions = replayPositions(match)
     const slotByPlayer = new Map()
     for (const radiant of [true, false]) {
       match.players.filter((p) => p.isRadiant === radiant).forEach((p, i) => slotByPlayer.set(p, (radiant ? 0 : 128) + i))
     }
-    return {
-      ...match,
-      players: match.players.map((p) => ({
-        ...p,
-        ...(positions.get(slotByPlayer.get(p)) ?? { position: 0 }),
-        impactPhases: replayPhaseStats(match, p),
-        name: profiles.get(p.steamAccountId)?.name ?? null,
-      })),
-    }
+    return withDraft(
+      {
+        ...match,
+        players: match.players.map((p) => {
+          const parsed = positions.get(slotByPlayer.get(p)) ?? null
+          const stratz = stratzRole(draft, p.isRadiant ? 'r' : 'd', p.heroId)
+          return {
+            ...p,
+            ...(parsed ?? {}),
+            ...(!parsed?.position && stratz ? stratz : {}),
+            impactPhases: replayPhaseStats(match, p),
+            name: profiles.get(p.steamAccountId)?.name ?? null,
+          }
+        }),
+      },
+      draft,
+    )
   },
 
   /**

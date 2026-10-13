@@ -19,6 +19,7 @@ import Rosters from '../components/match/Roster'
 import Draft from '../components/match/Draft'
 import Builds from '../components/match/Builds'
 import DraftReview from '../components/match/DraftReview'
+import DraftPower from '../components/match/DraftPower'
 import TimelinePanel from '../components/match/Timeline'
 import Teamfights from '../components/match/Teamfights'
 import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
@@ -109,8 +110,9 @@ export default function MatchPage() {
   const allPlayers = match.players
   const meSlot = meId != null ? slotOfPlayer(match, meId) : null
   const hasEvents = Boolean(timeline && (timeline.structures.length || timeline.kills.length || timeline.roshans.length))
-  // Черновик без банов — это не драфт: в Turbo Valve пишет только взятых героев.
-  const hasDraft = match.picksBans.some((a) => !a.isPick)
+  // Драфт есть там, где герои выбирались: баны либо хоть один зафиксированный
+  // выбор. В All Random/ARDM ни того, ни другого в данных нет.
+  const hasDraft = Boolean(match.draft?.picks.length) || match.picksBans.length > 0
   const hasBuilds = allPlayers.some((p) => p.abilityUpgrades.length > 0)
   const tabs = [
     { id: 'overview' as const, label: 'Обзор' },
@@ -237,7 +239,10 @@ export default function MatchPage() {
 
       {tab === 'draft' && hasDraft && (
         <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
-          <Draft picks={match.picksBans} heroMap={heroMap} match={match} />
+          <Draft heroMap={heroMap} match={match} />
+          <div className="sec">
+            <DraftPower players={allPlayers} heroMap={heroMap} />
+          </div>
           <div className="sec">
             <DraftReview players={allPlayers} heroMap={heroMap} />
           </div>
