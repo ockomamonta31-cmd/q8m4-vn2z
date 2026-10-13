@@ -197,16 +197,23 @@ disables all of it.
   is `replay` for matches we parsed ourselves, `stratz` for the rest (their
   replay parse), and `stats` never — an estimate from economy was judged too
   easy to mistake for a fact. The tooltip says which one it is.
-- **«Кто сильнее на бумаге» is the only draft verdict, and it is borrowed
-  arithmetic.** Five axes (laning, lane synergy, team synergy, counters, growth
-  to minute 35) come from STRATZ's measured winrates in
-  `server/data/constants/draft_data.json`, rebuilt by
-  `scripts/build-draft-data.mjs`; the file is a lazy chunk loaded on the draft
-  tab. Every axis shows how many pairs and measurements stand behind it, axes
-  with no pairs are dropped, and the total is a coverage-weighted mean — the
-  only judgement made here. We still do not rate drafts from Valve's hero tags:
-  across 465 All Draft games the outcome medians are flat per tag (kills with
-  two initiators 44/43/42/44, GPM with three carries 2546 vs 2529).
+- **Exactly two ratings, both computed by us.** A lane is a corridor of the map,
+  so lanes are mirrored: mid against mid, and carry plus its support against the
+  enemy offlaner (our pos 1/5 vs their pos 3/4) — never «safe vs safe». On top of
+  the three lane verdicts there is one overall draft rating per team.
+  Both come from `server/data/constants/hero_profile.json`, built by
+  `npm run profile:build` out of **our own** match library (996 games of raw Valve
+  stats): every hero is compared with the average of **his own role** (role = farm
+  order inside the team, so a support is never scored as a weak carry), an index
+  of 1.00 means «does the job of an average hero on that role». Six axes (farm,
+  fight, pressure, support, tempo, pair synergy) each become a strength share,
+  and the total is their mean. No third-party winrates are used anywhere in the
+  rating; the STRATZ merge above is only match facts (bans, picks, lanes), never
+  an evaluation.
+- **Synergy needs sample.** A pair counts only if it played together ≥12 times in
+  our library; expected winrate is the mean of the two heroes' own winrates (not
+  the union — that made every lift negative). If a side has fewer than two known
+  pairs, the axis is dropped from the mean instead of being zeroed.
 - **The detector flags five "side-tab" strips.** All five are mandated by the
   brief (tab underline, portrait camp strip, row outcome strip); they encode
   data, not decoration, and the brief overrides the skill.

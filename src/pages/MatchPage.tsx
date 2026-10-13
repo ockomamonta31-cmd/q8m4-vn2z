@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { fetchMatch, getItemMap } from '../api'
-import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails } from '../api/types'
+import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails, type MatchPlayer } from '../api/types'
 import { getHeroMap } from '../api/heroes'
 import { fetchTimeline, type MatchTimeline } from '../api/timeline'
 import { resolveImpact } from '../api/score'
@@ -20,12 +20,14 @@ import Draft from '../components/match/Draft'
 import Builds from '../components/match/Builds'
 import DraftReview from '../components/match/DraftReview'
 import DraftPower from '../components/match/DraftPower'
+import { useDraftRating } from '../components/match/useDraftRating'
 import TimelinePanel from '../components/match/Timeline'
 import Teamfights from '../components/match/Teamfights'
 import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
 
 type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft' | 'builds'
 const TABS: TabId[] = ['overview', 'roster', 'charts', 'timeline', 'draft', 'builds']
+const NO_PLAYERS: MatchPlayer[] = []
 
 export default function MatchPage() {
   const { id } = useParams()
@@ -81,6 +83,11 @@ export default function MatchPage() {
     () => (match && board ? buildInsights(match, board, timeline, (p) => playerLabel(p, heroMap.get(p.heroId)?.name)) : []),
     [match, board, timeline, heroMap],
   )
+
+  // Оценка драфта считается один раз на страницу и нужна и вкладке «Драфт»,
+  // и обзору. Массив-заглушка константный, чтобы хук не дёргался на каждом
+  // рендере до того, как матч пришёл.
+  const { rating } = useDraftRating(match?.players ?? NO_PLAYERS)
 
   // Единственный оркестрованный момент страницы: табло, затем ось, затем
   // составы. Секции ниже по скроллу больше ничего не выезжают.
@@ -162,7 +169,7 @@ export default function MatchPage() {
           <Rosters board={board} heroMap={heroMap} itemMap={itemMap} durationSec={match.durationSeconds} />
 
           <div className="sec">
-            <DraftReview players={allPlayers} heroMap={heroMap} />
+            <DraftReview players={allPlayers} heroMap={heroMap} rating={rating} />
           </div>
         </div>
       )}
@@ -241,10 +248,10 @@ export default function MatchPage() {
         <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
           <Draft heroMap={heroMap} match={match} />
           <div className="sec">
-            <DraftPower players={allPlayers} heroMap={heroMap} />
+            <DraftReview players={allPlayers} heroMap={heroMap} rating={rating} />
           </div>
           <div className="sec">
-            <DraftReview players={allPlayers} heroMap={heroMap} />
+            <DraftPower rating={rating} heroMap={heroMap} />
           </div>
         </div>
       )}

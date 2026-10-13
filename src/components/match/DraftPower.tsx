@@ -1,138 +1,68 @@
-// «Кто сильнее на бумаге»: пять осей из измеренных винрейтов STRATZ и вклад
-// каждого героя. Ни одного выдуманного веса: ось либо есть в данных, либо её
-// нет — см. src/api/draftStrength.ts.
+// Общая оценка драфта — одна цифра на команду. Считается у нас: каждый герой
+// сравнивается со средним по СВОЕЙ роли из нашей базы матчей, потом оси
+// складываются в долю силы. Никаких чужих винрейтов.
 
-import { useEffect, useState } from 'react'
-import type { HeroInfo, MatchPlayer } from '../../api/types'
+import type { HeroInfo } from '../../api/types'
 import { heroImageUrl } from '../../api/heroes'
-import { getDraftData, rateDraft, type DraftPower as Power, type HeroPower } from '../../api/draftStrength'
+import { callShare, type DraftRating } from '../../api/draftStrength'
+import RoleIcon from '../RoleIcon'
 
-const VERDICT_GAP = 1.5
+const share100 = (share: number) => (share * 100).toFixed(0)
 
-function pct(n: number | null, digits = 1) {
-  if (n === null || !Number.isFinite(n)) return '—'
-  return `${n > 0 ? '+' : ''}${n.toFixed(digits)}`
-}
-
-const plural = (n: number, one = 'пара', few = 'пары', many = 'пар') => {
-  const mod10 = n % 10
-  const mod100 = n % 100
-  if (mod10 === 1 && mod100 !== 11) return one
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few
-  return many
-}
-
-function Bar({ value, scale }: { value: number; scale: number }) {
-  const w = `${Math.min(50, (Math.abs(value) / scale) * 50)}%`
-  return (
-    <span className="dr-mu-bar">
-      <i className="mid" aria-hidden="true" />
-      {value >= 0
-        ? <i className="r" style={{ width: w, left: '50%' }} />
-        : <i className="d" style={{ width: w, right: '50%' }} />}
-    </span>
-  )
-}
-
-function HeroLine({ h, heroMap }: { h: HeroPower; heroMap: Map<number, HeroInfo> }) {
-  const hero = heroMap.get(h.player.heroId)
-  const p = h.player
-  return (
-    <li className={`dp-hrow ${p.isRadiant ? 'r' : 'd'}`}>
-      <span className={`port xs ${p.isRadiant ? 'r' : 'd'}`}>
-        {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
-      </span>
-      <span className="dp-hname">
-        <b>{hero?.name ?? `герой #${p.heroId}`}</b>
-        <span className="dim t12">{p.position ? `${p.position}-я роль` : 'роль неизвестна'}</span>
-      </span>
-      <span className="dp-hnums">
-        <span title="как эта линия стояла против своей">
-          <b>{h.laning === null ? '—' : `${(h.laning * 100).toFixed(0)}%`}</b> линия
-        </span>
-        <span title="нетворс к 35-й минуте против среднего по роли">
-          <b>{h.late === null ? '—' : h.late.toFixed(2)}×</b> лейт
-        </span>
-        <span title="прирост винрейта с соседями по команде">
-          <b>{pct(h.synergy === null ? null : h.synergy * 100)}</b> син
-        </span>
-        <span title="винрейт против героев другой команды">
-          <b>{pct(h.counter === null ? null : h.counter * 100)}</b> контр
-        </span>
-      </span>
-    </li>
-  )
-}
-
-export default function DraftPower({ players, heroMap }: { players: MatchPlayer[]; heroMap: Map<number, HeroInfo> }) {
-  const [power, setPower] = useState<Power | null>(null)
-  const [failed, setFailed] = useState(false)
-
-  useEffect(() => {
-    let alive = true
-    getDraftData()
-      .then((data) => {
-        if (!alive) return
-        if (!data) { setFailed(true); return }
-        setPower(rateDraft(data, players))
-      })
-      .catch(() => alive && setFailed(true))
-    return () => { alive = false }
-  }, [players])
-
-  if (failed) {
+export default function DraftPower({ rating, heroMap }: { rating: DraftRating | null; heroMap: Map<number, HeroInfo> }) {
+  if (!rating || !rating.axes.length) {
     return (
       <section className="dp">
         <header className="chart-h">
           <div>
-            <div className="chart-t">Кто сильнее на бумаге</div>
-            <div className="chart-s">Файл с измеренными винрейтами не загрузился — оценку не показываем</div>
+            <div className="chart-t">Общая оценка драфта</div>
+            <div className="chart-s">Профиль героев из нашей базы ещё не подгрузился — оценки нет</div>
           </div>
         </header>
       </section>
     )
   }
 
-  if (!power || !power.axes.length) return null
-
-  const scale = Math.max(VERDICT_GAP * 2, ...power.axes.map((a) => Math.abs(a.edge)))
-  const verdict = Math.abs(power.total) < VERDICT_GAP
-    ? 'Драфты равны'
-    : `На бумаге драфт лучше у ${power.total > 0 ? 'Radiant' : 'Dire'}`
+  const call = callShare(rating.total.radiant / 100)
+  const scale = Math.max(0.06, ...rating.axes.map((a) => Math.abs(a.share - 0.5)))
 
   return (
     <section className="dp">
       <header className="chart-h">
         <div>
-          <div className="chart-t">Кто сильнее на бумаге</div>
+          <div className="chart-t">Общая оценка драфта</div>
           <div className="chart-s">
-            {verdict}: {pct(power.total)} пункта · {power.axes.length} осей из измеренных винрейтов
+            Radiant {share100(rating.total.radiant / 100)} : {share100(rating.total.dire / 100)} Dire — {call.text} · {rating.axes.length} осей, база {rating.corpus} матчей
           </div>
         </div>
       </header>
 
+      <div className="dp-total">
+        <span className="dp-total-r" style={{ width: `${rating.total.radiant}%` }} />
+        <span className="dp-total-d" style={{ width: `${rating.total.dire}%` }} />
+        <b className="dp-total-l">{share100(rating.total.radiant / 100)}</b>
+        <b className="dp-total-rr">{share100(rating.total.dire / 100)}</b>
+      </div>
+
       <ul className="dp-axes">
-        {power.axes.map((a) => (
+        {rating.axes.map((a) => (
           <li key={a.key} className="dp-axis">
             <span className="dp-l">
               <b>{a.label}</b>
               <span className="dim t12">{a.detail}</span>
-              <span className="dim t12">
-                {a.pairs} {plural(a.pairs)} · {a.sample.toLocaleString('ru-RU')} измерений · посчитано {Math.round(a.coverage * 100)}% пар
-              </span>
             </span>
-            <Bar value={a.edge} scale={scale} />
-            <span className="dp-n"><b className={a.edge > 0 ? 'pos' : a.edge < 0 ? 'neg' : 'dim'}>{pct(a.edge)}</b></span>
+            <span className="dr-mu-bar">
+              <i className="mid" aria-hidden="true" />
+              {a.share >= 0.5
+                ? <i className="r" style={{ width: `${Math.min(50, ((a.share - 0.5) / scale) * 50)}%`, left: '50%' }} />
+                : <i className="d" style={{ width: `${Math.min(50, ((0.5 - a.share) / scale) * 50)}%`, right: '50%' }} />}
+            </span>
+            <span className="dp-n">
+              <b className={a.share > 0.5 ? 'pos' : a.share < 0.5 ? 'neg' : 'dim'}>{share100(a.share)}:{share100(1 - a.share)}</b>
+              <span className="dim t12">{a.rValue.toFixed(2)}× против {a.dValue.toFixed(2)}× · {a.games.toLocaleString('ru-RU')} матчей</span>
+            </span>
           </li>
         ))}
-        <li className="dp-axis total">
-          <span className="dp-l">
-            <b>Итого</b>
-            <span className="dim t12">среднее по {power.axes.length} осям, вес — доля посчитанных пар</span>
-          </span>
-          <Bar value={power.total} scale={scale} />
-          <span className="dp-n"><b className={power.total > 0 ? 'pos' : power.total < 0 ? 'neg' : 'dim'}>{pct(power.total)}</b></span>
-        </li>
       </ul>
 
       <div className="dp-teams">
@@ -140,21 +70,39 @@ export default function DraftPower({ players, heroMap }: { players: MatchPlayer[
           <div key={radiant ? 'r' : 'd'} className={`dp-side ${radiant ? 'r' : 'd'}`}>
             <h4 className={`dr-team ${radiant ? 'r' : 'd'}`}>{radiant ? 'Radiant' : 'Dire'}</h4>
             <ul className="dp-hlist">
-              {power.heroes.filter((h) => h.player.isRadiant === radiant).map((h) => (
-                <HeroLine key={`${h.player.heroId}:${h.player.steamAccountId}`} h={h} heroMap={heroMap} />
-              ))}
+              {rating.heroes.filter((h) => h.player.isRadiant === radiant).map((h) => {
+                const hero = heroMap.get(h.player.heroId)
+                return (
+                  <li className="dp-hrow" key={`${h.player.heroId}:${h.player.steamAccountId}`}>
+                    <RoleIcon position={h.role} source={h.roleFromReplay ? (h.player.positionSource ?? 'replay') : 'stats'} lane={h.player.lane} size={24} />
+                    <span className={`port xs ${radiant ? 'r' : 'd'}`}>
+                      {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
+                    </span>
+                    <span className="dp-hname">
+                      <b>{hero?.name ?? `герой #${h.player.heroId}`}</b>
+                      <span className="dim t12">{h.role}-я роль{h.roleFromReplay ? '' : ' (по фармам)'} · профиль по {h.games} матч.</span>
+                    </span>
+                    <span className="dp-hnums">
+                      <b className={h.index === null ? 'dim' : h.index >= 1 ? 'pos' : 'neg'}>{h.index === null ? '—' : `${h.index.toFixed(2)}×`}</b>
+                      <span className="dim t12">к среднему по роли</span>
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
           </div>
         ))}
       </div>
 
       <p className="pnote">
-        Каждая ось — это винрейт, который STRATZ насчитал по своим разборам реплеев
-        (агрегат по всем рангам, снимок {power.generated}): линия против линии, пара в
-        одной команде, пара друг против друга, рост нетворса. Числа выше — край
-        Radiant в пунктах винрейта, «Итого» — среднее по осям, где нашлись пары.
-        {power.missing.length ? ` Осей без данных: ${power.missing.join(', ')}.` : ''} Это разбор состава на бумаге,
-        а не прогноз: он не знает, кто как сыграет.
+        Как считаем: берём средние статы Valve по каждому герою на его роли из
+        нашей базы ({rating.corpus} матчей) и делим на среднее по этой роли — 1.00
+        значит «делает свою работу как средний», 1.15 — «на 15% лучше». Ось
+        команды — среднее по её героям, а итог — среднее по осям, где данных
+        хватило у обеих сторон. Синергия считается по парам, которые в нашей
+        базе играли вместе не меньше {rating.minPairGames} раз; если таких пар
+        мало, ось выпадает из среднего, а не обнуляется. Это оценка состава, а
+        не прогноз на результат.
       </p>
     </section>
   )

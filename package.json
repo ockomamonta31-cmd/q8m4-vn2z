@@ -15,8 +15,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cf:types": "wrangler types",
-    "drafts:data": "node scripts/build-draft-data.mjs",
-    "drafts:harvest": "node scripts/harvest-drafts.mjs"
+    "drafts:harvest": "node scripts/harvest-drafts.mjs",
+    "profile:build": "node scripts/build-hero-profile.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

@@ -1,332 +1,215 @@
-// «Кто сильнее на бумаге»: пять осей, каждая — из измеренных чисел STRATZ
-// (файл server/data/constants/draft_data.json, собранный scripts/build-draft-data.mjs).
+// Две оценки, и обе считаются у нас: по каждой линии и одна общая по драфту.
 //
-// Никаких наших весов: каждая ось — это винрейт, который STRATZ насчитал по
-// своим разборам реплеев, а между командами считается как край относительно 50.
-// Где выборки нет — оси просто нет.
+// Источник — только наша база матчей (server/data/constants/hero_profile.json):
+// средние статы Valve по героям и ролям. Чужие винрейты не используются.
 //
-//   лайнинг            — исход линии герой против героя
-//   синергия линий     — исход линии двух героев, стоявших в одном коридоре
-//   синергия состава   — винрейт пары в одной команде против их собственных
-//                        базовых винрейтов
-//   контры             — винрейт команды с героем против конкретного героя
-//   рост к 35-й        — нетворс героя к 35-й минуте против среднего по позиции
-//
-// Итог — среднее по осям с весом «доля посчитанных пар»: ось, по которой
-// данных наполовину, тянет вердикт вдвое слабее. Это единственное решение,
-// которое здесь принимается, и оно написано в подписи под блоком.
+// Как считаем:
+//   1. герой сравнивается со средним по СВОЕЙ роли (иначе саппорт всегда
+//      «слабый керри»); индекс 1.0 = делает свою работу как средний;
+//   2. линия — это коридор карты: мид против мида, а керри с саппортом против
+//      чужого оффлейна, поэтому пары зеркальные;
+//   3. перевес линии — доля силы одной стороны против другой по индексам её
+//      героев; это доля, а не букмекерская вероятность;
+//   4. общая оценка — среднее по шести осям (фарм, драка, давление, поддержка,
+//      темп, синергия пар), где каждая — тоже доля силы; ось без данных
+//      выпадает из среднего, а не тянет его нулём.
 
 import type { MatchPlayer } from './types'
-import { laneOf } from './draft'
+import { AXES, heroIndex, pairSynergy, roleOf, type Profile } from './heroProfile'
 
-type LaneRow = [number, number, number, number]
-type PairRow = [number, number, number]
-
-export type DraftData = {
-  v: number
-  generated: string
-  source: string
-  min: { lane: number; pair: number }
-  laneVs: Record<string, Record<string, LaneRow[]>>
-  laneWith: Record<string, LaneRow[]>
-  pairWith: Record<string, PairRow[]>
-  pairVs: Record<string, PairRow[]>
-  curve: Record<string, Record<string, number[]>>
-  base: Record<string, Record<string, [number, number]>>
-}
-
-let promise: Promise<DraftData | null> | null = null
-
-export function getDraftData(): Promise<DraftData | null> {
-  if (promise) return promise
-  promise = import('../../server/data/constants/draft_data.json')
-    .then((m) => m.default as unknown as DraftData)
-    .catch(() => null)
-  return promise
-}
-
-/** Исход линии: победа = 1, ничья = 0.5. */
-function laneRate(row: LaneRow | undefined) {
-  if (!row) return null
-  const [, w, l, d] = row
-  const total = w + l + d
-  return total > 0 ? { value: (w + d / 2) / total, sample: total } : null
-}
-
-const mainPosition = (data: DraftData, hero: number) => {
-  const b = data.base[String(hero)] ?? {}
-  let best = 0
-  let matches = -1
-  for (const [pos, [m]] of Object.entries(b)) if (m > matches) { matches = m; best = Number(pos) }
-  return best
-}
-
-/** Строка линии героя против героя: точная позиция, иначе его основная. */
-function laneRow(data: DraftData, hero: number, position: number, other: number) {
-  const byPos = data.laneVs[String(hero)]
-  if (!byPos) return undefined
-  const exact = byPos[String(position)]?.find((r) => r[0] === other)
-  if (exact) return exact
-  const home = String(mainPosition(data, hero))
-  return byPos[home]?.find((r) => r[0] === other)
-}
-
-const pairRow = (rows: PairRow[] | undefined, other: number) => rows?.find((r) => r[0] === other)
-
-/** Базовый винрейт героя на его позиции в этом матче. */
-function baseWin(data: DraftData, hero: number, position: number) {
-  const b = data.base[String(hero)]
-  if (!b) return null
-  const own = b[String(position)] ?? b[String(mainPosition(data, hero))]
-  if (!own || !own[0]) return null
-  return own[1] / own[0]
-}
-
-/** Нетворс героя к минуте относительно среднего по его позиции. */
-function farmShare(data: DraftData, hero: number, position: number, minute: number, field: Map<string, number>) {
-  const key = String(hero)
-  const pos = String(position || mainPosition(data, hero))
-  const curve = data.curve[key]?.[pos] ?? data.curve[key]?.[String(mainPosition(data, hero))]
-  if (!curve) return null
-  const nw = curve[Math.round(minute / 5)]
-  const avg = field.get(pos) ?? field.get(String(mainPosition(data, hero)))
-  if (!nw || !avg) return null
-  return nw / avg
-}
-
-/** Средний нетворс по позиции к минуте — знаменатель для доли фарма. */
-export function fieldAverages(data: DraftData, minute: number): Map<string, number> {
-  const idx = Math.round(minute / 5)
-  const sums = new Map<string, { nw: number; n: number }>()
-  for (const [hero, byPos] of Object.entries(data.curve)) {
-    for (const [pos, curve] of Object.entries(byPos)) {
-      const nw = curve?.[idx]
-      const matches = data.base[hero]?.[pos]?.[0] ?? 0
-      if (!nw || matches < 200) continue
-      const acc = sums.get(pos) ?? { nw: 0, n: 0 }
-      acc.nw += nw * matches
-      acc.n += matches
-      sums.set(pos, acc)
-    }
-  }
-  const out = new Map<string, number>()
-  for (const [pos, { nw, n }] of sums) if (n) out.set(pos, nw / n)
-  return out
-}
-
-export type Axis = {
+export type LaneCall = {
   key: string
   label: string
-  detail: string
-  /** край Radiant в пунктах винрейта: + значит Radiant сильнее */
-  edge: number
-  /** сколько пар удалось посчитать с обеих сторон */
-  pairs: number
-  /** сколько матчей и линий за этими числами стоит */
-  sample: number
-  /** доля пар этого типа, по которым нашлись данные */
+  note: string
+  radiant: MatchPlayer[]
+  dire: MatchPlayer[]
+  pairs: { radiant: MatchPlayer | null; dire: MatchPlayer | null }[]
+  /** доля силы Radiant на линии, 0…1; null — героев с профилем слишком мало */
+  share: number | null
+  rIndex: number
+  dIndex: number
   coverage: number
 }
 
-export type HeroPower = {
-  player: MatchPlayer
-  /** винрейт линии против её конкретного соперника */
-  laning: number | null
-  /** нетворс к 35-й минуте против среднего по позиции */
-  late: number | null
-  /** прирост винрейта рядом с соседями по команде, пункты */
-  synergy: number | null
-  /** винрейт против героев другой команды, пункты к 50 */
-  counter: number | null
+export type RatingAxis = {
+  key: string
+  label: string
+  detail: string
+  rValue: number
+  dValue: number
+  share: number
+  games: number
 }
 
-export type DraftPower = {
-  generated: string
-  axes: Axis[]
-  /** среднее по осям с весом по доле посчитанных пар, пункты винрейта */
-  total: number
-  heroes: HeroPower[]
-  missing: string[]
+export type HeroRating = {
+  player: MatchPlayer
+  role: number
+  roleFromReplay: boolean
+  index: number | null
+  axes: Record<string, number>
+  games: number
 }
+
+export type DraftRating = {
+  generated: string
+  corpus: number
+  minPairGames: number
+  lanes: LaneCall[]
+  axes: RatingAxis[]
+  synergy: { r: number | null; d: number | null; games: number }
+  total: { radiant: number; dire: number }
+  heroes: HeroRating[]
+  /** линии взяты из разобранного реплея, а не из порядка фарма */
+  realLanes: boolean
+}
+
+/** Коридор карты: наша лёгкая линия — это их сложная. */
+const LANES: { key: string; label: string; note: string; radiant: string; dire: string }[] = [
+  { key: 'safelane', label: 'Линия керри', note: 'наш керри и его саппорт против их оффлейнера', radiant: 'safelane', dire: 'offlane' },
+  { key: 'mid', label: 'Мид', note: 'мидер против мидера', radiant: 'mid', dire: 'mid' },
+  { key: 'offlane', label: 'Линия оффлейна', note: 'наш оффлейнер против их керри', radiant: 'offlane', dire: 'safelane' },
+]
+
+/** Роль → коридор: 1 и 5 стоят на лёгкой, 2 в миде, 3 и 4 на сложной. */
+const laneKey = (p: MatchPlayer, role: number): string =>
+  p.lane ?? (role === 2 ? 'mid' : role === 1 || role === 5 ? 'safelane' : 'offlane')
 
 const mean = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null)
-const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0)
 
-/** Накапливает край одной стороны: пары, измерения и среднее. */
-type Bucket = { edges: number[]; pairs: number; sample: number }
-const bucket = (): Bucket => ({ edges: [], pairs: 0, sample: 0 })
-
-/**
- * Оценка состава матча. Линии берутся из `laneOf` — то есть из разобранного
- * реплея; без него ось лайнинга честно не появляется.
- */
-export function rateDraft(data: DraftData, players: MatchPlayer[]): DraftPower | null {
+export function evaluateDraft(profile: Profile, players: MatchPlayer[]): DraftRating | null {
   const radiant = players.filter((p) => p.isRadiant)
   const dire = players.filter((p) => !p.isRadiant)
   if (radiant.length !== 5 || dire.length !== 5) return null
-  const field15 = fieldAverages(data, 15)
-  const field35 = fieldAverages(data, 35)
 
-  // --- лайнинг: пары «кто против кого» из линий этого матча
-  const laning = bucket()
-  let laningTotal = 0
-  for (const p of radiant) {
-    const key = laneOf(p)
-    if (!key) continue
-    for (const foe of dire.filter((q) => laneOf(q) === key)) {
-      laningTotal++
-      const mine = laneRate(laneRow(data, p.heroId, p.position, foe.heroId))
-      const theirs = laneRate(laneRow(data, foe.heroId, foe.position, p.heroId))
-      if (!mine && !theirs) continue
-      const mineRate = mine ? mine.value : 1 - (theirs?.value ?? 0.5)
-      const theirsRate = theirs ? theirs.value : 1 - (mine?.value ?? 0.5)
-      laning.edges.push((mineRate + (1 - theirsRate)) / 2 - 0.5)
-      laning.pairs++
-      laning.sample += Math.max(mine?.sample ?? 0, theirs?.sample ?? 0)
-    }
-  }
+  const roles = new Map<MatchPlayer, number>()
+  for (const side of [radiant, dire]) for (const p of side) roles.set(p, roleOf(p, side))
+  const indexes = new Map<MatchPlayer, ReturnType<typeof heroIndex>>()
+  for (const p of players) indexes.set(p, heroIndex(profile, p.heroId, roles.get(p)!))
 
-  // --- синергия линий: как пары в одном коридоре выигрывают свою линию
-  const laneSyn = { r: bucket(), d: bucket() }
-  let laneSynTotal = 0
-  for (const side of [radiant, dire]) {
-    const into = side === radiant ? laneSyn.r : laneSyn.d
-    const byLane = new Map<string, MatchPlayer[]>()
-    for (const p of side) {
-      const key = laneOf(p)
-      if (key) byLane.set(key, [...(byLane.get(key) ?? []), p])
-    }
-    for (const group of byLane.values()) {
-      for (let i = 0; i < group.length; i++) {
-        for (let j = i + 1; j < group.length; j++) {
-          laneSynTotal++
-          const a = laneRate((data.laneWith[String(group[i].heroId)] ?? []).find((r) => r[0] === group[j].heroId))
-          const b = laneRate((data.laneWith[String(group[j].heroId)] ?? []).find((r) => r[0] === group[i].heroId))
-          const values = [a, b].filter(Boolean) as { value: number; sample: number }[]
-          const v = mean(values.map((x) => x.value))
-          if (v === null) continue
-          into.edges.push(v)
-          into.pairs++
-          into.sample += Math.max(...values.map((x) => x.sample))
-        }
-      }
-    }
-  }
-
-  // --- синергия состава: прирост пары над винрейтами её же героев
-  const teamSyn = (side: MatchPlayer[]) => {
-    const out = bucket()
-    for (let i = 0; i < side.length; i++) {
-      for (let j = i + 1; j < side.length; j++) {
-        const a = side[i]
-        const b = side[j]
-        const row = pairRow(data.pairWith[String(a.heroId)], b.heroId) ?? pairRow(data.pairWith[String(b.heroId)], a.heroId)
-        const ba = baseWin(data, a.heroId, a.position)
-        const bb = baseWin(data, b.heroId, b.position)
-        if (!row || ba === null || bb === null) continue
-        out.edges.push(row[1] / row[2] - (ba + bb) / 2)
-        out.pairs++
-        out.sample += row[2]
-      }
-    }
-    return out
-  }
-  const synR = teamSyn(radiant)
-  const synD = teamSyn(dire)
-
-  // --- контры: винрейт против каждого конкретного врага
-  const counters = bucket()
-  let countersTotal = 0
-  for (const a of radiant) {
-    for (const b of dire) {
-      countersTotal++
-      const ra = pairRow(data.pairVs[String(a.heroId)], b.heroId)
-      const rb = pairRow(data.pairVs[String(b.heroId)], a.heroId)
-      if (!ra && !rb) continue
-      const mine = ra ? ra[1] / ra[2] : 1 - (rb ? rb[1] / rb[2] : 0.5)
-      const theirs = rb ? rb[1] / rb[2] : 1 - (ra ? ra[1] / ra[2] : 0.5)
-      counters.edges.push((mine + (1 - theirs)) / 2 - 0.5)
-      counters.pairs++
-      counters.sample += Math.max(ra?.[2] ?? 0, rb?.[2] ?? 0)
-    }
-  }
-
-  // --- рост к 35-й минуте
-  const scaling = (side: MatchPlayer[]) => {
-    let total = 0
-    let n = 0
-    let sample = 0
-    for (const p of side) {
-      const late = farmShare(data, p.heroId, p.position, 35, field35)
-      const early = farmShare(data, p.heroId, p.position, 15, field15)
-      if (late === null || early === null || !early) continue
-      total += late / early
-      sample += data.base[String(p.heroId)]?.[String(p.position)]?.[0] ?? 0
-      n++
-    }
-    return { total, n, sample }
-  }
-  const lateR = scaling(radiant)
-  const lateD = scaling(dire)
-
-  const axes: Axis[] = []
-  const missing: string[] = []
-  const push = (key: string, label: string, detail: string, edge: number | null, pairs: number, sample: number, coverage: number) => {
-    if (edge === null || !Number.isFinite(edge) || pairs === 0) { missing.push(label); return }
-    axes.push({ key, label, detail, edge: edge * 100, pairs, sample: Math.round(sample), coverage })
-  }
-
-  push('laning', 'Лайнинг', 'исход линии против конкретного героя', mean(laning.edges), laning.pairs, laning.sample, laningTotal ? laning.pairs / laningTotal : 0)
-  push(
-    'laneSynergy', 'Синергия линий', 'как пары в одном коридоре выигрывают линию',
-    laneSyn.r.pairs && laneSyn.d.pairs ? mean(laneSyn.r.edges)! - mean(laneSyn.d.edges)! : null,
-    laneSyn.r.pairs + laneSyn.d.pairs, laneSyn.r.sample + laneSyn.d.sample,
-    laneSynTotal ? (laneSyn.r.pairs + laneSyn.d.pairs) / laneSynTotal : 0,
-  )
-  push(
-    'teamSynergy', 'Синергия состава', 'винрейт пары в одной команде против её же героев',
-    synR.pairs && synD.pairs ? mean(synR.edges)! - mean(synD.edges)! : null,
-    synR.pairs + synD.pairs, synR.sample + synD.sample, (synR.pairs + synD.pairs) / 20,
-  )
-  push('counters', 'Контры', 'все 25 пар «наш герой против их героя»', mean(counters.edges), counters.pairs, counters.sample, countersTotal ? counters.pairs / countersTotal : 0)
-  push(
-    'late', 'Рост к 35-й', 'нетворс против среднего по позиции: 15-я минута → 35-я',
-    lateR.n === 5 && lateD.n === 5 && lateR.total + lateD.total > 0 ? lateR.total / (lateR.total + lateD.total) - 0.5 : null,
-    lateR.n + lateD.n, lateR.sample + lateD.sample, (lateR.n + lateD.n) / 10,
-  )
-
-  const weight = sum(axes.map((a) => a.coverage))
-  const total = weight ? sum(axes.map((a) => a.edge * a.coverage)) / weight : 0
-
-  const heroes: HeroPower[] = players.map((p) => {
-    const foes = players.filter((q) => q.isRadiant !== p.isRadiant && laneOf(q) === laneOf(p))
-    const laningVals = foes
-      .map((foe) => laneRate(laneRow(data, p.heroId, p.position, foe.heroId)))
-      .filter(Boolean) as { value: number }[]
-    const synVals = players
-      .filter((q) => q.isRadiant === p.isRadiant && q !== p)
-      .map((a) => {
-        const row = pairRow(data.pairWith[String(p.heroId)], a.heroId) ?? pairRow(data.pairWith[String(a.heroId)], p.heroId)
-        const ba = baseWin(data, p.heroId, p.position)
-        const bb = baseWin(data, a.heroId, a.position)
-        return row && ba !== null && bb !== null ? row[1] / row[2] - (ba + bb) / 2 : null
-      })
-      .filter((x): x is number => x !== null)
-    const cntVals = players
-      .filter((q) => q.isRadiant !== p.isRadiant)
-      .map((e) => {
-        const row = pairRow(data.pairVs[String(p.heroId)], e.heroId)
-        return row ? row[1] / row[2] - 0.5 : null
-      })
-      .filter((x): x is number => x !== null)
+  const heroes: HeroRating[] = players.map((p) => {
+    const idx = indexes.get(p)
     return {
       player: p,
-      laning: mean(laningVals.map((x) => x.value)),
-      late: farmShare(data, p.heroId, p.position, 35, field35),
-      synergy: mean(synVals),
-      counter: mean(cntVals),
+      role: roles.get(p)!,
+      roleFromReplay: p.position >= 1 && p.position <= 5,
+      index: idx ? idx.total : null,
+      axes: idx?.axes ?? {},
+      games: idx?.games ?? 0,
     }
   })
 
-  return { generated: data.generated, axes, total, heroes, missing }
+  // --- линии
+  const realLanes = players.some((p) => p.lane)
+  const lanes: LaneCall[] = LANES.map((lane) => {
+    const r = radiant.filter((p) => laneKey(p, roles.get(p)!) === lane.radiant)
+    const d = dire.filter((p) => laneKey(p, roles.get(p)!) === lane.dire)
+    const cores = (side: MatchPlayer[]) => [...side].sort((a, b) => roles.get(a)! - roles.get(b)!)
+    const rSorted = cores(r)
+    const dSorted = cores(d)
+    const pairs = Array.from({ length: Math.max(rSorted.length, dSorted.length) }, (_, i) => ({
+      radiant: rSorted[i] ?? null,
+      dire: dSorted[i] ?? null,
+    }))
+    const value = (side: MatchPlayer[]) => {
+      const known = side.map((p) => indexes.get(p)).filter((x): x is NonNullable<typeof x> => !!x)
+      return {
+        index: known.length ? known.reduce((a, b) => a + b.total, 0) / known.length : null,
+        coverage: side.length ? known.length / side.length : 0,
+      }
+    }
+    const rv = value(r)
+    const dv = value(d)
+    const share = rv.index !== null && dv.index !== null && rv.coverage >= 0.5 && dv.coverage >= 0.5
+      ? rv.index / (rv.index + dv.index)
+      : null
+    return {
+      key: lane.key,
+      label: lane.label,
+      note: lane.note,
+      radiant: rSorted,
+      dire: dSorted,
+      pairs,
+      share,
+      rIndex: rv.index ?? 0,
+      dIndex: dv.index ?? 0,
+      coverage: Math.min(rv.coverage, dv.coverage),
+    }
+  }).filter((l) => l.radiant.length || l.dire.length)
+
+  // --- оси по всей команде
+  const axes: RatingAxis[] = AXES.map((axis) => {
+    const side = (team: MatchPlayer[]) => {
+      const values = team.map((p) => indexes.get(p)?.axes?.[axis.key]).filter((v): v is number => typeof v === 'number')
+      const games = team.reduce((n, p) => n + (indexes.get(p)?.games ?? 0), 0)
+      return { value: values.length ? values.reduce((a, b) => a + b, 0) / values.length : null, games, n: values.length }
+    }
+    const r = side(radiant)
+    const d = side(dire)
+    if (r.value === null || d.value === null || r.n < 4 || d.n < 4) return null
+    return {
+      key: axis.key,
+      label: axis.label,
+      detail: axis.detail,
+      rValue: r.value,
+      dValue: d.value,
+      share: r.value / (r.value + d.value),
+      games: r.games + d.games,
+    }
+  }).filter(Boolean) as RatingAxis[]
+
+  // --- синергия пар: только те, что у нас встречались достаточно часто
+  const syn = (team: MatchPlayer[]) => {
+    const lifts: number[] = []
+    let games = 0
+    for (let i = 0; i < team.length; i++) {
+      for (let j = i + 1; j < team.length; j++) {
+        const a = team[i]
+        const b = team[j]
+        const soloA = profile.hero[String(a.heroId)]?.all?.winRate ?? 0.5
+        const soloB = profile.hero[String(b.heroId)]?.all?.winRate ?? 0.5
+        const s = pairSynergy(profile, a.heroId, b.heroId, soloA, soloB)
+        if (!s) continue
+        lifts.push(s.lift)
+        games += s.games
+      }
+    }
+    const m = mean(lifts)
+    return { value: m === null ? null : 1 + 2 * m, games, pairs: lifts.length }
+  }
+  const rSyn = syn(radiant)
+  const dSyn = syn(dire)
+  const synergy = { r: rSyn.value, d: dSyn.value, games: rSyn.games + dSyn.games }
+  if (rSyn.value !== null && dSyn.value !== null && rSyn.pairs >= 2 && dSyn.pairs >= 2) {
+    axes.push({
+      key: 'synergy',
+      label: 'Синергия пар',
+      detail: 'как пары этих героев выигрывают в нашей базе против их же героев поодиночке',
+      rValue: rSyn.value,
+      dValue: dSyn.value,
+      share: rSyn.value / (rSyn.value + dSyn.value),
+      games: synergy.games,
+    })
+  }
+
+  const totalShare = mean(axes.map((a) => a.share)) ?? 0.5
+  return {
+    generated: profile.generated,
+    corpus: profile.meta.matches,
+    minPairGames: profile.meta.minPairGames,
+    lanes,
+    axes,
+    synergy,
+    total: { radiant: totalShare * 100, dire: (1 - totalShare) * 100 },
+    heroes,
+    realLanes,
+  }
+}
+
+/** Вердикт по перевесу: до 57% против 43% считаем равным — спор о десятых долях бесполезен. */
+export function callShare(share: number | null): { text: string; tone: 'pos' | 'neg' | 'dim' } {
+  if (share === null) return { text: 'данных не хватает', tone: 'dim' }
+  const pct = share * 100
+  if (pct >= 57) return { text: 'перевес Radiant', tone: 'pos' }
+  if (pct <= 43) return { text: 'перевес Dire', tone: 'neg' }
+  return { text: 'равные', tone: 'dim' }
 }
