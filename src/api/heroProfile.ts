@@ -27,6 +27,8 @@ export type Profile = {
   backtest?: {
     matches: number
     lanes: number
+    /** сколько линий вообще имеют разобранные первые 10 минут */
+    lanesMeasured: number
     matchAccuracy: number
     laneAccuracy: number
     calibration: { lo: number; hi: number; games: number; won: number }[]

@@ -66,7 +66,7 @@ export function teamProfile(players: MatchPlayer[], radiant: boolean, meta: Map<
 }
 
 /** Разница двух чисел в процентах от большего. */
-function relativeEdge(a: number, b: number) {
+export function relativeEdge(a: number, b: number) {
   const top = Math.max(Math.abs(a), Math.abs(b))
   if (!top) return 0
   return ((a - b) / top) * 100

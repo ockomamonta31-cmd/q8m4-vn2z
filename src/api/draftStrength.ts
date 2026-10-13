@@ -15,7 +15,7 @@
 //      выпадает из среднего, а не тянет его нулём.
 
 import type { MatchPlayer } from './types'
-import { laneGaps } from './draft'
+import { laneGaps, relativeEdge } from './draft'
 import { AXES, calibrate, heroIndex, pairSynergy, realizedIndex, roleOf, type Profile } from './heroProfile'
 
 export type LaneSide = 'radiant' | 'dire' | 'even'
@@ -27,13 +27,15 @@ export type LaneCall = {
   radiant: MatchPlayer[]
   dire: MatchPlayer[]
   pairs: { radiant: MatchPlayer | null; dire: MatchPlayer | null }[]
-  /** доля силы Radiant, 0…1; null — героев с профилем слишком мало */
+  /** доля силы Radiant на линии, 0…1; null — героев с профилем слишком мало */
   share: number | null
   /** кого и почему мы ожидали на линии ДО знания результата */
   expected: { side: LaneSide; text: string; lines: string[] } | null
-  /** кто и почему забрал линию по факту */
-  result: { side: LaneSide; text: string; lines: string[] } | null
-  /** ожидался и получился один и тот же цвет */
+  /** чем закончилась именно линия (0–10 минут из разобранного реплея) */
+  laning: { side: LaneSide; text: string; lines: string[] } | null
+  /** что стороны произвели за весь матч — это НЕ результат линии */
+  full: { lines: string[]; totals: { r: number; d: number } } | null
+  /** предсказание и первые 10 минут совпали */
   hit: boolean | null
   rIndex: number
   dIndex: number
@@ -69,7 +71,7 @@ export type DraftRating = {
   corpus: number
   minPairGames: number
   /** точность модели по нашей базе — чтобы цифра предсказания не была магией */
-  model: { matchAccuracy: number; laneAccuracy: number; matches: number; lanes: number } | null
+  model: { matchAccuracy: number; laneAccuracy: number; matches: number; lanes: number; lanesMeasured: number } | null
   lanes: LaneCall[]
   axes: RatingAxis[]
   synergy: { r: number | null; d: number | null; games: number }
@@ -102,6 +104,15 @@ const group = (n: number) => Math.round(n).toLocaleString('ru-RU')
 /** больше 3% по замеру — уже перевес; меньше — «разницы нет» */
 const leadOf = (edge: number) =>
   edge > 3 ? `Radiant впереди на ${edge.toFixed(0)}%` : edge < -3 ? `Dire впереди на ${Math.abs(edge).toFixed(0)}%` : 'разницы нет'
+
+/**
+ * Линия длится первые ~10 минут, и они есть только в разобранном реплее:
+ * impactPhases[0] — это «Начало · 0–10 мин» из наших же файлов. Финальные
+ * статы матча линию не измеряют: за 40 минут набегает совсем другое.
+ */
+const laningPhase = (p: MatchPlayer) => p.impactPhases?.find((x) => x.label.startsWith('Начало')) ?? null
+
+const LANE_AXES = ['farm', 'fight', 'support']
 
 export function evaluateDraft(
   profile: Profile,
@@ -146,10 +157,18 @@ export function evaluateDraft(
       radiant: rSorted[i] ?? null,
       dire: dSorted[i] ?? null,
     }))
+    // Ожидание по линии строим только на осях, которые к линии и относятся:
+    // фарм, драка, поддержка. Пуш и темп — про остальную игру.
+    const laneIndexOf = (p: MatchPlayer) => {
+      const idx = indexes.get(p)
+      if (!idx) return null
+      const values = LANE_AXES.map((a) => idx.axes[a]).filter((v): v is number => typeof v === 'number')
+      return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null
+    }
     const value = (side: MatchPlayer[]) => {
-      const known = side.map((p) => indexes.get(p)).filter((x): x is NonNullable<typeof x> => !!x)
+      const known = side.map(laneIndexOf).filter((x): x is number => x !== null)
       return {
-        index: known.length ? known.reduce((a, b) => a + b.total, 0) / known.length : null,
+        index: known.length ? known.reduce((a, b) => a + b, 0) / known.length : null,
         coverage: side.length ? known.length / side.length : 0,
       }
     }
@@ -163,8 +182,8 @@ export function evaluateDraft(
     // кого ожидали: сравнение пар по профилю, построчно
     const pairLines = pairs.flatMap((p) => {
       if (!p.radiant || !p.dire) return []
-      const ri = indexes.get(p.radiant)?.total ?? null
-      const di = indexes.get(p.dire)?.total ?? null
+      const ri = laneIndexOf(p.radiant)
+      const di = laneIndexOf(p.dire)
       if (ri === null || di === null) return []
       const who = ri - di >= 0.05 ? name(p.radiant) : di - ri >= 0.05 ? name(p.dire) : null
       return [`${name(p.radiant)} ${ri.toFixed(2)}× против ${name(p.dire)} ${di.toFixed(2)}×${who ? ` — сильнее ${who}` : ' — равные'}`]
@@ -182,25 +201,44 @@ export function evaluateDraft(
       lines: pairLines,
     }
 
-    // кто взял: большинство из четырёх замеров линии, а не средняя каша
-    const metrics: { label: string; edge: number; r: number; d: number }[] = gaps ? [
-      { label: 'золото в минуту', edge: gaps.gpm, r: gaps.totals.r.gpm, d: gaps.totals.d.gpm },
-      { label: 'опыт в минуту', edge: gaps.xpm, r: gaps.totals.r.xpm, d: gaps.totals.d.xpm },
-      { label: 'добивания', edge: gaps.lh, r: gaps.totals.r.lh, d: gaps.totals.d.lh },
-      { label: 'нетворс', edge: gaps.networth, r: gaps.totals.r.nw, d: gaps.totals.d.nw },
+    // --- чем закончилась именно линия: 0–10 минут из разобранного реплея
+    const totals = (side: MatchPlayer[]) => {
+      const phases = side.map(laningPhase)
+      if (!side.length || phases.some((x) => !x)) return null
+      const sum = (pick: (x: NonNullable<typeof phases[number]>) => number) => phases.reduce((a, x) => a + pick(x!), 0)
+      return { lh: sum((x) => x.lastHits), xp: sum((x) => x.experience), gold: sum((x) => x.gold), kills: sum((x) => x.kills), deaths: sum((x) => x.deaths) }
+    }
+    const lr = totals(r)
+    const ld = totals(d)
+    const laneMetrics = lr && ld ? [
+      { label: 'добивания', r: lr.lh, d: ld.lh },
+      { label: 'опыт', r: lr.xp, d: ld.xp },
+      { label: 'золото', r: lr.gold, d: ld.gold },
     ] : []
-    const metricLines = metrics.map((m) => `${m.label}: ${group(m.r)} против ${group(m.d)} — ${leadOf(m.edge)}`)
-    const rWins = metrics.filter((m) => m.edge > 3).length
-    const dWins = metrics.filter((m) => m.edge < -3).length
-    const actualSide: LaneSide = !metrics.length ? 'even' : rWins > dWins ? 'radiant' : dWins > rWins ? 'dire' : 'even'
-    const won = actualSide === 'radiant' ? rWins : actualSide === 'dire' ? dWins : 0
-    const lostBy = actualSide === 'radiant' ? dWins : rWins
-    const result = !gaps ? null : {
-      side: actualSide,
-      text: actualSide === 'even'
-        ? 'по матчу линия равная: ни одна сторона не выиграла большинства замеров'
-        : `по матчу линию взяла ${SIDE[actualSide]}: ${won} замера из 4 за неё, ${lostBy ? `${lostBy} за соперника` : 'ни одного за соперника'}`,
-      lines: metricLines,
+    const laneLines = laneMetrics.map((m) => {
+      const edge = relativeEdge(m.r, m.d)
+      return `${m.label}: ${group(m.r)} против ${group(m.d)} — ${leadOf(edge)}`
+    })
+    const laneRWins = laneMetrics.filter((m) => relativeEdge(m.r, m.d) > 3).length
+    const laneDWins = laneMetrics.filter((m) => relativeEdge(m.r, m.d) < -3).length
+    const laningSide: LaneSide = !laneMetrics.length ? 'even' : laneRWins > laneDWins ? 'radiant' : laneDWins > laneRWins ? 'dire' : 'even'
+    const laning = lr && ld ? {
+      side: laningSide,
+      text: laningSide === 'even'
+        ? 'за первые 10 минут линия равная'
+        : `за первые 10 минут линию взяла ${SIDE[laningSide]}: ${Math.max(laneRWins, laneDWins)} замера из 3 за неё`,
+      lines: [...laneLines, ...(lr.kills || ld.kills ? [`смертей на линии: Radiant ${lr.deaths} против Dire ${ld.deaths}`] : [])],
+    } : null
+
+    // --- весь матч: это не итог линии, а то, что стороны вынесли из игры
+    const full = !gaps ? null : {
+      lines: [
+        `золото в минуту: ${group(gaps.totals.r.gpm)} против ${group(gaps.totals.d.gpm)} — ${leadOf(gaps.gpm)}`,
+        `опыт в минуту: ${group(gaps.totals.r.xpm)} против ${group(gaps.totals.d.xpm)} — ${leadOf(gaps.xpm)}`,
+        `добивания: ${group(gaps.totals.r.lh)} против ${group(gaps.totals.d.lh)} — ${leadOf(gaps.lh)}`,
+        `нетворс: ${group(gaps.totals.r.nw)} против ${group(gaps.totals.d.nw)} — ${leadOf(gaps.networth)}`,
+      ],
+      totals: { r: gaps.totals.r.nw, d: gaps.totals.d.nw },
     }
 
     return {
@@ -212,8 +250,9 @@ export function evaluateDraft(
       pairs,
       share,
       expected,
-      result,
-      hit: expected && result && expected.side !== 'even' && result.side !== 'even' ? expected.side === result.side : null,
+      laning,
+      full,
+      hit: expected && laning && expected.side !== 'even' && laning.side !== 'even' ? expected.side === laning.side : null,
       rIndex: rv.index ?? 0,
       dIndex: dv.index ?? 0,
       coverage: Math.min(rv.coverage, dv.coverage),
@@ -282,15 +321,21 @@ export function evaluateDraft(
     !match || match.didRadiantWin === null || match.didRadiantWin === undefined ? null : match.didRadiantWin ? 'radiant' : 'dire'
   const outcome = winner ? { winner, hit: winner === predicted } : null
 
-  // --- «что пошло не так»: только расхождения предикта и факта, человеческим языком
+  // --- «что пошло не так»: только расхождения предикта и первых 10 минут
   const why: WhyLine[] = []
   for (const lane of lanes) {
-    if (lane.hit !== false || !lane.expected || !lane.result) continue
-    const decided = lane.result.lines[0] ?? ''
-    const turned = lane.result.lines.find((l) => (lane.expected!.side === 'radiant' ? l.includes('Dire впереди') : l.includes('Radiant впереди'))) ?? decided
+    if (lane.hit !== false || !lane.expected || !lane.laning) continue
+    const turned = lane.laning.lines.find((l) => (lane.expected!.side === 'radiant' ? l.includes('Dire впереди') : l.includes('Radiant впереди'))) ?? lane.laning.lines[0] ?? ''
     why.push({
-      text: `${lane.label}: ${lane.expected.text.toLowerCase()}, а ${lane.result.text.toLowerCase()}${turned ? ` — ${turned}` : ''}.`,
-      tone: lane.result.side === 'radiant' ? 'pos' : 'neg',
+      text: `${lane.label}: ${lane.expected.text.toLowerCase()}, а ${lane.laning.text.toLowerCase()}${turned ? ` — ${turned}` : ''}.`,
+      tone: lane.laning.side === 'radiant' ? 'pos' : 'neg',
+    })
+  }
+  const unmeasured = lanes.filter((l) => !l.laning).length
+  if (unmeasured) {
+    why.push({
+      text: `Ещё ${unmeasured} ${unmeasured === 1 ? 'линия' : 'линии'} по первым 10 минутам не измерены: реплей этого матча не разобран, а по финальным статам линия не восстанавливается.`,
+      tone: 'dim',
     })
   }
   const deviations = heroes
@@ -319,7 +364,7 @@ export function evaluateDraft(
     generated: profile.generated,
     corpus: profile.meta.matches,
     minPairGames: profile.meta.minPairGames,
-    model: bt ? { matchAccuracy: bt.matchAccuracy, laneAccuracy: bt.laneAccuracy, matches: bt.matches, lanes: bt.lanes } : null,
+    model: bt ? { matchAccuracy: bt.matchAccuracy, laneAccuracy: bt.laneAccuracy, matches: bt.matches, lanes: bt.lanes, lanesMeasured: bt.lanesMeasured ?? bt.lanes } : null,
     lanes,
     axes,
     synergy,

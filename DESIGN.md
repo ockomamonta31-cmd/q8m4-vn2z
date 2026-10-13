@@ -210,12 +210,18 @@ disables all of it.
   and the total is their mean. No third-party winrates are used anywhere in the
   rating; the STRATZ merge above is only match facts (bans, picks, lanes), never
   an evaluation.
-- **Every verdict reads prediction → fact → divergence.** A lane row shows «по
-  драфту» (share of strength, computed before the match) next to «по факту»
-  (measured GPM/XP/LH/networth edge) and whether they agree. «Что пошло не так»
-  lists only the disagreements: lanes that went the other way, and heroes whose
-  realized index — same units, rescaled to the length of this match — beat or
-  fell short of their profile.
+- **A lane is the first ~10 minutes, and only a parsed replay can say how it
+  ended.** `impactPhases[0]` («Начало · 0–10 мин», shared helper
+  `server/gc/impact-phases.mjs`, used by both the API and the backtest) gives
+  last hits, XP and gold for that window; the lane goes to whoever wins the
+  majority of those three measurements. Whole-match numbers are still shown, but
+  inside a collapsed block labelled as *not* a lane result, and a match without
+  a parsed replay says plainly «реплей не разобран — чем закончилась именно
+  линия, не измерено» instead of inventing a winner from final stats.
+- **Lane predictions are not calibrated yet.** Only 21 lanes in the library have
+  parsed first minutes (19 decisive). The UI quotes that number and refuses to
+  call 84% on 19 lanes a conclusion; match-level calibration (998 games) is the
+  one the overall verdict leans on.
 - **The win probability is calibrated on our own library, not invented.**
   `npm run draft:backtest` runs the same `evaluateDraft()` (bundled by esbuild so
   it cannot drift from the frontend) over every cached match and writes

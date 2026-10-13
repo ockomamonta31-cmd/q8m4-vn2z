@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import type { HeroInfo, MatchPlayer } from '../../api/types'
 import { heroImageUrl } from '../../api/heroes'
 import { ATTR_RU, ATTACK_RU, TAG_ORDER, TAG_RU, getHeroMeta, type HeroMeta } from '../../api/heroMeta'
-import { draftNotes, laneGaps, teamProfile, type TeamProfile } from '../../api/draft'
+import { draftNotes, teamProfile, type TeamProfile } from '../../api/draft'
 import { type DraftRating, type LaneCall } from '../../api/draftStrength'
 import RoleIcon from '../RoleIcon'
 
@@ -40,13 +40,16 @@ function Side({ team }: { team: TeamProfile }) {
 function Hero({ player, heroMap, side }: { player: MatchPlayer | null; heroMap: Map<number, HeroInfo>; side: 'r' | 'd' }) {
   if (!player) return <span className={`lm-hero ${side} empty`}>на этой линии с той стороны никого</span>
   const h = heroMap.get(player.heroId)
+  const early = laning(player)
   return (
     <span className={`lm-hero ${side}`}>
       <RoleIcon position={player.position} source={player.positionSource} lane={player.lane} size={24} />
       <span className={`port xs ${side}`}>{h && <img src={heroImageUrl(h.shortName)} alt="" loading="lazy" />}</span>
       <span className="lm-hero-txt">
         <b>{h?.name ?? `герой #${player.heroId}`}</b>
-        <span className="dim t12">{player.goldPerMinute} GPM · {player.experiencePerMinute} XPM · {player.numLastHits} LH · {player.numDenies} DN</span>
+        {early
+          ? <span className="dim t12">{early.lastHits} LH · {early.experience.toLocaleString('ru-RU')} XP · {early.gold.toLocaleString('ru-RU')} золота за 10 мин</span>
+          : <span className="dim t12">{player.goldPerMinute} GPM · {player.experiencePerMinute} XPM · {player.numLastHits} LH — за весь матч</span>}
       </span>
     </span>
   )
@@ -54,22 +57,28 @@ function Hero({ player, heroMap, side }: { player: MatchPlayer | null; heroMap: 
 
 const fmt = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(0)}`
 
-function Call({ kind, call }: { kind: 'expected' | 'result'; call: LaneCall['expected'] | LaneCall['result'] }) {
+/** Первые 10 минут героя из нашего разбора реплея — это и есть линия. */
+const laning = (p: MatchPlayer) => p.impactPhases?.find((x) => x.label.startsWith('Начало')) ?? null
+
+function Call({ kind, title, call, missing }: { kind: 'expected' | 'result'; title: string; call: LaneCall['expected'] | LaneCall['laning']; missing: string }) {
   return (
     <div className={`lm-call ${kind}`}>
-      <span className="lm-call-k">{kind === 'expected' ? 'Что обещал драфт' : 'Что вышло в матче'}</span>
-      <b className="lm-call-t">{call ? call.text : 'предсказать нечего: профилей этих героев на этих ролях мало'}</b>
-      {!!call?.lines.length && (
-        <ul className="lm-call-l">
-          {call.lines.map((l) => <li key={l}>{l}</li>)}
-        </ul>
-      )}
+      <span className="lm-call-k">{title}</span>
+      {call ? (
+        <>
+          <b className="lm-call-t">{call.text}</b>
+          {!!call.lines.length && (
+            <ul className="lm-call-l">
+              {call.lines.map((l) => <li key={l}>{l}</li>)}
+            </ul>
+          )}
+        </>
+      ) : <b className="lm-call-t dim">{missing}</b>}
     </div>
   )
 }
 
 function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo> }) {
-  const gaps = laneGaps(lane.radiant, lane.dire)
   return (
     <section className="lm">
       <header className="lm-h">
@@ -81,23 +90,32 @@ function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo
           {lane.expected?.side === 'even'
             ? 'драфт обещал равную'
             : lane.hit === null
-              ? 'сравнивать не с чем'
+              ? 'проверить нечем'
               : lane.hit ? 'совпало' : 'не совпало'}
         </span>
       </header>
 
       <div className="lm-calls">
-        <Call kind="expected" call={lane.expected} />
-        <Call kind="result" call={lane.result} />
+        <Call kind="expected" title="Что обещал драфт" call={lane.expected} missing="предсказать нечего: профилей этих героев на этих ролях мало" />
+        <Call kind="result" title="Первые 10 минут — сама линия" call={lane.laning} missing="реплей не разобран: чем закончилась именно линия, не измерено" />
       </div>
+
+      {!!lane.full && (
+        <details className="lm-full">
+          <summary>Вся игра этой парой — это не итог линии, а что стороны вынесли из матча</summary>
+          <ul className="lm-call-l">
+            {lane.full.lines.map((l) => <li key={l}>{l}</li>)}
+          </ul>
+        </details>
+      )}
 
       <ul className="lm-pairs">
         {lane.pairs.map((pair, i) => {
           const r = pair.radiant
           const d = pair.dire
-          const gap = r && d
-            ? { gpm: r.goldPerMinute - d.goldPerMinute, xpm: r.experiencePerMinute - d.experiencePerMinute, lh: r.numLastHits - d.numLastHits }
-            : null
+          const rl = r ? laning(r) : null
+          const dl = d ? laning(d) : null
+          const gap = rl && dl ? { lh: rl.lastHits - dl.lastHits, xp: rl.experience - dl.experience, gold: rl.gold - dl.gold } : null
           return (
             <li className="lm-pair" key={`${i}-${r?.heroId ?? 'x'}-${d?.heroId ?? 'x'}`}>
               <Hero player={r} heroMap={heroMap} side="r" />
@@ -106,26 +124,15 @@ function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo
               <span className="lm-d">
                 {gap
                   ? <>
-                    <b className={gap.gpm > 0 ? 'pos' : gap.gpm < 0 ? 'neg' : 'dim'}>{fmt(gap.gpm)} GPM</b>
-                    <span className="dim t12">{fmt(gap.xpm)} XPM · {fmt(gap.lh)} LH</span>
+                    <b className={gap.lh > 0 ? 'pos' : gap.lh < 0 ? 'neg' : 'dim'}>{fmt(gap.lh)} LH</b>
+                    <span className="dim t12">{fmt(gap.xp)} XP · {fmt(gap.gold)} золота за 10 мин</span>
                   </>
-                  : <span className="dim t12">прямого соперника нет</span>}
+                  : <span className="dim t12">{r && d ? 'первых 10 минут нет в разборе' : 'прямого соперника нет'}</span>}
               </span>
             </li>
           )
         })}
       </ul>
-
-      <div className="lm-foot">
-        <span className="lm-sum r"><b>{gaps.totals.r.gpm}</b> GPM · <b>{gaps.totals.r.xpm}</b> XPM · <b>{gaps.totals.r.lh}</b> LH · <b>{gaps.totals.r.nw}</b> NW</span>
-        <span className="dr-mu-bar">
-          <i className="mid" aria-hidden="true" />
-          {gaps.edge >= 0
-            ? <i className="r" style={{ width: `${Math.min(50, Math.abs(gaps.edge) / 2)}%`, left: '50%' }} />
-            : <i className="d" style={{ width: `${Math.min(50, Math.abs(gaps.edge) / 2)}%`, right: '50%' }} />}
-        </span>
-        <span className="lm-sum d"><b>{gaps.totals.d.gpm}</b> GPM · <b>{gaps.totals.d.xpm}</b> XPM · <b>{gaps.totals.d.lh}</b> LH · <b>{gaps.totals.d.nw}</b> NW</span>
-      </div>
     </section>
   )
 }
@@ -161,11 +168,15 @@ export default function DraftReview({ players, heroMap, rating }: {
       )}
 
       <p className="pnote">
-        Слева — что обещал драфт: как эти герои на этих ролях стоят такие линии по
-        нашей базе ({rating ? rating.corpus : '…'} матчей). Справа — что дала линия в
-        этом матче по четырём замерам; её берёт та сторона, которая выиграла
-        большинство замеров. {rating?.model ? `На нашей базе модель угадывает линию в ${(rating.model.laneAccuracy * 100).toFixed(0)}% случаев (${rating.model.lanes} линий).` : ''}
-        Ниже — сами пары и числа каждого героя.
+        Линия — это первые ~10 минут, и измеряются они только в разобранном реплее:
+        справа то, что стороны нафармили и получили за этот отрезок (добивания, опыт,
+        золото), а линию отдаём той стороне, за которой большинство замеров. Слева —
+        что обещал драфт: как эти герои на этих ролях стоят такие линии по нашей базе
+        ({rating ? rating.corpus : '…'} матчей), по осям фарма, драки и поддержки.
+        Числа за весь матч вынесены отдельно и линией не называются.
+        {rating?.model && (rating.model.lanesMeasured >= 50
+          ? ` Предсказание проверено на ${rating.model.lanesMeasured} разобранных линиях — совпало в ${(rating.model.laneAccuracy * 100).toFixed(0)}% случаев.`
+          : ` Проверить предсказание линии пока можно только на ${rating?.model ? rating.model.lanesMeasured : 0} разобранных линиях — это капля, выводом не называем.`)}
         {rating && !rating.realLanes ? ' Линии этого матча взяты из порядка фарма, а не из разобранного реплея.' : ''}
       </p>
 
