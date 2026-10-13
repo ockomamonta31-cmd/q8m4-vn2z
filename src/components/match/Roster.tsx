@@ -11,8 +11,7 @@ import { steamProfileUrl } from '../../api/formats'
 import { signed, type ImpactScore } from '../../api/score'
 import type { MatchBoard, TeamSide } from '../../pages/match-model'
 import { ImpactMeter } from '../Impact'
-import PositionIcon from '../PositionIcon'
-import LaneMap from '../LaneMap'
+import RoleIcon from '../RoleIcon'
 import { Icon } from '../Icons'
 import { BuildTimeline, ImpactPanel, ItemSlot, PurchaseTimeline } from './Build'
 
@@ -99,10 +98,7 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec }: {
         aria-expanded={canOpen ? open : undefined}
       >
         <span className="c-who">
-          <span className="c-role">
-            <PositionIcon position={p.position} source={p.positionSource} size={40} />
-            {p.positionSource === 'replay' && p.lane && <LaneMap lane={p.lane} radiant={p.isRadiant} size={16} />}
-          </span>
+          <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={p.isRadiant} size={40} />
           <span className={`port ${p.isRadiant ? 'r' : 'd'}`}>
             {hero && <img src={heroImageUrl(hero.shortName)} alt={hero.name} loading="lazy" />}
           </span>

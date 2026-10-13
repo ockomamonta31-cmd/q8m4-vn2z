@@ -122,8 +122,6 @@
 
 .c-who { display: grid; grid-template-columns: 40px 88px minmax(0, 1fr); gap: var(--sp-12); align-items: center; min-width: 0; }
 .c-items { min-width: 0; }
-.c-role { position: relative; width: 40px; height: 40px; flex: none; }
-.c-role .lane { position: absolute; right: -2px; bottom: -2px; }
 .c-name { display: grid; gap: var(--sp-4); min-width: 0; font-size: var(--fs-12); }
 .c-nm { display: flex; align-items: center; gap: var(--sp-8); min-width: 0; }
 .c-nm a, .c-nm > span:first-child { font-size: var(--fs-16); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -186,20 +184,6 @@
 .hb.r { --tc: var(--radiant); }
 .hb.d { --tc: var(--dire); }
 .hb-v { text-align: right; font-variant-numeric: tabular-nums; }
-
-/* --- линия: схема миникарты --- */
-
-.lane-f { fill: var(--bg-deep); stroke: var(--line); stroke-width: 1; }
-.lane-r { stroke: var(--line); stroke-width: 1.4; fill: none; }
-.lane-l { stroke: var(--line); stroke-width: 1.8; fill: none; stroke-linecap: round; }
-.lane-l.on { stroke: var(--text); stroke-width: 2.6; }
-.lane-b { fill: var(--line); }
-.lane-b.r { fill: var(--radiant); }
-.lane-b.d { fill: var(--dire); }
-
-/* --- временная шкала --- */
-
-.axis { position: relative; margin-top: var(--sp-32); }
 
 /* --- таймлайн --- */
 

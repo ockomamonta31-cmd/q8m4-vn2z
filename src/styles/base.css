@@ -45,6 +45,19 @@
   --role-4: #E5604A;
   --role-5: #5CCFB4;
 
+  /* Глиф роли светлеет кверху и темнеет книзу — это объём того же токена,
+     а не шестой акцент: базовый цвет, разведённый костью и чернильным дном. */
+  --role-1-lt: color-mix(in oklab, var(--role-1), var(--text) 45%);
+  --role-2-lt: color-mix(in oklab, var(--role-2), var(--text) 45%);
+  --role-3-lt: color-mix(in oklab, var(--role-3), var(--text) 45%);
+  --role-4-lt: color-mix(in oklab, var(--role-4), var(--text) 45%);
+  --role-5-lt: color-mix(in oklab, var(--role-5), var(--text) 45%);
+  --role-1-dk: color-mix(in oklab, var(--role-1), var(--bg-deep) 55%);
+  --role-2-dk: color-mix(in oklab, var(--role-2), var(--bg-deep) 55%);
+  --role-3-dk: color-mix(in oklab, var(--role-3), var(--bg-deep) 55%);
+  --role-4-dk: color-mix(in oklab, var(--role-4), var(--bg-deep) 55%);
+  --role-5-dk: color-mix(in oklab, var(--role-5), var(--bg-deep) 55%);
+
   /* --- шрифты --- */
   --display: 'Forum', Georgia, 'Times New Roman', serif;
   --ui: 'Onest', 'Geologica', system-ui, sans-serif;
@@ -374,10 +387,12 @@ svg { display: block; }
 .note-b p { margin-top: var(--sp-8); }
 .note-a { display: flex; flex-wrap: wrap; gap: var(--sp-8); margin-top: var(--sp-24); }
 
-/* --- роль: глиф позиции + мини-карта линии (заменяются объёмными иконками в M2) --- */
+/* --- объёмная иконка роли --- */
 
-.role-g { color: var(--text-dim); flex: none; }
-.role-g.est { opacity: .55; }
+.role { position: relative; display: inline-block; flex: none; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .5)); }
+.role > svg:first-child { display: block; }
+.role .lane-badge { position: absolute; right: -3px; bottom: -3px; display: block; }
+.role.est { opacity: .62; }
 
 /* --- импакт: число со знаком и мини-полоска --- */
 

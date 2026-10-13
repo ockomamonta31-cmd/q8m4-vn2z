@@ -11,7 +11,7 @@ import { heroImageUrl } from '../../api/heroes'
 import { signed } from '../../api/score'
 import { CopyButton } from '../primitives'
 import { Icon } from '../Icons'
-import PositionIcon from '../PositionIcon'
+import RoleIcon from '../RoleIcon'
 
 function Pair({ label, radiant, dire, format }: { label: string; radiant: number; dire: number; format: (n: number) => string }) {
   const total = radiant + dire
@@ -70,7 +70,7 @@ function Five({ players, radiant, heroMap }: { players: MatchPlayer[]; radiant: 
             <span className={`port xs ${radiant ? 'r' : 'd'}`}>
               {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
             </span>
-            <PositionIcon position={p.position} source={p.positionSource} size={24} />
+            <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={radiant} size={24} />
           </li>
         )
       })}

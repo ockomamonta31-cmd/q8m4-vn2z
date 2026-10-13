@@ -8,7 +8,7 @@ import { fitImpEstimator } from '../api/performance'
 import { IMPACT_MODEL_READY, impactModelInfo } from '../api/impact'
 import { localImpact, resolveImpact, type ImpactScore } from '../api/score'
 import { ImpactMeter } from './Impact'
-import PositionIcon from './PositionIcon'
+import RoleIcon from './RoleIcon'
 import { EmptyState } from './States'
 import { Icon } from './Icons'
 
@@ -65,7 +65,7 @@ export default function MatchesTable({
               <span className={`port ${p.isVictory ? 'r' : 'd'}`}>
                 {hero && <img src={heroImageUrl(hero.shortName)} alt="" loading="lazy" />}
               </span>
-              <PositionIcon position={p.position} source={p.positionSource} size={40} />
+              <RoleIcon position={p.position} source={p.positionSource} lane={p.lane} radiant={p.isVictory} size={40} />
 
               <span className="mrow-hero">
                 <b>{heroName}</b>

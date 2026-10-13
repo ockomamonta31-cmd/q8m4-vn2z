@@ -11,6 +11,7 @@ import { parseQuery } from './api/formats'
 import { fetchAuth, logoutAuth, type Auth } from './auth'
 import { readRecentSearches, type RecentSearch } from './recents'
 import { Icon } from './components/Icons'
+import { RoleIconDefs } from './components/RoleIcon'
 
 /** Три героя справа — витрина, а не данные: они ничего не утверждают. */
 const SHOWCASE = ['invoker', 'phantom_assassin', 'pudge']
@@ -153,6 +154,7 @@ export default function App() {
   return (
     <div className="app">
       <div className="page-bg" aria-hidden="true" />
+      <RoleIconDefs />
       <ScrollToTop />
       <TopBar
         auth={auth}
