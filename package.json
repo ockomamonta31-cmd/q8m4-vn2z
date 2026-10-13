@@ -17,7 +17,8 @@
     "cf:types": "wrangler types",
     "drafts:harvest": "node scripts/harvest-drafts.mjs",
     "profile:build": "node scripts/build-hero-profile.mjs",
-    "draft:backtest": "node scripts/backtest-draft.mjs"
+    "draft:backtest": "node scripts/backtest-draft.mjs",
+    "kit:build": "node scripts/build-hero-kit.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

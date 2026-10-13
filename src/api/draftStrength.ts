@@ -16,7 +16,7 @@
 
 import type { MatchPlayer } from './types'
 import { laneGaps, relativeEdge } from './draft'
-import { AXES, calibrate, heroIndex, pairSynergy, realizedIndex, roleOf, type Profile } from './heroProfile'
+import { AXES, calibrate, heroIndex, laneKitOf, pairSynergy, realizedIndex, roleOf, type Profile } from './heroProfile'
 
 export type LaneSide = 'radiant' | 'dire' | 'even'
 
@@ -112,7 +112,17 @@ const leadOf = (edge: number) =>
  */
 const laningPhase = (p: MatchPlayer) => p.impactPhases?.find((x) => x.label.startsWith('Начало')) ?? null
 
-const LANE_AXES = ['farm', 'fight', 'support']
+const LANE_AXES = ['farm', 'fight', 'support', 'control', 'burst']
+
+/**
+ * Чем линия выигрывается до фарма. Числа не максимальные: контроль и урон
+ * берутся на тех уровнях умений, которые реально качают к 10-й минуте
+ * (измерено по нашей базе), и нормированы на среднее по той же роли.
+ */
+export const LANE_SPELLS: { key: string; label: string; detail: string }[] = [
+  { key: 'control', label: 'Контроль', detail: 'секунды хард-дизейбла (стан, сон, корень, холд) на уровнях умений к 10-й минуте' },
+  { key: 'burst', label: 'Урон спелов', detail: 'урон способностей теми уровнями, что качают к 10-й минуте' },
+]
 
 export function evaluateDraft(
   profile: Profile,
@@ -196,6 +206,21 @@ export function evaluateDraft(
       : null
     const gaps = r.length && d.length ? laneGaps(r, d) : null
 
+    // Прокачка к 10-й минуте: не «стан 6 секунд на максимуме», а то, чем герой
+    // реально располагает в линии.
+    const spellLine = (p: MatchPlayer) => {
+      const l = laneKitOf(profile, p.heroId)
+      if (!l || !l.spells?.length) return null
+      const list = l.spells.slice(0, 3).map((s) => `${s.title} ${s.control} c (ур. ${s.level.toFixed(1)})`).join(', ')
+      return `${name(p)}: ${l.control.toFixed(1)} c дизейбла к 10-й минуте — ${list}`
+    }
+    const spellsOnLane = [...r, ...d].map(spellLine).filter((x): x is string => !!x)
+    const noControl = (side: MatchPlayer[]) => !side.some((p) => (laneKitOf(profile, p.heroId)?.control ?? 0) > 0)
+    const bareSide = [
+      ...(r.length && noControl(r) ? [`у ${SIDE.radiant} на этой линии хард-дизейбла нет`] : []),
+      ...(d.length && noControl(d) ? [`у ${SIDE.dire} на этой линии хард-дизейбла нет`] : []),
+    ]
+
     // кого ожидали: сравнение пар по профилю, построчно
     const pairLines = pairs.flatMap((p) => {
       if (!p.radiant || !p.dire) return []
@@ -217,6 +242,8 @@ export function evaluateDraft(
         : `по драфту линию должна была взять ${SIDE[expectedSide]}: ${p}% против ${100 - p}%`,
       lines: [
         ...pairLines,
+        ...spellsOnLane.slice(0, 4),
+        ...bareSide,
         ...rv.mates.map((m) => m.text),
         ...dv.mates.map((m) => m.text),
         ...(rv.mates.length || dv.mates.length ? [] : ['эти пары вместе не играли — комбо не измерено, только сила героев на своих ролях']),

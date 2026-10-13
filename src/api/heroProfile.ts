@@ -17,12 +17,20 @@ export type MetricRow = {
   floor: number
 } & Record<string, number>
 
+/** Контроль и урон спелов на 10-й минуте: уровни умений измерены по нашим матчам. */
+export type LaneSpell = { name: string; title: string; level: number; control: number }
+export type LaneKit = { control: number; burst: number; spells?: LaneSpell[] }
+
 export type Profile = {
   v: number
   generated: string
   source: string
   metrics: string[]
   meta: { matches: number; players: number; heroes: number; minMatchSeconds: number; minPairGames: number; avgDurationSeconds: number }
+  /** контроль и урон спелов на уровнях умений, которые реально есть к 10-й минуте */
+  lane?: Record<string, LaneKit>
+  /** среднее тех же чисел по роли — знаменатель для сравнения */
+  laneBaseline?: Record<string, { control: number; burst: number }>
   /** бэктест этой же модели по нашей базе: предсказание против факта */
   backtest?: {
     matches: number
@@ -82,12 +90,42 @@ const ratio = (value: number, base: number, sign: 1 | -1) => {
   return Math.min(3, r)
 }
 
+/** Роль, на которой герой играет чаще всего, — запасной знаменатель. */
+function mainPosition(profile: Profile, heroId: number): number {
+  const roles = profile.hero[String(heroId)]?.roles ?? {}
+  let best = 0
+  let games = -1
+  for (const [role, row] of Object.entries(roles)) if (row.games > games) { games = row.games; best = Number(role) }
+  return best
+}
+
+/**
+ * Линия длится первые ~10 минут, поэтому берём не максимум умений, а то, что
+ * реально прокачано к 10-й минуте: уровни измерены по нашей базе по
+ * ability_upgrades. «Стан 6 секунд» от ультима Бейна к линии отношения не
+ * имеет — к 10-й минуте его обычно нет. Относим к среднему по той же роли.
+ */
+export function laneAxes(profile: Profile, heroId: number, role: number): Record<string, number> {
+  const l = profile.lane?.[String(heroId)]
+  const base = profile.laneBaseline?.[String(role)] ?? profile.laneBaseline?.[String(mainPosition(profile, heroId))]
+  if (!l || !base) return {}
+  const out: Record<string, number> = {}
+  if (base.control > 0) out.control = Math.min(3, l.control / base.control)
+  if (base.burst > 0) out.burst = Math.min(3, l.burst / base.burst)
+  return out
+}
+
+/** Секунды контроля и урон спелов на 10-й минуте — их показываем в объяснении линии. */
+export function laneKitOf(profile: Profile, heroId: number): LaneKit | null {
+  return profile.lane?.[String(heroId)] ?? null
+}
+
 /** Индекс героя на роли: среднее по осям, где у нас есть его профиль. */
 export function heroIndex(profile: Profile, heroId: number, role: number): HeroIndex | null {
   const row = profile.hero[String(heroId)]?.roles?.[String(role)]
   const base = profile.baseline[String(role)]
   if (!row || !base) return null
-  const axes: Record<string, number> = {}
+  const axes: Record<string, number> = { ...laneAxes(profile, heroId, role) }
   const missing: string[] = []
   for (const axis of AXES) {
     const parts: number[] = []
