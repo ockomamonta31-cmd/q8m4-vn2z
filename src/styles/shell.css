@@ -73,7 +73,7 @@
 
 .find-in::placeholder { color: var(--text-dim); }
 .find-in:focus { outline: none; box-shadow: inset 0 0 0 1px var(--gold); }
-.find-in:focus-visible { outline: none; }
+.find-in:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 
 .find-g {
   position: absolute;
@@ -210,7 +210,8 @@
 }
 
 .home-in::placeholder { color: var(--text-dim); }
-.home-in:focus { outline: none; box-shadow: inset 0 0 0 1px var(--gold); }
+.home-in:focus { outline: none; }
+.home-in:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
 .home-form .btn { height: 56px; }
 
 .home-err { margin-top: var(--sp-8); color: var(--dire-t); font-size: var(--fs-14); }
