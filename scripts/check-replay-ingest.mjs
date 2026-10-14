@@ -43,8 +43,9 @@ assert.deepEqual(pending.matchIds,[43],'directly opened matches enter the queue 
 payload.timeline.padding='x'.repeat(1_900_000)
 assert.equal((await request('/api/internal/replay/42',payload)).status,413)
 assert.equal(rows.get('replay-data:v1:42').value,original)
-for(const failure of [false,true]) {
-  const preload=`globalThis.fetch=async url=>String(url).includes('api.opendota.com')?Response.json({}, {status:${failure?502:200}}):Response.json({ok:true});`
+for(const code of [200,404,502]) {
+  const failure=code===502
+  const preload=`globalThis.fetch=async url=>String(url).includes('api.opendota.com')?Response.json({}, {status:${code}}):Response.json({ok:true});`
   const run=spawnSync(process.execPath,['--import','data:text/javascript,'+encodeURIComponent(preload),'server/gc/github-ingest.mjs'],{encoding:'utf8',env:{...process.env,REPLAY_INGEST_URL:'https://test',REPLAY_INGEST_TOKEN:'test',REPLAY_MATCH_ID:'42'}})
   assert.equal(run.status,failure?1:0,run.stderr)
   assert.match(run.stdout,failure?/ошибок=1/:/WAIT 42/)

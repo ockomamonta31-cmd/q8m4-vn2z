@@ -42,6 +42,7 @@ for(const id of candidates) {
   if(completed>=max) break
   try {
     const metaRes=await fetch(`https://api.opendota.com/api/matches/${id}`,{signal:AbortSignal.timeout(20_000)})
+    if(metaRes.status===404){noReplay++;await status(id,'waiting');console.log(`WAIT ${id}: match not indexed by replay metadata provider`);continue}
     if(!metaRes.ok) throw new Error(`Replay metadata HTTP ${metaRes.status}`)
     const meta=await metaRes.json()
     if(!/^\d+$/.test(String(meta.cluster??''))||!/^\d+$/.test(String(meta.replay_salt??''))) { noReplay++; await status(id,'waiting');console.log(`WAIT ${id}: replay metadata not published`);continue }
