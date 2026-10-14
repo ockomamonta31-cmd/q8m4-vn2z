@@ -35,6 +35,8 @@ export function playerEvidence(replay, slot, heroId, heroes) {
   }).filter(Boolean) : null
   const tracks=replay.movement?.tracks
   const at=(s,t)=>tracks?.[s]?.findLast(p=>p[0]<=t&&t-p[0]<=3)
+  const heroForName=new Map(heroes.map(h=>['npc_dota_hero_'+h.shortName,h.id]))
+  const enemyNames=new Set(Object.entries(replay.movement?.heroes??{}).filter(([s])=>(Number(s)<128)!==(slot<128)).map(([,id])=>'npc_dota_hero_'+heroes.find(h=>h.id===id)?.shortName))
   const damage=events=>events.reduce((n,e)=>n+Number(e[4]||0),0)
   const keys=events=>[...new Set(events.map(e=>e[5]).filter(k=>k&&k!=='dota_unknown'))].slice(0,8)
   const laneMinutes=tracks&&combat?Array.from({length:10},(_,i)=>{
@@ -46,7 +48,21 @@ export function playerEvidence(replay, slot, heroId, heroes) {
   }).filter(Boolean):null
   const deathWindows=tracks&&combat&&deaths?deaths.filter(d=>d.t>=0).slice(0,20).map(d=>{
     const from=Math.max(0,d.t-20),pos=at(slot,Math.max(0,d.t-10)),before=at(slot,from),after=at(slot,d.t+60)
-    const outgoing=own.filter(e=>e[0]>=from&&e[0]<=d.t),incoming=combat.filter(e=>e[0]>=from&&e[0]<=d.t&&e[3]===name&&e[6]&&!e[8])
+    const outgoing=own.filter(e=>e[0]>=from&&e[0]<=d.t),incoming=combat.filter(e=>e[0]>=from&&e[0]<=d.t&&e[3]===name&&e[6]&&!e[8]&&!e[9]&&enemyNames.has(e[2]))
+    const contacts=incoming.filter(e=>e[1]==='DAMAGE'&&e[4]>0||e[1]==='ABILITY').sort((a,b)=>a[0]-b[0])
+    const attackStart=contacts[0]?.[0]??null,decisionTime=attackStart==null?null:Math.max(0,attackStart-6)
+    const decisionPos=decisionTime==null?null:at(slot,decisionTime)
+    const allySlots=Object.keys(tracks).map(Number).filter(s=>s!==slot&&(s<128)===(slot<128))
+    const decisionAllies=allySlots.flatMap(s=>{
+      const a=decisionTime==null?null:at(s,decisionTime)
+      return decisionPos&&a?.[3]===0?[{heroId:replay.movement.heroes[s],distance:Math.round(Math.hypot(decisionPos[1]-a[1],decisionPos[2]-a[2])*128)}]:[]
+    }).sort((a,b)=>a.distance-b.distance)
+    // Missing positions mean unknown availability, never an empty nearby team.
+    const complete=decisionPos&&allySlots.length===4&&allySlots.every(s=>at(s,decisionTime))
+    const health=decisionTime==null?null:replay.movement?.heroState?.[slot]?.findLast(p=>p[0]<=decisionTime&&decisionTime-p[0]<=3)
+    const attackers=[...new Set(contacts.map(e=>e[2]))].map(n=>({heroId:heroForName.get(n),firstContact:contacts.find(e=>e[2]===n)[0]})).filter(a=>a.heroId).slice(0,5)
+    const decision=decisionTime==null?null:{t:decisionTime,attackStart,nearbyAllies:complete?decisionAllies.filter(a=>a.distance<=1600).length:null,
+      nearestAlly:decisionAllies[0]??null,health:health?.[1]??null,maxHealth:health?.[2]??null,attackers}
     const allies=Object.keys(tracks).map(Number).filter(s=>s!==slot&&(s<128)===(slot<128)).flatMap(s=>{
       const p=at(s,Math.max(0,d.t-10));return pos&&p?.[3]===0?[{heroId:replay.movement.heroes[s],distance:Math.round(Math.hypot(pos[1]-p[1],pos[2]-p[2])*128)}]:[]
     }).sort((a,b)=>a.distance-b.distance)
@@ -55,7 +71,7 @@ export function playerEvidence(replay, slot, heroId, heroes) {
     return {t:d.t,from,damage:damage(outgoing.filter(e=>e[1]==='DAMAGE'&&hostile(e))),taken:damage(incoming.filter(e=>e[1]==='DAMAGE')),
       attacks:outgoing.filter(e=>e[1]==='DAMAGE'&&hostile(e)&&e[5]==='dota_unknown').length,
       ownSpells:keys(outgoing.filter(e=>e[1]==='ABILITY')),enemySpells:keys(incoming.filter(e=>['ABILITY','DAMAGE'].includes(e[1]))),
-      items:keys(outgoing.filter(e=>e[1]==='ITEM')),nearestAlly:allies[0]??null,
+      items:keys(outgoing.filter(e=>e[1]==='ITEM')),nearestAlly:allies[0]??null,decision,
       allyDamage:damage(partner.filter(e=>e[1]==='DAMAGE')),allySpells:keys(partner.filter(e=>e[1]==='ABILITY')),
       lhNextMinute:before&&after?after[6]-before[6]:null,xpNextMinute:before&&after?after[5]-before[5]:null}
   }):null
@@ -67,7 +83,7 @@ export function playerEvidence(replay, slot, heroId, heroes) {
     attacks: laneOut?.filter(e => e[5] === 'dota_unknown').length ?? null,
     spellHits: laneOut?.filter(e => e[5] !== 'dota_unknown').length ?? null,
     activeMinutes: laneOut ? new Set(laneOut.map(e => Math.floor(e[0] / 60))).size : null },
-    deaths, wards, uses, fights,microVersion:tracks?1:null,laneMinutes,deathWindows,spellWindows,
+    deaths, wards, uses, fights,microVersion:tracks?1:null,decisionVersion:tracks&&combat?1:null,laneMinutes,deathWindows,spellWindows,
     dewards: Number.isFinite(p.killed?.npc_dota_observer_wards) ? p.killed.npc_dota_observer_wards : log('kills_log') ? 0 : null,
     stacks: Number.isFinite(p.camps_stacked) ? p.camps_stacked : null,
     stuns: Number.isFinite(p.stuns) ? p.stuns : null,
@@ -88,10 +104,13 @@ export function validEvidence(e) {
   if(e.uses?.some(r=>!r||!Number.isFinite(r.t)||r.t<0||r.t>14400||typeof r.key!=='string'||r.key.length>100||typeof r.target!=='string'||r.target.length>160))return false
   for(const key of ['laneMinutes','deathWindows','spellWindows'])if(e[key]!=null&&(!Array.isArray(e[key])||e[key].length>40))return false
   if(e.microVersion!=null&&e.microVersion!==1)return false
+  if(e.decisionVersion!=null&&e.decisionVersion!==1)return false
   const finite=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0
   if(e.laneMinutes?.some(r=>!r||!['t','end','lh','xp','damage','taken','attacks','aliveSeconds'].every(k=>finite(r[k]))||r.end<r.t||r.aliveSeconds>60))return false
   const names=xs=>Array.isArray(xs)&&xs.length<=8&&xs.every(x=>typeof x==='string'&&/^[a-z0-9_]{1,100}$/.test(x))
   if(e.deathWindows?.some(r=>!r||!['t','from','damage','taken','attacks','allyDamage'].every(k=>finite(r[k]))||r.from>r.t||r.t>14400||!['lhNextMinute','xpNextMinute'].every(k=>r[k]==null||finite(r[k]))||!['ownSpells','enemySpells','items','allySpells'].every(k=>names(r[k]))||r.nearestAlly!=null&&(!finite(r.nearestAlly.distance)||!Number.isInteger(r.nearestAlly.heroId)||r.nearestAlly.heroId<=0)))return false
+  const ally=a=>a==null||finite(a.distance)&&Number.isInteger(a.heroId)&&a.heroId>0
+  if(e.deathWindows?.some(r=>{const c=r.decision;return c!=null&&(!finite(c.t)||!finite(c.attackStart)||c.t>c.attackStart||c.attackStart<r.from||c.attackStart>r.t||c.nearbyAllies!=null&&(!Number.isInteger(c.nearbyAllies)||c.nearbyAllies<0||c.nearbyAllies>4)||!ally(c.nearestAlly)||!['health','maxHealth'].every(k=>c[k]==null||finite(c[k]))||!Array.isArray(c.attackers)||c.attackers.length>5||c.attackers.some(a=>!a||!Number.isInteger(a.heroId)||a.heroId<=0||!finite(a.firstContact)||a.firstContact<c.attackStart||a.firstContact>r.t))}))return false
   if(e.spellWindows?.some(r=>!r||!['t','seconds','attacks','damage'].every(k=>finite(r[k]))||!names([r.key])))return false
   return new TextEncoder().encode(JSON.stringify(e)).length < 1_000_000
 }

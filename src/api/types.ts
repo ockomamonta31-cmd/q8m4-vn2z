@@ -219,8 +219,9 @@ export interface PlayerEvidence {
   curve: (number | null)[][]
   lane: { damage: number | null; damageTaken: number | null; attacks: number | null; spellHits: number | null; activeMinutes: number | null }
   microVersion?:1|null
+  decisionVersion?:1|null
   laneMinutes?:{t:number;end:number;lh:number;xp:number;damage:number;taken:number;attacks:number;aliveSeconds:number}[]|null
-  deathWindows?:{t:number;from:number;damage:number;taken:number;attacks:number;ownSpells:string[];enemySpells:string[];items:string[];nearestAlly:{heroId:number;distance:number}|null;allyDamage:number;allySpells:string[];lhNextMinute:number|null;xpNextMinute:number|null}[]|null
+  deathWindows?:{t:number;from:number;damage:number;taken:number;attacks:number;ownSpells:string[];enemySpells:string[];items:string[];nearestAlly:{heroId:number;distance:number}|null;allyDamage:number;allySpells:string[];lhNextMinute:number|null;xpNextMinute:number|null;decision?:{t:number;attackStart:number;nearbyAllies:number|null;nearestAlly:{heroId:number;distance:number}|null;health:number|null;maxHealth:number|null;attackers:{heroId:number;firstContact:number}[]}|null}[]|null
   spellWindows?:{t:number;key:string;seconds:number;attacks:number;damage:number}[]|null
   deaths: { t: number; goldFed: number | null; lostGold: number | null; secondsDead: number | null; killer: string; dieback: boolean }[] | null
   wards: { t: number; type: string; x: number | null; y: number | null }[] | null

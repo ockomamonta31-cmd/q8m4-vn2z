@@ -182,6 +182,9 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
   const matches=await env.DB.prepare("SELECT key FROM cache WHERE key GLOB 'match:*'").all<{key:string}>()
   const ids=[...new Set([...matches.results.map(row=>Number(row.key.slice(6))),...histories.results.flatMap(row=>{try{return (JSON.parse(row.value).rows??[]).map((x:any)=>Number(x.id))}catch{return []}})].filter((id:number)=>Number.isSafeInteger(id)&&id>0))].sort((a,b)=>b-a)
   const done=new Set<number>()
+  // Refresh recent coaching after decision evidence changes, without re-parsing
+  // the entire historical corpus on each coach release.
+  const recent=new Set(ids.slice(0,20))
   // Батч по 40: на каждый матч нужно два ключа, а D1 отказывается биндить
   // слишком много параметров одним запросом ("too many SQL variables").
   for(let i=0;i<ids.length;i+=40) {
@@ -199,7 +202,8 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
       const enriched=!timeline||fights.length===0||Array.isArray(fights[0]?.lines)
       const spatial=entries.length===10&&entries.every((x:any)=>x.mapPlays?.version===1)
       const coached=entries.length===10&&entries.every((x:any)=>x.evidence?.version===1&&x.evidence?.microVersion===1&&x.mapPlays?.structures?.length)
-      if(timeline&&positioned&&enriched&&spatial&&coached) done.add(id)
+      const decision=!recent.has(id)||entries.every((x:any)=>x.evidence?.decisionVersion===1)
+      if(timeline&&positioned&&enriched&&spatial&&coached&&decision) done.add(id)
     }
   }
   return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))

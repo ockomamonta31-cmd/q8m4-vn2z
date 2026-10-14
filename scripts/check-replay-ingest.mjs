@@ -19,7 +19,7 @@ const rows=new Map(),env={REPLAY_INGEST_TOKEN:'test',DB:{prepare(sql){return {ar
 const request=(path,body,auth=true)=>worker.fetch(new Request('https://test'+path,{method:body?'POST':'GET',headers:{...(auth?{authorization:'Bearer test'}:{}),'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),env)
 const slots=[0,1,2,3,4,128,129,130,131,132]
 const mapPlays={version:1,heroId:74,sampleSeconds:2,coverage:1,score:null,good:0,bad:0,neutral:0,episodes:[],structures:[{kind:'tower',team:2,x:80,y:80}]}
-const payload={players:slots.map(playerSlot=>({playerSlot,position:1,positionVersion:2,evidence:{...evidence,microVersion:1},mapPlays})),timeline:{series:[],teamfights:[]}}
+const payload={players:slots.map(playerSlot=>({playerSlot,position:1,positionVersion:2,evidence:{...evidence,microVersion:1,decisionVersion:1},mapPlays})),timeline:{series:[],teamfights:[]}}
 // One busy Invoker + the other nine players, not ten cloned busy Invokers.
 payload.players.slice(1).forEach(p=>p.evidence.uses=[])
 payload.timeline.padding='x'.repeat(800_000)
@@ -40,6 +40,10 @@ assert.equal((await (await request('/api/matches/43/replay-status')).json()).sta
 rows.set('match:42',{value:'{}',updated_at:Date.now()});rows.set('match:43',{value:'{}',updated_at:Date.now()})
 const pending=await (await request('/api/internal/replay/pending')).json()
 assert.deepEqual(pending.matchIds,[43],'directly opened matches enter the queue and complete matches leave it')
+const legacy=JSON.parse(original);Object.values(legacy).forEach(p=>delete p.evidence.decisionVersion)
+rows.get('replay-data:v1:42').value=JSON.stringify(legacy)
+assert.deepEqual((await (await request('/api/internal/replay/pending')).json()).matchIds,[43,42],'recent legacy evidence is regenerated')
+rows.get('replay-data:v1:42').value=original
 payload.timeline.padding='x'.repeat(1_900_000)
 assert.equal((await request('/api/internal/replay/42',payload)).status,413)
 assert.equal(rows.get('replay-data:v1:42').value,original)

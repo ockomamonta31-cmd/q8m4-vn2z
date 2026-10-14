@@ -11,17 +11,22 @@ const heroName=(id:number)=>heroes.find(h=>h.id===id)?.displayName??`герой 
 const spellNames=new Map(Object.values(kits.kit).flatMap(k=>k.abilities.map(a=>[a.name,a.title] as [string,string])))
 const spellName=(key:string)=>spellNames.get(key)??({clinkz_strafe:'Strafe',clinkz_death_pact:'Death Pact',earthshaker_aftershock:'Aftershock'} as Record<string,string>)[key]??key.replace(/^[^_]+_/,'').replaceAll('_',' ')
 
-export function deathDetail(p:MatchPlayer,d:NonNullable<PlayerEvidence['deathWindows']>[number]):Omit<TrainingFact,'id'> {
+export const isolatedGank=(d:NonNullable<PlayerEvidence['deathWindows']>[number])=>d.decision?.nearbyAllies===0&&d.decision.attackers.length>=2
+export const decisionExercise='Останови реплей перед началом нападения. Проверь миникарту: где мидер, кто рядом и чем враг удержит тебя. Запиши, какую волну можно было безопасно дождаться вместо выхода.'
+export function deathDetail(p:MatchPlayer,d:NonNullable<PlayerEvidence['deathWindows']>[number],opponents:MatchPlayer[]=[]):Omit<TrainingFact,'id'> {
   const ally=d.nearestAlly,enemy=d.enemySpells.map(spellName).join(', '),used=[...d.ownSpells.map(spellName),...d.items.map(k=>itemName(k.replace(/^item_/,'')))].join(', ')
-  return {section:d.t<600?'lane':'fight',title:`${fmtDuration(d.t)} · что предшествовало твоей смерти`,t:d.t,status:'review',
-    fact:`За ${fmtDuration(d.from)}–${fmtDuration(d.t)}: нанёс героям ${d.damage} урона (${d.attacks} обычных попаданий), получил ${d.taken} урона. ${enemy?`В тебя попали: ${enemy}. `:''}${used?`Использовал: ${used}. `:''}${ally?`За 10 с до смерти ближайший живой союзник — ${heroName(ally.heroId)}, ${ally.distance} ед. В этом окне его урон героям: ${d.allyDamage}; контроль/способности по героям: ${d.allySpells.map(spellName).join(', ')||'не записаны'}. `:''}${d.lhNextMinute!=null?`От начала окна до минуты после смерти: ${d.lhNextMinute} добиваний, ${d.xpNextMinute} опыта.`:''}`,
-    advice:d.taken>d.damage*1.5
-      ? `Подтверждённая проблема этого эпизода — смерть после размена с перевесом входящего урона. ${ally&&ally.distance<900?`${heroName(ally.heroId)} был рядом; этих данных недостаточно, чтобы обвинить его в отсутствии помощи. `:''}В следующей игре сократи размен до одного-двух ударов и возвращайся к крипам, если ответный контроль не позволяет продолжить. На реплее найди последний момент до первого из перечисленных попаданий, когда ещё можно было увеличить дистанцию; если отход уже был перекрыт, разбери более ранний подход.`
-      : `Сам урон не объясняет смерть: ты мог выиграть размен до подключения второго противника. Сравни перечисленные попадания с моментом, когда начали подходить новые враги. Следующее исправление — заранее выбрать сторону отхода и закончить размен до их подключения; готовность способностей и видимость нужно проверить в реплее.`}
+  const c=d.decision,risk=isolatedGank(d),shaman=d.enemySpells.includes('shadow_shaman_voodoo')&&d.enemySpells.includes('shadow_shaman_shackles')
+  const mid=c?.attackers.find(a=>opponents.some(o=>o.heroId===a.heroId&&o.lane==='mid'))
+  const before=c?`Перед нападением, на ${fmtDuration(c.t)}: ${c.nearbyAllies==null?'число ближайших союзников неизвестно':`живых союзников в радиусе 1600 ед. — ${c.nearbyAllies}`}${c.nearestAlly?`; ближайший — ${heroName(c.nearestAlly.heroId)}, ${c.nearestAlly.distance} ед.`:'.'}${c.health!=null&&c.maxHealth!=null?` HP ${c.health}/${c.maxHealth}.`:''} Нападение в этом окне началось на ${fmtDuration(c.attackStart)}. Затем тебя атаковали ${c.attackers.map(a=>`${heroName(a.heroId)} (${fmtDuration(a.firstContact)})`).join(', ')}.${mid?` Подключился вражеский мидер ${heroName(mid.heroId)}.`:''} Видимость врагов на миникарте не восстановлена. `:''
+  const advice=risk
+    ? `Ты остался один против нескольких героев: ближайший союзник был слишком далеко для немедленной помощи пешком. ${shaman?'Shaman связал Hex → Shackles, а остальные получили время нанести урон. Здесь нужно оценивать выход до Hex: рассчитывать на отход после цепочки контроля опасно. ':''}${mid?`Перед подходом к волне проверь, виден ли ${heroName(mid.heroId)} на миде. `:'Перед подходом к волне проверь, виден ли вражеский мидер на своей линии. '}Если мидер пропал, помощи рядом нет и враг может удержать тебя контролем, не выходи один к открытой волне: дождись её ближе к своей башне или забери безопасный лагерь, если это доступно. Возвращайся после появления мидера, союзника или обзора подхода. Если это был дайв под башню и путь уже перекрыли, проверь более раннюю возможность уйти или сменить линию; сам факт смерти не доказывает, что в момент нападения ещё можно было спастись.`
+    : `Проверь решение до первого контроля: кто мог удержать тебя, где находился вражеский мидер и был ли свободен путь к безопасной волне. ${c?.nearbyAllies&&c.nearbyAllies>0?'Союзники были рядом, но дистанция не доказывает готовность спасти: сопоставь их действия, контроль и возможность подключения. ':ally&&ally.distance<900?`${heroName(ally.heroId)} был рядом; этих данных недостаточно, чтобы обвинить его в отсутствии помощи. `:''}Если враги способны закрыть отход до подключения команды, уступи добивание и сохрани дистанцию заранее. ${c?.nearbyAllies==null?'Наличие помощи до нападения здесь неизвестно. ':''}Журнал не показывает видимость и готовность спасения; сравнение нанесённого и полученного урона само по себе не определяет ошибку.`
+  return {section:d.t<600?'lane':'fight',title:`${fmtDuration(d.t)} · что предшествовало твоей смерти${risk?' — ганк без союзников рядом':''}`,t:d.t,status:'review',decisionRisk:risk,
+    fact:`${before}За ${fmtDuration(d.from)}–${fmtDuration(d.t)}: нанёс героям ${d.damage} урона (${d.attacks} обычных попаданий), получил ${d.taken} урона по самому герою. ${enemy?`В тебя попали: ${enemy}. `:''}${used?`Использовал: ${used}. `:''}${ally?`За 10 с до смерти ближайший живой союзник — ${heroName(ally.heroId)}, ${ally.distance} ед. В этом окне его урон героям: ${d.allyDamage}; способности по героям: ${d.allySpells.map(spellName).join(', ')||'не записаны'}. `:''}${d.lhNextMinute!=null?`От начала окна до минуты после смерти: ${d.lhNextMinute} добиваний, ${d.xpNextMinute} опыта.`:''}`,advice}
 }
 
 
-export type TrainingFact = CoachNote & { id: string; section: 'lane' | 'farm' | 'fight' | 'support' | 'map'; referenceIds?: number[] }
+export type TrainingFact = CoachNote & { id: string; section: 'lane' | 'farm' | 'fight' | 'support' | 'map'; referenceIds?: number[]; decisionRisk?:boolean }
 export function rolePlan(p: Pick<MatchPlayer,'heroId'|'position'>): string {
   const tags = meta.find(h=>h.id === p.heroId)?.roles ?? []
   if (p.heroId === 2 && p.position === 3) return 'Axe: до Blink обеспечь фарм и уровень; после покупки ищи выход с союзниками под Call. Один Blink не делает любую драку выгодной.'
@@ -50,7 +55,7 @@ export function trainingFacts(p: MatchPlayer, duration: number, opponents: Match
   if(p.position<=3&&farmTrade)notes.push({section:'lane',title:`${fmtDuration(farmTrade.t)}–${fmtDuration(farmTrade.end)} · размены при слабом добивании`,status:'review',t:farmTrade.t,
     fact:`За минуту: ${farmTrade.lh} добиваний, ${farmTrade.xp} опыта, ${farmTrade.attacks} обычных попаданий по героям, ${farmTrade.damage} нанесённого и ${farmTrade.taken} полученного урона. Живым был ${farmTrade.aliveSeconds} с.`,
     advice:'Конкретная потеря здесь — мало добиваний в минуту, когда ты был жив и активно бил героев. Проверь, совпадали ли атаки по героям с возможностью добить крипа. Если да, сначала забирай добивание и только затем бей врага во время его атаки по своему крипу. Это кандидат на неправильный приоритет, а не доказанный механический промах: журнал не показывает HP и доступность каждого крипа.'})
-  notes.push(...(e.deathWindows??[]).filter(d=>d.t<600).sort((a,b)=>(b.taken-b.damage)-(a.taken-a.damage)).slice(0,3).map(d=>deathDetail(p,d)))
+  notes.push(...(e.deathWindows??[]).filter(d=>d.t<600).sort((a,b)=>Number(isolatedGank(b))-Number(isolatedGank(a))||(b.taken-b.damage)-(a.taken-a.damage)).slice(0,3).map(d=>deathDetail(p,d,opponents)))
   const repeated=(e.deathWindows??[]).find((d,i,all)=>d.t<600&&i>0&&d.t-all[i-1].t<=120)
   if(repeated)notes.push({section:'lane',title:'После смерти быстро потерял ещё одну жизнь',t:repeated.t,status:'review',
     fact:`Предыдущая смерть — ${fmtDuration((e.deathWindows??[]).find(d=>d.t<repeated.t&&d.t>=repeated.t-120)!.t)}; следующая — ${fmtDuration(repeated.t)}. Во втором эпизоде получил ${repeated.taken} урона за ${repeated.t-repeated.from} с.`,
@@ -104,6 +109,6 @@ export function trainingFacts(p: MatchPlayer, duration: number, opponents: Match
   }
   if(e.deaths?.some(d=>d.dieback)) notes.push({section:'fight',title:'Смерть после байбека',status:'review',t:e.deaths.find(d=>d.dieback)?.t,
     fact:`Подтверждено ${e.deaths.filter(d=>d.dieback).length} повторных смертей после байбека.`,advice:'Перед возвратом назови объект, который спасёшь, и способ подключения. Если до команды не добраться вовремя, один байбек не исправит проигранный бой. Проверь это по эпизоду, а не только по цене смерти.'})
-  notes.push(...(e.deathWindows??[]).filter(d=>d.t>=600).slice(0,4).map(d=>deathDetail(p,d)))
+  notes.push(...(e.deathWindows??[]).filter(d=>d.t>=600).slice(0,4).map(d=>deathDetail(p,d,opponents)))
   return notes.map((n,i)=>({...n,id:'F'+i}))
 }

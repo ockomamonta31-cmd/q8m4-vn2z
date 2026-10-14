@@ -11,6 +11,8 @@ import skadistats.clarity.model.Entity;
 import skadistats.clarity.model.FieldPath;
 import skadistats.clarity.processor.entities.OnEntityCreated;
 import skadistats.clarity.processor.entities.OnEntityUpdated;
+import skadistats.clarity.processor.entities.Entities;
+import skadistats.clarity.processor.reader.OnTickEnd;
 import skadistats.clarity.processor.runner.Context;
 import skadistats.clarity.processor.stringtables.StringTables;
 import skadistats.clarity.processor.stringtables.UsesStringTable;
@@ -23,6 +25,8 @@ public class SpatialReplay {
     public static class SpatialParse extends Parse {
         // Parse runs its callbacks in the super constructor: initialize lazily.
         Map<Integer, Map<String,Object>> structures;
+        Map<Integer, List<Object[]>> heroState;
+        Integer lastStateTime;
         public SpatialParse(InputStream input) throws IOException { super(input,OutputStream.nullOutputStream(),false); }
         private Object prop(Entity e,String key) { try {return e.getProperty(key);} catch(Exception ignored){return null;} }
         @OnEntityCreated(classPattern=".*Tower.*|.*Barracks.*|.*Fort.*|.*Fountain.*")
@@ -41,6 +45,26 @@ public class SpatialReplay {
         }
         @OnEntityUpdated(classPattern=".*Tower.*|.*Barracks.*|.*Fort.*|.*Fountain.*")
         public void buildingUpdated(Context ctx,Entity e,FieldPath[] fields,int count) { building(ctx,e); }
+        @OnTickEnd
+        public void heroState(Context ctx,boolean synthetic) {
+            int t=time-gameStartTime;
+            if(!init||postGame||gameStartTime==0||t<0||t%2!=0||Objects.equals(lastStateTime,t))return;
+            lastStateTime=t;
+            var entities=ctx.getProcessor(Entities.class);
+            var resource=entities.stream().filter(e->e.getDtClass().getDtName().equals("CDOTA_PlayerResource")).findFirst().orElse(null);
+            if(resource==null)return;
+            if(heroState==null)heroState=new TreeMap<>();
+            for(int i=0;i<numPlayers;i++) {
+                Number handle=getEntityProperty(resource,"m_vecPlayerTeamData.%i.m_hSelectedHero",validIndices[i]);
+                Number team=getEntityProperty(resource,"m_vecPlayerData.%i.m_iPlayerTeam",validIndices[i]);
+                Number teamSlot=getEntityProperty(resource,"m_vecPlayerTeamData.%i.m_iTeamSlot",validIndices[i]);
+                Integer slot=team==null||teamSlot==null||team.intValue()<2||team.intValue()>3||teamSlot.intValue()<0||teamSlot.intValue()>4?null:(team.intValue()==2?0:128)+teamSlot.intValue();
+                Entity hero=handle==null?null:entities.getByHandle(handle.intValue());
+                if(hero==null||slot==null)continue;
+                // Real selected hero only; do not mix illusion HP with the player.
+                heroState.computeIfAbsent(slot,k->new ArrayList<>()).add(new Object[]{t,prop(hero,"m_iHealth"),prop(hero,"m_iMaxHealth")});
+            }
+        }
     }
     public static void main(String[] args) throws Exception {
         var url = URI.create(args[0]);
@@ -88,6 +112,7 @@ public class SpatialReplay {
         movement.add("tracks", gson.toJsonTree(tracks));
         movement.add("combat", gson.toJsonTree(combat));
         movement.add("structures",gson.toJsonTree(parsed.structures==null?List.of():parsed.structures.values()));
+        movement.add("heroState",gson.toJsonTree(parsed.heroState==null?Map.of():parsed.heroState));
         output.add("movement", movement);
         Files.writeString(Path.of(args[1]), gson.toJson(output));
         System.out.println("Spatial replay: " + tracks.values().stream().mapToInt(List::size).sum() + " positions, " + combat.size() + " combat events");
