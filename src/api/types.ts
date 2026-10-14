@@ -31,8 +31,11 @@ export interface PlayerMatch {
     positionSource?: 'replay' | 'stats' | 'stratz'
     /** линия известна, когда позиция взята из разобранного реплея; jungle и roaming не определяются */
     lane?: 'safelane' | 'mid' | 'offlane'
-    /** сезонный ранг игрока НА МОМЕНТ матча (0 — нет данных) */
+    /** Medal code; rankScope distinguishes historical and current ranks. 0 = unavailable. */
     seasonRank: number
+    rankSource?: 'opendota' | 'match' | null
+    rankScope?: 'current' | 'match' | null
+    rankFetchedAt?: number | null
     isVictory: boolean
     /** IMP: −100…+100. Всегда null в своём API (Steam не считает импакты) — колонка использует свою модель */
     imp: number | null
@@ -45,8 +48,11 @@ export interface Profile {
   avatar: string | null
   matchCount: number | null
   winCount: number | null
-  /** последний сезонный ранг (null — Steam не отдаёт в этом API) */
+  /** Public medal code (null when unavailable). */
   rank: number | null
+  rankSource?: 'opendota' | 'match' | null
+  rankScope?: 'current' | 'match' | null
+  rankFetchedAt?: number | null
   /** true — основная позиция (core), false — support */
   rankIsCore: boolean | null
 }
@@ -159,6 +165,9 @@ export interface MatchPlayer {
   lane?: 'safelane' | 'mid' | 'offlane'
   /** текущий сезонный ранг игрока, 0 — нет данных */
   seasonRank: number
+  rankSource?: 'opendota' | 'match' | null
+  rankScope?: 'current' | 'match' | null
+  rankFetchedAt?: number | null
   /** rich-stats для модели импакта (всегда null в своём API — Steam не отдаёт события; модель честно считает на base-признаках) */
   stats: MatchPlayerStats | null
 }

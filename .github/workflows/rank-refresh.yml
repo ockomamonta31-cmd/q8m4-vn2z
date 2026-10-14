@@ -1,0 +1,25 @@
+name: Public player ranks
+on:
+  repository_dispatch:
+    types: [replay-backfill]
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: rank-refresh
+  cancel-in-progress: false
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      REPLAY_INGEST_URL: ${{ secrets.REPLAY_INGEST_URL }}
+      REPLAY_INGEST_TOKEN: ${{ secrets.REPLAY_INGEST_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/refresh-ranks.mjs

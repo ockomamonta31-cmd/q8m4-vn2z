@@ -35,6 +35,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { inferReplayPositions } from './gc/infer-replay-positions.mjs'
 import { impactPhases } from './gc/impact-phases.mjs'
 import { buildMatchTimeline } from './gc/build-timeline.mjs'
+import { createRankResolver, rankFields } from './player-ranks.mjs'
 
 const ROOT = dirname(fileURLToPath(import.meta.url))
 const DATA = join(ROOT, 'data')
@@ -553,6 +554,11 @@ async function resolveProfiles(accountIds) {
   return out
 }
 
+const resolveRanks = createRankResolver({
+  read: async (id) => readJson(join(DATA, 'ranks', id + '.json'), null),
+  write: async (id, value) => writeJson(join(DATA, 'ranks', id + '.json'), value),
+})
+
 // --- Хендлеры API ---
 
 class HttpError extends Error {
@@ -570,7 +576,7 @@ const handlers = {
   async profile(params) {
     const id = Number(params.id)
     if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный Steam ID')
-    const [names, history] = await Promise.all([resolveProfiles([id]), ensureHistory(id)])
+    const [names, history, ranks] = await Promise.all([resolveProfiles([id]), ensureHistory(id), resolveRanks([id])])
     const info = names.get(id) ?? {}
     return {
       steamAccountId: id,
@@ -579,7 +585,10 @@ const handlers = {
       // Valve отдаёт окно последних 500 публичных матчей, а не всю историю
       matchCount: history.total ?? null,
       winCount: null,
-      rank: null,
+      rank: ranks.get(id)?.tier ?? null,
+      rankSource: ranks.get(id)?.source ?? null,
+      rankScope: ranks.get(id)?.scope ?? null,
+      rankFetchedAt: ranks.get(id)?.fetchedAt ?? null,
       rankIsCore: null,
     }
   },
@@ -591,7 +600,7 @@ const handlers = {
     const skip = Math.max(Number(params.skip) || 0, 0)
     if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный Steam ID')
 
-    const history = await ensureHistory(id)
+    const [history, ranks] = await Promise.all([ensureHistory(id), resolveRanks([id])])
     // Детали качаются параллельно (окно держит steamFetch), битые пропускаем
     const settled = await Promise.all(
       history.rows.slice(skip, skip + take).map((row) => ensureMatch(row.id, row.seq).catch(() => null)),
@@ -626,7 +635,7 @@ const handlers = {
           heroHealing: me.heroHealing,
           ...role,
           positionSource: role.positionSource,
-          seasonRank: me.seasonRank,
+          ...rankFields(me, ranks.get(id)),
           isVictory: me.isVictory,
           imp: null,
         },
@@ -638,7 +647,7 @@ const handlers = {
   /** GET /api/matches/:id — полный матч (все 10 игроков с именами). */
   async match(params) {    const id = Number(params.id)
     if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный ID матча')
-    const match = await ensureMatch(id)
+    const match = await resolveRanks.forMatch(await ensureMatch(id))
     const [profiles, draft] = await Promise.all([
       resolveProfiles(match.players.map((p) => p.steamAccountId)),
       stratzDraft(id),
@@ -659,7 +668,7 @@ const handlers = {
             ...(parsed ?? {}),
             ...(!parsed?.position && stratz ? stratz : {}),
             impactPhases: replayPhaseStats(match, p),
-            name: profiles.get(p.steamAccountId)?.name ?? null,
+            name: profiles.get(p.steamAccountId)?.name ?? p.name ?? null,
           }
         }),
       },

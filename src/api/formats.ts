@@ -51,6 +51,18 @@ export function lobbyName(lobby: string): string {
   return LOBBY_TYPES[lobby] ?? humanizeEnum(lobby)
 }
 
+export function rankName(rank: number | null | undefined): string {
+  if (!rank) return 'Ранг неизвестен'
+  const names = ['', 'Рекрут', 'Страж', 'Рыцарь', 'Герой', 'Легенда', 'Властелин', 'Божество', 'Титан']
+  const medal = Math.floor(rank / 10), stars = rank % 10
+  return names[medal] ? `${names[medal]}${medal < 8 && stars ? ` ${stars}` : ''}` : 'Ранг неизвестен'
+}
+
+export function rankDescription(source?: string | null, scope?: string | null, fetchedAt?: number | null): string {
+  const date = fetchedAt ? ` · получен ${new Date(fetchedAt).toLocaleString('ru-RU')}` : ''
+  return `${scope === 'match' ? 'Ранг на момент матча' : 'Текущий публичный ранг'}${source === 'opendota' ? ' · OpenDota' : ''}${date}`
+}
+
 export function fmtDuration(seconds: number): string {
   if (!seconds) return '—'
   const m = Math.floor(seconds / 60)

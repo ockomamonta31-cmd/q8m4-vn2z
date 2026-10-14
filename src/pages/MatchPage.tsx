@@ -75,7 +75,14 @@ export default function MatchPage() {
   }, [matchId, attempt])
 
   const board = useMemo(
-    () => (match ? buildBoard(match, (p) => resolveImpact(p, match.durationSeconds, null)) : null),
+    () => (match ? buildBoard(match, (p) => {
+      const teammates = match.players.filter((q) => q.isRadiant === p.isRadiant)
+      return resolveImpact({
+        ...p,
+        teamKills: teammates.reduce((sum, q) => sum + q.kills, 0),
+        teamDamage: teammates.reduce((sum, q) => sum + q.heroDamage, 0),
+      }, match.durationSeconds, null)
+    }) : null),
     [match],
   )
 

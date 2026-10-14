@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom'
 import type { HeroInfo, ItemInfo, MatchPlayer } from '../../api/types'
 import { itemImageUrl } from '../../api'
 import { heroImageUrl } from '../../api/heroes'
-import { steamProfileUrl } from '../../api/formats'
+import { steamProfileUrl, rankName, rankDescription } from '../../api/formats'
 import { signed, type ImpactScore } from '../../api/score'
 import type { MatchBoard, TeamSide } from '../../pages/match-model'
 import { ImpactMeter } from '../Impact'
@@ -17,7 +17,7 @@ import { BuildTimeline, ImpactPanel, ItemSlot, PurchaseTimeline } from './Build'
 
 const number = (n: number) => n.toLocaleString('ru-RU')
 
-type Row = MatchPlayer & { __impact: number; __score: ImpactScore | null }
+type Row = MatchPlayer & { __impact: number; __score: ImpactScore | null; teamKills: number; teamDamage: number }
 
 const posOf = (p: MatchPlayer) => (p.positionSource && p.position >= 1 && p.position <= 5 ? p.position : 6)
 
@@ -35,7 +35,7 @@ function TeamTable({ side, board, heroMap, itemMap, durationSec }: {
 }) {
   const won = side.players.every((p) => p.isVictory) && side.players.length > 0
   const rows: Row[] = side.players
-    .map((p, i) => ({ ...p, __impact: side.scores[i]?.value ?? 0, __score: side.scores[i] ?? null }))
+    .map((p, i) => ({ ...p, teamKills: side.kills, teamDamage: side.heroDamage, __impact: side.scores[i]?.value ?? 0, __score: side.scores[i] ?? null }))
     .sort((a, b) => posOf(a) - posOf(b))
   const mvpId = board.mvp ? `${board.mvp.player.steamAccountId}:${board.mvp.player.heroId}` : null
   const maxDamage = Math.max(1, ...side.players.map((p) => p.heroDamage))
@@ -122,6 +122,7 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec, best }:
             </span>
             <span className="dim">
               {hero?.name ?? `герой #${p.heroId}`}, {p.level} ур.
+              <span title={rankDescription(p.rankSource, p.rankScope, p.rankFetchedAt)}> · {rankName(p.seasonRank)}{p.rankScope === 'current' ? ' сейчас' : ''}</span>
               {p.leaverStatus ? ' · покинул игру' : ''}
             </span>
           </span>

@@ -1,6 +1,7 @@
 /// <reference types="@cloudflare/workers-types" />
 import heroes from '../server/data/constants/heroes.json'
 import items from '../server/data/constants/items.json'
+import { createRankResolver, rankFields, validRank } from '../server/player-ranks.mjs'
 
 interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; AUTH_SECRET?: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string; GITHUB_DISPATCH_TOKEN?: string; GITHUB_REPO?: string; REPLAY_MATCHES_PER_RUN?: string }
 const PRIVATE_ID = 0xffffffff
@@ -19,6 +20,27 @@ async function cachedPrevious<T>(env: Env, key: string): Promise<T | null> {
 async function save(env: Env, key: string, value: unknown) {
   await env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(key, JSON.stringify(value), Date.now()).run()
 }
+const rankResolvers = new WeakMap<Env, ReturnType<typeof createRankResolver>>()
+function rankResolver(env: Env) {
+  let resolver = rankResolvers.get(env)
+  if (!resolver) {
+    resolver = createRankResolver({
+      read: async (id: number | string) => {
+        const value = await cachedPrevious<any>(env, 'rank:v1:' + id)
+        const missing = !value || Date.now() - value.fetchedAt > 24 * 3600_000 || (value.tier === 0 && Date.now() - value.checkedAt > 3600_000) || (String(id).startsWith('match-') && !value.players?.length)
+        if (missing && !await cachedPrevious(env, 'rank-pending:v1:' + id)) {
+          await save(env, 'rank-pending:v1:' + id, { key: String(id) })
+        }
+        return value
+      },
+      write: (id: number, value: unknown) => save(env, 'rank:v1:' + id, value),
+    })
+    rankResolvers.set(env, resolver)
+  }
+  return resolver
+}
+const ranks = (env: Env, ids: number[]) => rankResolver(env)(ids)
+const rankedMatch = (env: Env, value: any) => rankResolver(env).forMatch(value)
 async function steam(env: Env, endpoint: string, params: Record<string, string | number>) {
   if (!env.STEAM_WEB_API_KEY) throw new Response(JSON.stringify({error:'Добавь STEAM_WEB_API_KEY в Worker secrets'}), {status:503})
   const url = new URL(`https://api.steampowered.com/${endpoint}`)
@@ -286,6 +308,45 @@ export default {
   if(!p.startsWith('/api/')) return env.ASSETS.fetch(request)
   if(p.startsWith('/api/auth/')) { try { return (await steamAuth(request,env))??json({error:'Not found'},404) } catch(e) { console.error('Steam auth failed',e instanceof Error?e.message:'unknown'); return json({error:'Steam login failed'},502) } }
   try {
+    if(p==='/api/internal/ranks') {
+      if(!env.REPLAY_INGEST_TOKEN || request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}`) return json({error:'Unauthorized'},401)
+      if(request.method==='GET') {
+        const rows=await env.DB.prepare("SELECT value FROM cache WHERE key GLOB 'rank-pending:v1:*' ORDER BY updated_at ASC LIMIT 10").all<{value:string}>()
+        return json({pending:rows.results.flatMap((r)=>{try{return [JSON.parse(r.value)]}catch{return []}})})
+      }
+      if(request.method!=='POST') return json({error:'Method not allowed'},405)
+      const raw=await request.text()
+      if(raw.length>200_000) return json({error:'Payload too large'},413)
+      let body:any;try{body=JSON.parse(raw)}catch{return json({error:'Invalid JSON'},400)}
+      if(!Array.isArray(body.records)||body.records.length>150) return json({error:'Invalid rank records'},400)
+      const records:{key:string;value:any}[]=[]
+      for(const row of body.records) {
+        if(!row||typeof row.key!=='string'||!/^(?:match-)?[1-9]\d{0,11}$/.test(row.key)) return json({error:'Invalid rank key'},400)
+        const value=row.value, timestamp=Number(value?.fetchedAt)
+        if(!Number.isFinite(timestamp)||timestamp>Date.now()+120_000||timestamp<Date.now()-7*86400_000) return json({error:'Invalid rank timestamp'},400)
+        if(row.key.startsWith('match-')) {
+          if(!Array.isArray(value.players)||value.players.length!==10) return json({error:'Expected ten public identities'},400)
+          const slots=new Set(), heroes=new Set()
+          const players=[]
+          for(const p of value.players) {
+            if(!p||typeof p!=='object') return json({error:'Invalid match identity'},400)
+            if(!Number.isInteger(p.player_slot)||!(p.player_slot>=0&&p.player_slot<=4||p.player_slot>=128&&p.player_slot<=132)||slots.has(p.player_slot)||!Number.isInteger(p.hero_id)||p.hero_id<=0||heroes.has(p.hero_id)) return json({error:'Invalid match identity'},400)
+            if(p.account_id!=null&&(!Number.isInteger(p.account_id)||p.account_id<0||p.account_id>=PRIVATE_ID)) return json({error:'Invalid account ID'},400)
+            slots.add(p.player_slot);heroes.add(p.hero_id)
+            players.push({account_id:p.account_id??null,hero_id:p.hero_id,player_slot:p.player_slot,rank_tier:validRank(p.rank_tier)?p.rank_tier:null,personaname:typeof p.personaname==='string'?p.personaname.slice(0,128):null})
+          }
+          records.push({key:row.key,value:{fetchedAt:timestamp,players}})
+        } else {
+          if(Number(row.key)>=PRIVATE_ID||!(value.tier===0||validRank(value.tier))) return json({error:'Invalid medal'},400)
+          records.push({key:row.key,value:{tier:value.tier,source:'opendota',scope:'current',fetchedAt:timestamp,checkedAt:timestamp}})
+        }
+      }
+      if(records.length) await env.DB.batch(records.flatMap((r)=>[
+        env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind('rank:v1:'+r.key,JSON.stringify(r.value),Date.now()),
+        env.DB.prepare('DELETE FROM cache WHERE key=?').bind('rank-pending:v1:'+r.key),
+      ]))
+      return json({ok:true,records:records.length})
+    }
     const ingest=p.match(/^\/api\/internal\/replay\/(\d+)$/)
     if(ingest) {
       if(request.method!=='POST') return json({error:'Method not allowed'},405)
@@ -328,15 +389,15 @@ export default {
     if(p==='/api/constants/heroes') return json(heroes)
     if(p==='/api/constants/items') return json(items)
     let m=p.match(/^\/api\/profile\/(\d+)$/)
-    if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h]=await Promise.all([profiles(env,[id]),history(env,id)]); const info=ps.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:null,rankIsCore:null}) }
+    if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h,rs]=await Promise.all([profiles(env,[id]),history(env,id),ranks(env,[id])]); const info=ps.get(id), rank=rs.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:rank?.tier??null,rankSource:rank?.source??null,rankScope:rank?.scope??null,rankFetchedAt:rank?.fetchedAt??null,rankIsCore:null}) }
     m=p.match(/^\/api\/player\/(\d+)\/matches$/)
-    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),role=(await replayData(env,x.id))?.[String(slot)];return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:role?.position??0,positionSource:role?.positionSource,seasonRank:0,isVictory:me.isVictory,imp:null}}}))) }
+    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take),rank=(await ranks(env,[id])).get(id);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),role=(await replayData(env,x.id))?.[String(slot)];return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:role?.position??0,positionSource:role?.positionSource,...rankFields(me,rank),isVictory:me.isVictory,imp:null}}}))) }
     m=p.match(/^\/api\/matches\/(\d+)$/)
     if(m) {
-      const id=Number(m[1]),x=await match(env,id)
+      const id=Number(m[1]),x=await rankedMatch(env,await match(env,id))
       const [ps,replay,draft]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id),matchDraft(env,id)])
       const purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0}
-      const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases}})
+      const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??p.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases}})
       return json(withDraft({...x,players},draft))
     }
     m=p.match(/^\/api\/matches\/(\d+)\/timeline$/)

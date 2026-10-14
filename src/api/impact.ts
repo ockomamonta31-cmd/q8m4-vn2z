@@ -1,359 +1,174 @@
-// «Честная» модель импакта (обучена scripts/train-impact.mjs на реальных
-// исходах матчей, НЕ на IMP STRATZ).
-//
-// Принцип: импакт игрока = насколько ЕГО статистика сдвигает шанс победы
-// команды относительно ТИПИЧЕСКОГО игрока ЕГО же ранга и позиции.
-// Подробности и валидация (AUC, корреляция с их IMP, синтетика) — в скрипте.
-//
-// Использование:
-// - со страницы матча (полный контекст 10 игроков, rich-признаки);
-// - со списка матчей (один игрок, контекст команды импутируется baseline'ом
-//   его ранга, base-признаки).
-
-import type { MatchDetails, MatchPlayer, PlayerMatch } from './types'
+// A role-specific statistical comparison, not a causal verdict on a match.
+// Training: scripts/train-impact.mjs. All favorable feature coefficients are
+// constrained nonnegative; death/error coefficients are nonpositive.
+import type { MatchPlayer } from './types'
 import impactModelJson from './impact-model.json'
 
 interface WinModel {
-  kind: 'ridge' | 'mlp'
-  mean: number[]
+  kind: string
+  beta: number[]
   std: number[]
-  /** температура калибровки: P = sigmoid(logit / T) */
-  T?: number
-  beta?: number[]
-  dim?: number
-  H?: number
-  W1?: number[][]
-  b1?: number[]
-  W2?: number[]
-  b2?: number
+  clip: number
+  metrics?: { auc: number; logLoss: number; train: number; test: number }
 }
-
 export interface ImpactLevel {
-  name: string
   features: string[]
   win: WinModel
+  positionWins: Record<string, WinModel>
   baselines: Record<string, number[]>
+  heroBaselines: Record<string, number[]>
   posMean: Record<string, number[]>
-  rankBuckets: Record<string, number[]>
+  durationCenters: number[]
+  durationAdjustments: Record<string, number[][]>
   scale: number
-  metrics: {
-    auc: number
-    corrWithStratzImp: number
-    winAvgImpact: number
-    lossAvgImpact: number
+  metrics: { auc: number }
+}
+const model = impactModelJson as unknown as {
+  version: number; matches: number; players: number; trainedAt: string
+  base: ImpactLevel; rich: ImpactLevel; placeholder?: boolean
+}
+export const IMPACT_MODEL_READY = !model.placeholder && model.version >= 4 && model.matches > 0
+
+export function impactModelInfo() {
+  return IMPACT_MODEL_READY ? {
+    matches: model.matches, players: model.players,
+    auc: model.base.metrics.auc, trainedAt: model.trainedAt,
+  } : null
+}
+
+export type ImpactInput = Pick<MatchPlayer,
+  'seasonRank' | 'heroId' | 'position' | 'kills' | 'deaths' | 'assists' |
+  'goldPerMinute' | 'experiencePerMinute' | 'numLastHits' | 'numDenies' |
+  'networth' | 'level' | 'heroDamage' | 'towerDamage' | 'heroHealing'
+> & Partial<Pick<MatchPlayer, 'stats'>> & { teamKills?: number; teamDamage?: number }
+
+const bucketOf = (rank: number) => Math.max(10, Math.min(80, Math.floor(rank / 10) * 10))
+const sigmoid = (v: number) => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, v))))
+const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : 0
+
+function durationAdjustment(level: ImpactLevel, pos: number, minutes: number): number[] {
+  const values = level.durationAdjustments[String(pos)]
+  if (!values) return level.features.map(() => 0)
+  const centers = level.durationCenters
+  let hi = centers.findIndex((v) => v >= minutes)
+  if (hi < 0) hi = centers.length - 1
+  const lo = Math.max(0, hi - 1)
+  const t = lo === hi ? 0 : Math.max(0, Math.min(1, (minutes - centers[lo]) / (centers[hi] - centers[lo])))
+  return values[lo].map((v, j) => v * (1 - t) + values[hi][j] * t)
+}
+
+function baselineFor(level: ImpactLevel, p: ImpactInput, rank: number, minutes: number): number[] {
+  const pos = p.position >= 1 && p.position <= 5 ? p.position : 0
+  const prior = level.posMean[String(pos)] ?? level.posMean['0']
+  const ranked = rank > 0 ? level.baselines[pos + ':' + bucketOf(rank)] ?? prior : prior
+  const hero = level.heroBaselines[p.heroId + ':' + pos + ':0']
+  const exact = rank > 0 ? level.heroBaselines[p.heroId + ':' + pos + ':' + bucketOf(rank)] : null
+  const base = exact ?? (hero ? ranked.map((v, j) => v + hero[j] - prior[j]) : ranked)
+  const adjustment = durationAdjustment(level, pos, minutes)
+  return base.map((v, j) => Math.max(0, v + adjustment[j]))
+}
+
+interface ImpactContext { level: ImpactLevel; base: number[]; actual: number[]; win: WinModel }
+function impactContext(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactContext | null {
+  if (!IMPACT_MODEL_READY || !Number.isFinite(durationSec) || durationSec <= 0) return null
+  const level = p.stats ? model.rich : model.base
+  const minutes = Math.max(durationSec / 60, 1)
+  const rank = p.seasonRank > 0 ? p.seasonRank : seasonRank && seasonRank > 0 ? seasonRank : 0
+  const base = baselineFor(level, p, rank, minutes)
+  const rates = (v: unknown) => num(v) / minutes
+  const lobby = baselineFor(level, { ...p, heroId: 0, position: 0 }, rank, minutes)
+  const typical = (f: string) => lobby[level.features.indexOf(f)] ?? 0
+  const kills = num(p.kills), assists = num(p.assists), damage = num(p.heroDamage)
+  // Profile histories do not contain teammates: only share features use a
+  // typical-team estimate there. The match page supplies observed team totals.
+  const teamKills = p.teamKills ?? kills + 4 * typical('kpm') * minutes
+  const teamDamage = p.teamDamage ?? damage + 4 * typical('heroDmgPerMin') * minutes
+  const s = p.stats
+  const values: Record<string, number> = {
+    kpm: rates(kills), dpm: rates(p.deaths), apm: rates(assists),
+    killParticipation: teamKills > 0 ? Math.min(1, (kills + assists) / teamKills) : 0,
+    gpm: num(p.goldPerMinute), xpm: num(p.experiencePerMinute),
+    lhpm: rates(p.numLastHits), deniesPerMin: rates(p.numDenies),
+    networthPerMin: rates(p.networth),
+    heroDmgPerMin: rates(damage), towerDmgPerMin: rates(p.towerDamage), heroHealPerMin: rates(p.heroHealing),
+    dmgShare: teamDamage > 0 ? damage / teamDamage : 0,
+    avgGoldFed: s?.deathEvents.length ? s.deathEvents.reduce((n, e) => n + num(e.goldFed), 0) / s.deathEvents.length : 0,
+    dieBacksPerMin: rates(s?.deathEvents.filter((e) => e.isDieBack).length),
+    diedWithHealPerMin: rates(s?.deathEvents.filter((e) => e.hasHealAvailable).length),
+    tpFailDeathsPerMin: rates(s?.deathEvents.filter((e) => e.isAttemptTpOut).length),
+    wardsObsPerMin: rates(s?.wards.filter((w) => w.type === 0).length),
+    wardsSenPerMin: rates(s?.wards.filter((w) => w.type === 1).length),
+    dewardsPerMin: rates(s?.wardDestruction.length),
+    campStacksPerMin: rates(s?.campStack.reduce((n, v) => n + num(v), 0)),
+    runesPerMin: rates(s?.runes.length), courierKillsPerMin: rates(s?.courierKills.length),
+    smokesBoughtPerMin: rates(s?.itemPurchases.filter((e) => e.itemId === 188).length),
+    dustsBoughtPerMin: rates(s?.itemPurchases.filter((e) => e.itemId === 40).length),
   }
+  return { level, base, actual: level.features.map((f) => values[f] ?? 0),
+    win: level.positionWins[String(p.position)] ?? level.win }
 }
 
-interface ImpactModelFile {
-  version: number
-  kind: string
-  trainedAt: string
-  matches: number
-  players: number
-  base: ImpactLevel
-  rich: ImpactLevel
-  placeholder?: boolean
+// The sigmoid changes the scale, not the sign of a feature's contribution.
+// Integrating its slope along the baseline-to-player line gives an exact
+// additive breakdown in O(features), without permutation noise.
+function attribution(context: ImpactContext) {
+  const { win, actual, base, level } = context
+  const terms = actual.map((v, j) => win.beta[j + 1] * Math.max(-win.clip, Math.min(win.clip, (v - base[j]) / win.std[j])))
+  const delta = terms.reduce((s, v) => s + v, 0)
+  const origin = sigmoid(win.beta[0])
+  const raw = (sigmoid(win.beta[0] + delta) - origin) * level.scale
+  const slope = Math.abs(delta) > 1e-9 ? raw / delta : origin * (1 - origin) * level.scale
+  return { score: Math.round(raw), contributions: terms.map((v) => v * slope) }
 }
 
-const model = impactModelJson as ImpactModelFile
-
-export const IMPACT_MODEL_READY =
-  !model.placeholder && typeof model.matches === 'number' && model.matches > 0
-
-export function impactModelInfo(): {
-  matches: number
-  players: number
-  auc: number
-  corr: number
-  trainedAt: string
-} | null {
-  if (!IMPACT_MODEL_READY) return null
-  return {
-    matches: model.matches,
-    players: model.players,
-    auc: model.base.metrics.auc,
-    corr: model.base.metrics.corrWithStratzImp,
-    trainedAt: model.trainedAt,
-  }
-}
-
-function winProb(level: ImpactLevel, diff: number[]): number {
-  const w = level.win
-  const z = diff.map((v, j) => (v - (w.mean[j] ?? 0)) / (w.std[j] || 1))
-  let out: number
-  if (w.kind === 'mlp' && w.W1 && w.W2 && w.b1 && typeof w.b2 === 'number' && w.dim && w.H) {
-    let acc2 = w.b2
-    for (let j = 0; j < w.H; j++) {
-      let acc = w.b1[j]
-      for (let k = 0; k < w.dim; k++) acc += z[k] * w.W1[k][j]
-      acc2 += Math.tanh(acc) * w.W2[j]
-    }
-    out = acc2
-  } else if (w.beta) {
-    const beta = w.beta
-    out = [1, ...z].reduce((s, v, j) => s + v * beta[j], 0)
-  } else {
-    return 0.5
-  }
-  // Калибровка температуры — как в scripts/train-impact.mjs (T ≥ 1, только сглаживание)
-  const T = w.T && w.T > 0 ? w.T : 1
-  const p = 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, out / T))))
-  return p
-}
-
-function nearestBucket(level: ImpactLevel, target: number): string | null {
-  const keys = Object.keys(level.rankBuckets).map(Number)
-  if (!keys.length) return null
-  const best = keys.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a))
-  return String(best)
-}
-
-function baselineFor(level: ImpactLevel, pos: number, seasonRank: number): number[] {
-  const bucket = Math.max(10, Math.min(80, Math.round((seasonRank || 45) / 10) * 10))
-  const key = `${pos}:${bucket}`
-  if (pos >= 1 && pos <= 5 && level.baselines[key]) return level.baselines[key]
-  if (level.rankBuckets[String(bucket)]) return level.rankBuckets[String(bucket)]
-  const near = nearestBucket(level, bucket)
-  return (near ? level.rankBuckets[near] : null) ?? level.posMean[String(pos)] ?? []
-}
-
-function lobbyBaseline(level: ImpactLevel, actualRank: number): number[] {
-  const bucket = Math.max(10, Math.min(80, Math.round((actualRank || 45) / 10) * 10))
-  const near = nearestBucket(level, bucket)
-  return (near ? level.rankBuckets[near] : null) ?? level.rankBuckets['40'] ?? []
-}
-
-// --- Извлечение признаков (должно совпадать с scripts/harvest-rich.mjs) ---
-
-const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
-const mean = (arr: number[]): number => (arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0)
-const sum = (arr: number[]): number => arr.reduce((s, v) => s + v, 0)
-
-type RichSource = {
-  kills: number
-  deaths: number
-  assists: number
-  goldPerMinute: number
-  experiencePerMinute: number
-  numLastHits: number
-  numDenies: number
-  networth: number
-  level: number
-  heroDamage: number
-  towerDamage: number
-  heroHealing: number
-  // rich (только со страницы матча)
-  killEvents?: { isSolo?: boolean; isGank?: boolean; assist?: number | null }[]
-  deathEvents?: { goldFed?: number | null; isDieBack?: boolean; hasHealAvailable?: boolean; isAttemptTpOut?: boolean }[]
-  wards?: { type?: number | null }[]
-  wardDestruction?: unknown[]
-  itemPurchases?: { itemId?: number | null }[]
-  campStack?: number[]
-  runes?: unknown[]
-  courierKills?: unknown[]
-  actionsPerMinute?: number[]
-  tripsFountainPerMinute?: number[]
-  pathPerMin?: number
-}
-
-function extractFeatures(
-  src: RichSource,
-  durationMin: number,
-  teamKills: number,
-  teamDamage: number,
-  rich: boolean,
-  features: string[],
-): number[] {
-  const k = num(src.kills), d = num(src.deaths), a = num(src.assists)
-  const killEvents = src.killEvents ?? []
-  const deathEvents = src.deathEvents ?? []
-  const wards = src.wards ?? []
-  // ward.type — Int: 0 = OBSERVER, 1 = SENTRY
-  const wardObs = wards.filter((w) => num(w.type) === 0).length
-  const wardSen = wards.filter((w) => num(w.type) === 1).length
-  const purchases = src.itemPurchases ?? []
-  const smokesBought = purchases.filter((ip) => num(ip.itemId) === 188).length
-  const dustsBought = purchases.filter((ip) => num(ip.itemId) === 40).length
-  const d2 = Math.max(durationMin, 1)
-
-  const all: Record<string, number> = {
-    k, d, a,
-    kpm: k / d2, dpm: d / d2, apm: a / d2,
-    gpm: num(src.goldPerMinute), xpm: num(src.experiencePerMinute),
-    lh: num(src.numLastHits), denies: num(src.numDenies),
-    networth: num(src.networth), level: num(src.level),
-    heroDmg: num(src.heroDamage), heroDmgPerMin: num(src.heroDamage) / d2,
-    towerDmg: num(src.towerDamage), heroHeal: num(src.heroHealing),
-    dmgShare: teamDamage > 0 ? num(src.heroDamage) / teamDamage : 0,
-    killShare: teamKills > 0 ? k / teamKills : 0,
-    assistsPerKill: killEvents.length
-      ? mean(killEvents.map((e) => num(e.assist)))
-      : k > 0 ? a / k : 0,
-    soloKillRate: killEvents.length ? killEvents.filter((e) => e.isSolo).length / killEvents.length : 0,
-    gankKillRate: killEvents.length ? killEvents.filter((e) => e.isGank).length / killEvents.length : 0,
-    avgGoldFed: deathEvents.length ? mean(deathEvents.map((e) => num(e.goldFed))) : 0,
-    dieBacks: deathEvents.filter((e) => e.isDieBack).length,
-    diedWithHeal: deathEvents.filter((e) => e.hasHealAvailable).length,
-    tpFailDeaths: deathEvents.filter((e) => e.isAttemptTpOut).length,
-    wardsObs: wardObs, wardsSen: wardSen,
-    smokesBought, dustsBought,
-    dewards: (src.wardDestruction ?? []).length,
-    campStacks: sum(src.campStack ?? []),
-    runes: (src.runes ?? []).length,
-    courierKills: (src.courierKills ?? []).length,
-    pathPerMin: num(src.pathPerMin),
-    apmAvg: mean(src.actionsPerMinute ?? []),
-    fountainTrips: mean(src.tripsFountainPerMinute ?? []),
-  }
-  // rich-модель может содержать base-признаки; base-модель — только base
-  return features.map((f) => all[f] ?? 0)
-}
-
-function meanVec(vecs: number[][]): number[] {
-  if (!vecs.length) return []
-  return vecs[0].map((_, j) => vecs.reduce((s, v) => s + v[j], 0) / vecs.length)
-}
-
-function diffVec(a: number[], b: number[]): number[] {
-  return a.map((v, j) => v - (b[j] ?? 0))
-}
-
-/**
- * ЕДИНСТВЕННАЯ оценка импакта — та же, что изначально жила в списке матчей.
- * Считает линию статов игрока против типичного для его bracket и вызывается
- * одинаково и для строки списка, и для каждой из десяти строк страницы матча,
- * поэтому один и тот же игрок в одном и том же матче видит одно число.
- */
-/** Минимальный набор полей для оценки: есть и у строки списка, и у игрока матча. */
-export type ImpactInput = Pick<
-  MatchPlayer,
-  | 'seasonRank'
-  | 'position'
-  | 'kills'
-  | 'deaths'
-  | 'assists'
-  | 'goldPerMinute'
-  | 'experiencePerMinute'
-  | 'numLastHits'
-  | 'numDenies'
-  | 'networth'
-  | 'level'
-  | 'heroDamage'
-  | 'towerDamage'
-  | 'heroHealing'
->
-
-export function personalImpact(
-  p: ImpactInput,
-  durationSec: number,
-  seasonRank: number | null,
-): number | null {
+export function personalImpact(p: ImpactInput, durationSec: number, seasonRank: number | null): number | null {
   const context = impactContext(p, durationSec, seasonRank)
-  if (!context) return null
-  return impactFor(context, context.actual)
+  return context ? attribution(context).score : null
 }
 
 export interface ImpactBreakdown {
   score: number
-  factors: { label: string; section: string; contribution: number; actual: number; baseline: number }[]
+  factors: { label: string; section: string; contribution: number; actual: number; baseline: number; unit: 'rate' | 'share' | 'value' }[]
 }
-
 const impactLabels: Record<string, [string, string]> = {
-  k: ['Убийства', 'Бой'], d: ['Смерти', 'Бой'], a: ['Ассисты', 'Бой'],
-  kpm: ['Убийств/мин', 'Бой'], dpm: ['Смертей/мин', 'Бой'], apm: ['Ассистов/мин', 'Бой'],
+  kpm: ['Убийства', 'Бой'], dpm: ['Смерти', 'Бой'], apm: ['Ассисты', 'Бой'],
+  killParticipation: ['Участие в убийствах команды', 'Бой'],
   gpm: ['Золото/мин', 'Фарм'], xpm: ['Опыт/мин', 'Фарм'],
-  lh: ['Добивания', 'Фарм'], denies: ['Денаи', 'Фарм'], networth: ['Нетворт', 'Фарм'], level: ['Уровень', 'Фарм'],
-  heroDmg: ['Урон героям', 'Урон и объекты'], heroDmgPerMin: ['Урон/мин', 'Урон и объекты'], towerDmg: ['Урон башням', 'Урон и объекты'], heroHeal: ['Лечение', 'Урон и объекты'],
-  killShare: ['Доля убийств команды', 'Бой'],
+  lhpm: ['Добивания', 'Фарм'], deniesPerMin: ['Денаи', 'Фарм'], networthPerMin: ['Нетворт', 'Фарм'],
+  heroDmgPerMin: ['Урон героям', 'Урон и объекты'], towerDmgPerMin: ['Урон башням', 'Урон и объекты'],
+  heroHealPerMin: ['Лечение', 'Урон и объекты'], dmgShare: ['Доля урона команды', 'Урон и объекты'],
+  avgGoldFed: ['Отдано золота за смерть', 'Ошибки'],
+  dieBacksPerMin: ['Повторные смерти', 'Ошибки'], diedWithHealPerMin: ['Смерти с доступным лечением', 'Ошибки'],
+  tpFailDeathsPerMin: ['Смерти при телепорте', 'Ошибки'],
+  wardsObsPerMin: ['Observer-варды', 'Поддержка'], wardsSenPerMin: ['Sentry-варды', 'Поддержка'],
+  dewardsPerMin: ['Снятые варды', 'Поддержка'], campStacksPerMin: ['Стаки лагерей', 'Поддержка'],
+  runesPerMin: ['Подобранные руны', 'Поддержка'], courierKillsPerMin: ['Убитые курьеры', 'Поддержка'],
+  smokesBoughtPerMin: ['Купленные смоки', 'Поддержка'], dustsBoughtPerMin: ['Купленный Dust', 'Поддержка'],
 }
-
-/** Permutation-averaged marginal contributions; inference weights remain untouched. */
 export function personalImpactBreakdown(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactBreakdown | null {
   const context = impactContext(p, durationSec, seasonRank)
   if (!context) return null
-  const totals = new Array(context.level.features.length).fill(0)
-  let seed = 0x51f15e
-  const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 0x100000000 }
-  for (let sample = 0; sample < 64; sample++) {
-    const order = context.level.features.map((_, i) => i)
-    for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]] }
-    const current = context.base.slice()
-    let before = impactFor(context, current)
-    for (const i of order) {
-      current[i] = context.actual[i]
-      const after = impactFor(context, current)
-      totals[i] += after - before
-      before = after
-    }
-  }
-  const score = impactFor(context, context.actual)
-  const rows: ImpactBreakdown['factors'] = context.level.features.flatMap((key, i) => {
+  const { score, contributions } = attribution(context)
+  const factors = context.level.features.flatMap((key, j) => {
     const meta = impactLabels[key]
-    return meta && Math.abs(context.actual[i] - context.base[i]) > 1e-9
-      ? [{ label: meta[0], section: meta[1], contribution: Math.round(totals[i] / 64), actual: context.actual[i], baseline: context.base[i] }]
-      : []
+    return meta ? [{ label: meta[0], section: meta[1], contribution: Math.trunc(contributions[j]),
+      actual: context.actual[j], baseline: context.base[j],
+      unit: (key === 'killParticipation' || key === 'dmgShare' ? 'share' : key === 'avgGoldFed' ? 'value' : 'rate') as 'rate' | 'share' | 'value' }] : []
   })
-  if (rows.length) rows[rows.length - 1].contribution += score - rows.reduce((sum, row) => sum + row.contribution, 0)
-  return { score, factors: rows }
-}
-
-function impactFor(context: ImpactContext, player: number[]): number {
-  const meanR = meanVec([player, context.lobby, context.lobby, context.lobby, context.lobby])
-  const baseTeam = meanVec([context.base, context.lobby, context.lobby, context.lobby, context.lobby])
-  const impact = winProb(context.level, diffVec(meanR, context.lobby)) - winProb(context.level, diffVec(baseTeam, context.lobby))
-  return Math.max(-100, Math.min(100, Math.round(impact * context.level.scale)))
-}
-
-interface ImpactContext { level: ImpactLevel; lobby: number[]; base: number[]; actual: number[] }
-
-function impactContext(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactContext | null {
-  if (!IMPACT_MODEL_READY) return null
-  const level = model.base
-  const durationMin = Math.max(durationSec / 60, 1)
-  const effRank = p.seasonRank > 0 ? p.seasonRank : (seasonRank ?? 45)
-  const lobby = lobbyBaseline(level, effRank)
-  const base = baselineFor(level, p.position, effRank)
-  if (!lobby.length || !base.length) return null
-
-  const myVec = lobby.slice()
-  const set = (name: string, v: number) => {
-    const i = level.features.indexOf(name)
-    if (i >= 0 && Number.isFinite(v)) myVec[i] = v
+  // Largest-remainder rounding preserves every factor's sign and makes the
+  // displayed integer contributions sum exactly to the displayed score.
+  let remainder = score - factors.reduce((s, f) => s + f.contribution, 0)
+  const order = factors.map((_, j) => j).sort((a, b) =>
+    Math.sign(remainder) * ((contributions[b] - factors[b].contribution) - (contributions[a] - factors[a].contribution)))
+  for (const j of order) {
+    if (!remainder) break
+    const step = Math.sign(remainder)
+    if (Math.sign(contributions[j]) !== step) continue
+    factors[j].contribution += step
+    remainder -= step
   }
-  const kLobby = lobby[level.features.indexOf('k')] ?? 5
-  const teamKills = p.kills + 4 * kLobby
-  set('k', p.kills)
-  set('d', p.deaths)
-  set('a', p.assists)
-  set('kpm', p.kills / durationMin)
-  set('dpm', p.deaths / durationMin)
-  set('apm', p.assists / durationMin)
-  set('gpm', p.goldPerMinute)
-  set('xpm', p.experiencePerMinute)
-  set('lh', p.numLastHits)
-  set('denies', p.numDenies)
-  const myNetworth = p.networth > 0 ? p.networth : p.goldPerMinute * durationMin
-  set('networth', myNetworth)
-  set('level', p.level)
-  set('killShare', teamKills > 0 ? p.kills / teamKills : 0)
-  const dmgLobby = lobby[level.features.indexOf('heroDmg')] ?? 0
-  const nwLobby = lobby[level.features.indexOf('networth')] ?? 0
-  const myDmg = p.heroDamage > 0
-    ? p.heroDamage
-    : dmgLobby > 0 && nwLobby > 0
-      ? myNetworth * (dmgLobby / nwLobby)
-      : myNetworth * 1.5
-  set('heroDmg', myDmg)
-  set('heroDmgPerMin', myDmg / durationMin)
-  set('towerDmg', p.towerDamage)
-  set('heroHeal', p.heroHealing)
-
-  return { level, lobby, base, actual: myVec }
+  return { score, factors }
 }
-
 export function impactClass(score: number): string {
-  if (score >= 15) return 'score-top'
-  if (score >= 0) return 'score-mid'
-  if (score <= -15) return 'score-low'
-  return 'score-mid'
+  return score >= 15 ? 'score-top' : score <= -15 ? 'score-low' : 'score-mid'
 }

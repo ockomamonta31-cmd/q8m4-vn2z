@@ -1,6 +1,6 @@
 import type { HeroInfo, HeroStat, Profile } from '../api/types'
 import { avatarImageUrl, heroImageUrl } from '../api/heroes'
-import { fmtWinrate, steamProfileUrl, timeAgo, winrate } from '../api/formats'
+import { fmtWinrate, steamProfileUrl, timeAgo, winrate, rankName, rankDescription } from '../api/formats'
 import { Counter } from './primitives'
 
 type Averages = {
@@ -31,6 +31,7 @@ export default function PlayerAside({
         <img src={avatarImageUrl(profile.avatar)} alt="" width={96} height={96} />
         <div>
           <h1>{profile.name}</h1>
+          <p className="dim" title={rankDescription(profile.rankSource, profile.rankScope, profile.rankFetchedAt)}>{rankName(profile.rank)}{profile.rank ? ' · текущий ранг' : ''}</p>
           <div className="meta">
             <a href={steamProfileUrl(profile.steamAccountId)} target="_blank" rel="noreferrer">
               Steam ID {profile.steamAccountId}

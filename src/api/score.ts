@@ -1,5 +1,5 @@
-// Одна и та же оценка в списке матчей и на странице матча: наша модель,
-// если она не посчитала — IMP источника, иначе предсказание модели-фолбэка.
+// Shared model; the match page additionally supplies observed team totals
+// and event statistics when available. Histories use estimated team shares.
 
 import { IMPACT_MODEL_READY, impactModelInfo, personalImpact, type ImpactInput } from './impact'
 import { globalModelInfo, predictImpGlobal, type ImpEstimator } from './performance'
@@ -23,13 +23,13 @@ export function resolveImpact(
   durationSec: number,
   seasonRank: number | null,
 ): ImpactScore | null {
-  const model = IMPACT_MODEL_READY ? personalImpact({ ...row, position: 0 }, durationSec, seasonRank) : null
+  const model = IMPACT_MODEL_READY ? personalImpact(row, durationSec, seasonRank) : null
   if (model !== null) {
     const info = impactModelInfo()
     return {
       value: model,
       source: 'model',
-      note: `Насколько статы выше типичных для этой позиции и уровня.${info ? ` Модель: ${info.matches.toLocaleString('ru-RU')} матчей, AUC ${info.auc.toFixed(2)}.` : ''}`,
+      note: `Сравнение статистики с нормой героя и роли для похожей длительности.${row.seasonRank > 0 || (seasonRank ?? 0) > 0 ? ' Ранг учтён.' : ' Ранг неизвестен: общая норма роли.'}${row.teamKills === undefined ? ' Участие в боях рассчитано с оценкой убийств команды.' : ''}${info ? ` Обучение: ${info.matches.toLocaleString('ru-RU')} матчей.` : ''}`,
     }
   }
 
@@ -44,7 +44,7 @@ export function resolveImpact(
       value: estimate,
       source: 'estimate',
       note: info
-        ? `Предсказание модели-фолбэка: обучена на ${info.samples.toLocaleString('ru-RU')} матчах, MAE ±${info.mae}. Для этого игрока точная оценка не посчитана.`
+        ? `Предсказание модели-фолбэка: обучена на ${info.matches.toLocaleString('ru-RU')} матчах (${info.samples.toLocaleString('ru-RU')} игроков), MAE ±${info.mae}. Для этого игрока точная оценка не посчитана.`
         : 'Предсказание модели-фолбэка.',
     }
   }
