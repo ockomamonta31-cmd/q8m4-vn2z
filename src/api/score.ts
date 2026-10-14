@@ -44,7 +44,7 @@ export function resolveImpact(
       value: estimate,
       source: 'estimate',
       note: info
-        ? `Предсказание модели-фолбэка: обучена на ${info.matches.toLocaleString('ru-RU')} матчах (${info.samples.toLocaleString('ru-RU')} игроков), MAE ±${info.mae}. Для этого игрока точная оценка не посчитана.`
+        ? `Предсказание модели-фолбэка: обучена на ${info.samples.toLocaleString('ru-RU')} записях игроков, MAE ±${info.mae}. Для этого игрока точная оценка не посчитана.`
         : 'Предсказание модели-фолбэка.',
     }
   }
