@@ -170,6 +170,7 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec, best }:
 
       {open && (
         <div className="det">
+          {p.mapPlays && <MapPlaysPanel plays={p.mapPlays} />}
           <div>
             <div className="det-t">Прочие числа</div>
             <div className="det-r"><span>Урон башням</span><b>{number(p.towerDamage)}</b></div>
@@ -193,7 +194,7 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec, best }:
               <Icon.External size={14} />
             </a>
           </div>
-          {p.mapPlays ? <MapPlaysPanel plays={p.mapPlays} /> : p.__score?.source === 'model' && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
+          {!p.mapPlays && p.__score?.source === 'model' && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
           <BuildTimeline upgrades={p.abilityUpgrades} heroId={p.heroId} />
           <PurchaseTimeline events={p.purchaseEvents} itemMap={itemMap} />
         </div>

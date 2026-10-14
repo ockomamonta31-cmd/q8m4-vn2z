@@ -407,6 +407,14 @@
 .det-r b { font-weight: 600; text-align: right; }
 
 .bld { min-width: 0; }
+.map-plays { grid-column: 1 / -1; }
+.map-plays .note-a { margin: var(--sp-12) 0; }
+.map-play-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); align-items: start; gap: var(--sp-24); margin-top: var(--sp-16); }
+.map-play-detail p { margin-top: 0; }
+@media (max-width: 600px) {
+  .map-play-detail { grid-template-columns: 1fr; }
+  .map-plays .bld-h { flex-wrap: wrap; }
+}
 .bld-h { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-12); margin-bottom: var(--sp-12); font-size: var(--fs-16); font-weight: 600; }
 .bld-l { display: flex; flex-wrap: wrap; gap: var(--sp-12); margin-bottom: var(--sp-12); font-size: var(--fs-12); color: var(--text-dim); }
 .bld-l span { display: inline-flex; align-items: center; gap: var(--sp-4); }

@@ -42,25 +42,27 @@ export default function MapPlaysPanel({ plays }: { plays: MapPlays }) {
   const [filter, setFilter] = useState<'all' | 'after15'>('all')
   const episodes = plays.episodes.filter(e => filter === 'all' || e.t >= 900)
   const play = episodes[Math.min(selected, Math.max(0, episodes.length - 1))]
-  return <section className="bld">
+  return <section className="bld map-plays">
     <div className="bld-h"><b>Действия на карте</b><span className="dim">Координаты каждые {plays.sampleSeconds} с · покрытие {Math.round(plays.coverage * 100)}%</span></div>
     <p className="dim t12">На 15-й минуте: преимущество команды {signed(plays.teamGoldAt15)} золота. Нетворс игрока {plays.networthAt15?.toLocaleString('ru-RU') ?? 'неизвестен'}. Итог победы или поражения не меняет баланс эпизодов.</p>
     <p className="t14">{plays.good} положительных разменов и объектов · {plays.bad} отрицательных · {plays.neutral} нейтральных эпизодов.</p>
-    <p className="dim t12">Баланс {plays.score === null ? 'недоступен' : signed(plays.score)} = 100 × (положительные − отрицательные) / (положительные + отрицательные). Равный размен нейтрален; неподтверждённое давление не даёт баллов. Это описание результатов, а не оценка того, был ли выбор оптимальным.</p>
+    <p className="dim t12">Это баланс результатов эпизодов. Он не определяет, было ли решение оптимальным.</p>
+    <details className="t12 dim"><summary>Как считается баланс</summary><p>Баланс {plays.score === null ? 'недоступен' : signed(plays.score)} = 100 × (положительные − отрицательные) / (положительные + отрицательные). Равный размен нейтрален; неподтверждённое давление не даёт баллов. Эпизоды имеют одинаковый вес; масштаб размена, видимость команд, кулдауны и доступные альтернативы не входят в этот индекс.</p></details>
     <div className="note-a">
       <button className="btn btn-q" aria-pressed={filter === 'all'} onClick={() => { setFilter('all'); setSelected(0) }}>Вся игра</button>
       <button className="btn btn-q" aria-pressed={filter === 'after15'} onClick={() => { setFilter('after15'); setSelected(0) }}>После 15-й минуты</button>
     </div>
-    <label style={{ display: 'block', margin: '12px 0' }}>Эпизод
-      <select style={{ display: 'block', width: '100%', padding: 8, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--line)' }} value={Math.min(selected, Math.max(0, episodes.length - 1))} onChange={e => setSelected(Number(e.target.value))}>
+    <label htmlFor={`map-play-${plays.heroId}`} style={{ display: 'block', margin: '12px 0 4px' }}>Эпизод</label>
+      <select id={`map-play-${plays.heroId}`} style={{ display: 'block', width: '100%', padding: 8, background: 'var(--surface)', color: 'var(--text)', border: '1px solid var(--line)' }} value={Math.min(selected, Math.max(0, episodes.length - 1))} onChange={e => setSelected(Number(e.target.value))}>
         {episodes.map((e, i) => <option key={i} value={i}>{fmtDuration(e.t)} · {kindName[e.kind]} · {e.verdict > 0 ? 'положительный' : e.verdict < 0 ? 'отрицательный' : 'нейтральный'}</option>)}
       </select>
-    </label>
-    {play ? <>
+    {play ? <div className="map-play-detail">
+      <div>
       <p className="t14">{factsOf(play)}</p>
       <p className="dim t12">Преимущество команды перед эпизодом: {signed(play.teamGold)} золота. {play.moved !== null && `Смещение за предыдущие 30 с: ${play.moved.toLocaleString('ru-RU')} ед. карты (включает телепорты).`}</p>
-      <Route play={play} heroId={plays.heroId} />
       <p className="dim t12">Жёлтый — маршрут игрока и его позиция в начале события. Зелёные — Radiant, красные — Dire. Показаны истинные позиции из реплея; видимость команд, кулдауны и намерения пока не учитываются.</p>
-    </> : <p className="dim">В этом промежутке нет подтверждённых эпизодов.</p>}
+      </div>
+      <Route play={play} heroId={plays.heroId} />
+    </div> : <p className="dim">В этом промежутке нет подтверждённых эпизодов.</p>}
   </section>
 }
