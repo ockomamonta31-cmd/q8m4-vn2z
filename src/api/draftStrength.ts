@@ -14,6 +14,7 @@
 //      темп, синергия пар), где каждая — тоже доля силы; ось без данных
 //      выпадает из среднего, а не тянет его нулём.
 
+import { laneOutcome, LANE_RESULT_LABELS } from '../../server/gc/lane-outcome.mjs'
 import type { MatchPlayer } from './types'
 import { laneMechanics } from './laneMechanics'
 import { laneGaps, relativeEdge } from './draft'
@@ -276,8 +277,12 @@ export function evaluateDraft(
       const sum = (pick: (x: NonNullable<typeof phases[number]>) => number) => phases.reduce((a, x) => a + pick(x!), 0)
       return { lh: sum((x) => x.lastHits), xp: sum((x) => x.experience), gold: sum((x) => x.gold), kills: sum((x) => x.kills), deaths: sum((x) => x.deaths) }
     }
-    const lr = totals(r)
-    const ld = totals(d)
+    const corridor = lane.key === 'mid' ? 'mid' : lane.key === 'safelane' ? 'bottom' : 'top'
+    const actualR = players.filter(p => p.isRadiant && p.startingLane === corridor)
+    const actualD = players.filter(p => !p.isRadiant && p.startingLane === corridor)
+    const measured = match && actualR.length ? laneOutcome(players, actualR[0], match.durationSeconds) : null
+    const lr = measured ? totals(actualR) : null
+    const ld = measured ? totals(actualD) : null
     const laneMetrics = lr && ld ? [
       { label: 'добивания', r: lr.lh, d: ld.lh },
       { label: 'опыт', r: lr.xp, d: ld.xp },
@@ -287,15 +292,12 @@ export function evaluateDraft(
       const edge = relativeEdge(m.r, m.d)
       return `${m.label}: ${group(m.r)} против ${group(m.d)} — ${leadOf(edge)}`
     })
-    const laneRWins = laneMetrics.filter((m) => relativeEdge(m.r, m.d) > 3).length
-    const laneDWins = laneMetrics.filter((m) => relativeEdge(m.r, m.d) < -3).length
-    const laningSide: LaneSide = !laneMetrics.length ? 'even' : laneRWins > laneDWins ? 'radiant' : laneDWins > laneRWins ? 'dire' : 'even'
-    const laning = lr && ld ? {
+    const laningSide: LaneSide = !measured || measured.result === 'draw' ? 'even' : measured.score > 0 ? 'radiant' : 'dire'
+    const laning = measured && lr && ld ? {
       side: laningSide,
-      text: laningSide === 'even'
-        ? 'за первые 10 минут линия равная'
-        : `за первые 10 минут линию взяла ${SIDE[laningSide]}: ${Math.max(laneRWins, laneDWins)} замера из 3 за неё`,
-      lines: [...laneLines, ...(lr.kills || ld.kills ? [`смертей на линии: Radiant ${lr.deaths} против Dire ${ld.deaths}`] : [])],
+      text: laningSide === 'even' ? 'за первые 10 минут: ничья'
+        : `за первые 10 минут: ${LANE_RESULT_LABELS[measured.score > 0 ? measured.result : measured.result === 'stomp_loss' ? 'stomp' : 'win'].toLowerCase()} ${SIDE[laningSide]}`,
+      lines: [`стартовый состав: ${actualR.map(name).join(' + ')} против ${actualD.map(name).join(' + ')}`, ...laneLines],
     } : null
 
     // --- весь матч: это не итог линии, а то, что стороны вынесли из игры

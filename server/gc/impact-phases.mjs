@@ -21,6 +21,7 @@ export function impactPhases(parsed, durationSeconds) {
     const to = Math.min(rawTo, durationSeconds)
     return {
       label,
+      endSeconds: Math.min(to, Number(parsed.times?.at(-1)) || 0),
       kills: count(parsed.kills_log, from, to),
       deaths: count(parsed.deaths_log, from, to),
       gold: Math.max(0, at(parsed.gold_t, to) - at(parsed.gold_t, from)),

@@ -1,3 +1,4 @@
+import type { LaneOutcome } from '../../server/gc/lane-outcome.mjs'
 // Общие типы данных, нормализованные СОБСТВЕННЫМ API-сервером (server/index.mjs)
 // из Steam Web API. Строковые enum'ы режимов/лобби приведены к виду UI.
 
@@ -41,6 +42,7 @@ export interface PlayerMatch {
     imp: number | null
     evidence?: PlayerEvidence | null
     mapPlays?: MapPlays | null
+    laneOutcome?: LaneOutcome | null
     impactPhases?: MatchPlayer['impactPhases']
     purchaseEvents?: MatchPlayer['purchaseEvents']
     stats?: MatchPlayerStats | null
@@ -195,7 +197,9 @@ export interface MatchPlayer {
   /** Parsed replay item purchase events; null when no timeline is available. */
   purchaseEvents?: { time: number; itemId: number }[] | null
   /** Replay-derived phase totals. */
-  impactPhases?: { label: string; kills: number; deaths: number; gold: number; networth: number; lastHits: number; experience: number; heroDamage: number; towerDamage: number }[]
+  startingLane?: string
+  laneOutcome?: LaneOutcome | null
+  impactPhases?: { label: string; endSeconds?: number; kills: number; deaths: number; gold: number; networth: number; lastHits: number; experience: number; heroDamage: number; towerDamage: number }[]
   mapPlays?: MapPlays | null
   evidence?: PlayerEvidence | null
   /** позиция 1–5 (0 — неизвестно) */

@@ -221,8 +221,14 @@ disables all of it.
 - **A lane is the first ~10 minutes, and only a parsed replay can say how it
   ended.** `impactPhases[0]` («Начало · 0–10 мин», shared helper
   `server/gc/impact-phases.mjs`, used by both the API and the backtest) gives
-  last hits, XP and gold for that window; the lane goes to whoever wins the
-  majority of those three measurements. Whole-match numbers are still shown, but
+  last hits, XP and gold for that window. Profile and match use the same five
+  outcomes: stomp / win / draw / loss / stomp loss. Initial groups come from
+  alive movement at 1–5 minutes (lane heatmap fallback); uncertain membership
+  or an incomplete ten-minute window gives no verdict. The resource edge is
+  65% earned gold + 35% XP, each relative to the mean of both lane groups:
+  below 10% is a draw, from 10% a win, from 30% a stomp only if both gold and
+  XP lead by at least 10%. Supports share their lane result. Subsequent
+  rotations and jungle income remain part of the initial group’s resources. Whole-match numbers are still shown, but
   inside a collapsed block labelled as *not* a lane result, and a match without
   a parsed replay says plainly «реплей не разобран — чем закончилась именно
   линия, не измерено» instead of inventing a winner from final stats.

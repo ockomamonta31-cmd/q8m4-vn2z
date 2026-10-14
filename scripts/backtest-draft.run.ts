@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { evaluateDraft } from '../src/api/draftStrength'
 import { impactPhases } from '../server/gc/impact-phases.mjs'
+import { startingLanes } from '../server/gc/lane-outcome.mjs'
 import type { Profile } from '../src/api/heroProfile'
 import type { MatchDetails } from '../src/api/types'
 
@@ -31,12 +32,14 @@ function hydrate(match: MatchDetails): MatchDetails['players'] {
   } catch { /* разбора нет */ }
   const radiant = match.players.filter((p) => p.isRadiant)
   const dire = match.players.filter((p) => !p.isRadiant)
+  const lanes = startingLanes(replay)
   return match.players.map((p) => {
     const slot = (p.isRadiant ? 0 : 128) + (p.isRadiant ? radiant : dire).indexOf(p)
     const parsed = replay?.players?.find((x) => Number(x.player_slot) === slot)
     const role = roles[`${p.isRadiant ? 'r' : 'd'}:${p.heroId}`]
     return {
       ...p,
+      startingLane: lanes.get(slot),
       impactPhases: impactPhases(parsed, match.durationSeconds),
       ...(role ? { position: role.position, positionSource: 'stratz' as const, lane: role.lane } : {}),
     }

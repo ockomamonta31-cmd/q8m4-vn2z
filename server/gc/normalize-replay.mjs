@@ -5,6 +5,8 @@
 import { readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { impactPhases as phasesFor } from './impact-phases.mjs'
+import { startingLanes } from './lane-outcome.mjs'
 import { inferReplayPositions } from './infer-replay-positions.mjs'
 import { buildMatchTimeline } from './build-timeline.mjs'
 import { buildMapPlays } from './map-plays.mjs'
@@ -34,29 +36,13 @@ if (!Array.isArray(replay.players) || replay.players.length !== 10) throw new Er
 const detectedPositions = inferReplayPositions(match.players, replay.players)
 const mapPlays = buildMapPlays(replay, match, heroes)
 let purchases = 0, unmapped = 0
-const phasesFor = (parsed) => {
-  const bounds = [[0, 600, 'Начало · 0–10 мин'], [600, 1500, 'Середина · 10–25 мин'], [1500, match.durationSeconds, 'Конец · 25+ мин']]
-  const at = (series, seconds) => {
-    const times = parsed.times ?? []
-    let index = 0
-    while (index + 1 < times.length && times[index + 1] <= seconds) index++
-    return Number(series?.[index]) || 0
-  }
-  const count = (events, from, to) => (events ?? []).filter((event) => Number(event.time) >= from && Number(event.time) < to).length
-  const fields = [['gold_t', 'gold'], ['networth_t', 'networth'], ['lh_t', 'lastHits'], ['xp_t', 'experience'], ['hero_damage_t', 'heroDamage'], ['tower_damage_t', 'towerDamage']]
-  return bounds.filter(([from]) => from < match.durationSeconds).map(([from, rawTo, label]) => {
-    const to = Math.min(rawTo, match.durationSeconds)
-    const values = { label, kills: count(parsed.kills_log, from, to), deaths: count(parsed.deaths_log, from, to) }
-    for (const [series, key] of fields) values[key] = Math.max(0, at(parsed[series], to) - at(parsed[series], from))
-    return values
-  })
-}
+const observedLanes = startingLanes(replay)
 const replayPlayers = match.players.map((p) => {
   const side = match.players.filter((q) => q.isRadiant === p.isRadiant)
   const slot = (p.isRadiant ? 0 : 128) + side.indexOf(p)
   const parsed = replay.players.find((x) => Number(x.player_slot) === slot)
   if (!parsed) throw new Error(`Replay lacks player_slot ${slot}`)
-  const impactPhases = phasesFor(parsed)
+  const impactPhases = phasesFor(parsed, match.durationSeconds)
   const evidence = playerEvidence(replay, slot, p.heroId, heroes)
   p.evidence = evidence
   p.impactPhases = impactPhases
@@ -68,7 +54,7 @@ const replayPlayers = match.players.map((p) => {
     p.purchaseEvents.push({ time: Number(e.time) || 0, itemId }); purchases++
   }
   const role = detectedPositions.get(slot)
-  return { playerSlot: slot, positionVersion: 2, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, evidence, mapPlays: mapPlays?.[slot], ...(role ?? {}) }
+  return { playerSlot: slot, positionVersion: 2, startingLane: observedLanes.get(slot), purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, evidence, mapPlays: mapPlays?.[slot], ...(role ?? {}) }
 })
 const path = join(data, 'matches', `${id}.json`)
 await writeFile(path, JSON.stringify(match))

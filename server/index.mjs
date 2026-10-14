@@ -33,6 +33,7 @@ import { dirname, join, extname, resolve, relative, isAbsolute } from 'node:path
 import { fileURLToPath } from 'node:url'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { inferReplayPositions } from './gc/infer-replay-positions.mjs'
+import { laneOutcome, startingLanes } from './gc/lane-outcome.mjs'
 import { impactPhases } from './gc/impact-phases.mjs'
 import { buildMapPlays } from './gc/map-plays.mjs'
 import { playerEvidence } from './gc/player-evidence.mjs'
@@ -617,6 +618,8 @@ const handlers = {
       const replay = readJson(join(DATA, 'replays', `${m.id}.json`), null)
       const team = m.players.filter(p=>p.isRadiant === me.isRadiant)
       const slot = (me.isRadiant ? 0 : 128) + team.indexOf(me)
+      const observed = startingLanes(replay)
+      const laners = m.players.map(p => { const side=m.players.filter(q=>q.isRadiant===p.isRadiant),s=(p.isRadiant?0:128)+side.indexOf(p);return {...p,startingLane:observed.get(s),impactPhases:replayPhaseStats(m,p)} })
       const plays = buildMapPlays(replay,m,CONSTANTS.heroes)
       return {
         id: m.id,
@@ -639,6 +642,7 @@ const handlers = {
           heroDamage: me.heroDamage,
           towerDamage: me.towerDamage,
           heroHealing: me.heroHealing,
+          laneOutcome: laneOutcome(laners,laners.find(p=>p.steamAccountId===id),m.durationSeconds),
           ...role,
           evidence: playerEvidence(replay, slot, me.heroId, CONSTANTS.heroes),
           mapPlays: plays?.[slot],
@@ -666,6 +670,7 @@ const handlers = {
     ])
     const positions = replayPositions(match)
     const spatialReplay = readJson(join(DATA, 'replays', `${id}.json`), null)
+    const observed = startingLanes(spatialReplay)
     const mapPlays = buildMapPlays(spatialReplay, match, CONSTANTS.heroes)
     const slotByPlayer = new Map()
     for (const radiant of [true, false]) {
@@ -681,12 +686,13 @@ const handlers = {
             ...p,
             ...(parsed ?? {}),
             ...(!parsed?.position && stratz ? stratz : {}),
+            startingLane: observed.get(slotByPlayer.get(p)),
             impactPhases: replayPhaseStats(match, p),
             evidence: playerEvidence(spatialReplay,slotByPlayer.get(p),p.heroId,CONSTANTS.heroes),
             mapPlays: mapPlays?.[slotByPlayer.get(p)],
             name: profiles.get(p.steamAccountId)?.name ?? p.name ?? null,
           }
-        }),
+        }).map((p, _i, players) => ({ ...p, laneOutcome: laneOutcome(players, p, match.durationSeconds) })),
       },
       draft,
     )

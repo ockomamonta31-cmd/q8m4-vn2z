@@ -353,6 +353,13 @@
 .mrow-hero { display: grid; gap: var(--sp-4); min-width: 0; flex: 1; }
 .mrow-hero b { font-size: var(--fs-16); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mrow-hero span { font-size: var(--fs-12); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mrow-hero .mrow-lane { white-space: normal; overflow: visible; }
+.mrow-lane.win, .mrow-lane.stomp { color: var(--radiant-t); }
+.mrow-lane.loss, .mrow-lane.stomp_loss { color: var(--dire-t); }
+.mrow-lane.stomp, .mrow-lane.stomp_loss { font-weight: 600; }
+.lane-method { margin-top: var(--sp-16); }
+.lane-method summary { cursor: pointer; width: fit-content; }
+.lane-method p { max-width: 72ch; margin-top: var(--sp-8); }
 
 .mrow-kda { width: 110px; flex: none; }
 .mrow-kda b { font-size: var(--fs-16); font-weight: 700; }
