@@ -1,9 +1,10 @@
 // Shared model; the match page additionally supplies observed team totals
 // and event statistics when available. Histories use estimated team shares.
 
-import { IMPACT_MODEL_READY, impactModelInfo, personalImpact, type ImpactInput } from './impact'
+import type { ImpactInput } from './impact'
 import { globalModelInfo, predictImpGlobal, type ImpEstimator } from './performance'
 import type { PlayerMatch } from './types'
+import { assessPlayer } from './assessment'
 
 export type ImpactScore = {
   value: number
@@ -23,20 +24,12 @@ export function resolveImpact(
   durationSec: number,
   seasonRank: number | null,
 ): ImpactScore | null {
-  const plays = row.mapPlays
-  if (plays?.version === 1 && plays.score === null) return null
-  if (plays?.version === 1 && plays.score !== null) return {
-    value: plays.score,
-    source: 'replay',
-    note: `Баланс подтверждённых эпизодов: ${plays.good} положительных разменов и объектов, ${plays.bad} отрицательных. Маршруты из реплея каждые ${plays.sampleSeconds} с. Это индекс результатов эпизодов, не обученная оценка правильности решений.`,
-  }
-  const model = IMPACT_MODEL_READY ? personalImpact(row, durationSec, seasonRank) : null
-  if (model !== null) {
-    const info = impactModelInfo()
+  const assessment = assessPlayer(row, durationSec, seasonRank)
+  if (assessment) {
     return {
-      value: model,
+      value: assessment.value,
       source: 'model',
-      note: `Сравнение статистики с нормой героя и роли для похожей длительности.${row.seasonRank > 0 || (seasonRank ?? 0) > 0 ? ' Ранг учтён.' : ' Ранг неизвестен: общая норма роли.'}${row.teamKills === undefined ? ' Участие в боях рассчитано с оценкой убийств команды.' : ''}${info ? ` Обучение: ${info.matches.toLocaleString('ru-RU')} матчей.` : ''}`,
+      note: assessment.note + (row.teamKills === undefined ? ' Убийства команды оценены: данных команды нет.' : ''),
     }
   }
 

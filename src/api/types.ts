@@ -39,6 +39,13 @@ export interface PlayerMatch {
     isVictory: boolean
     /** IMP: −100…+100. Всегда null в своём API (Steam не считает импакты) — колонка использует свою модель */
     imp: number | null
+    evidence?: PlayerEvidence | null
+    mapPlays?: MapPlays | null
+    impactPhases?: MatchPlayer['impactPhases']
+    purchaseEvents?: MatchPlayer['purchaseEvents']
+    stats?: MatchPlayerStats | null
+    teamKills?: number
+    teamDamage?: number
   }
 }
 
@@ -183,9 +190,10 @@ export interface MatchPlayer {
   abilityUpgrades: { ability: number; time: number; level: number }[]
   /** Parsed replay item purchase events; null when no timeline is available. */
   purchaseEvents?: { time: number; itemId: number }[] | null
-  /** Replay-derived phase totals; do not feed these into the impact model. */
+  /** Replay-derived phase totals. */
   impactPhases?: { label: string; kills: number; deaths: number; gold: number; networth: number; lastHits: number; experience: number; heroDamage: number; towerDamage: number }[]
   mapPlays?: MapPlays | null
+  evidence?: PlayerEvidence | null
   /** позиция 1–5 (0 — неизвестно) */
   position: number
   /** replay — своё движение по карте; stratz — их разбор реплея; stats — оценка по экономике */
@@ -199,6 +207,23 @@ export interface MatchPlayer {
   rankFetchedAt?: number | null
   /** rich-stats для модели импакта (всегда null в своём API — Steam не отдаёт события; модель честно считает на base-признаках) */
   stats: MatchPlayerStats | null
+}
+
+export interface PlayerEvidence {
+  version: 1
+  /** t, earned gold, networth, XP, LH, denies, hero damage, healing, tower damage, team gold lead */
+  curve: (number | null)[][]
+  lane: { damage: number | null; damageTaken: number | null; attacks: number | null; spellHits: number | null; activeMinutes: number | null }
+  deaths: { t: number; goldFed: number | null; lostGold: number | null; secondsDead: number | null; killer: string; dieback: boolean }[] | null
+  wards: { t: number; type: string; x: number | null; y: number | null }[] | null
+  uses: { t: number; key: string; target: string }[] | null
+  fights: { t: number; end: number; damage: number; healing: number; deaths: number; kills: number; gold: number | null; firstCast: boolean | null; abilities: Record<string, number> | null; items: Record<string, number> | null }[] | null
+  dewards: number | null
+  stacks: number | null
+  stuns: number | null
+  purchases: { t: number; key: string }[] | null
+  itemUses: Record<string, number> | null
+  runes: { t: number; key: string }[] | null
 }
 
 /** Событийная статистика для «честной» оценки импакта. */

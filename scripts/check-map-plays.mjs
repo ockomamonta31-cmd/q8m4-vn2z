@@ -41,8 +41,10 @@ assert.equal(buildMapPlays({ players: [] }, match, heroes), null)
 assert.equal(buildMapPlays(replay, { ...match, players: match.players.map(p => ({ ...p, heroId: 999 })) }, heroes), null, 'wrong replay is rejected')
 const { outputFiles } = buildSync({ entryPoints: ['src/api/score.ts'], bundle: true, platform: 'node', format: 'esm', write: false })
 const { resolveImpact } = await import('data:text/javascript;base64,' + Buffer.from(outputFiles[0].text).toString('base64'))
-assert.equal(resolveImpact({ mapPlays: p }, 1800, null).source, 'replay', 'match must display the actual episode balance')
-assert.equal(resolveImpact({ mapPlays: { ...p, score: null } }, 1800, null), null, 'do not disguise incomplete map analysis with aggregate fallback')
+const input = {heroId:56,position:1,seasonRank:45,kills:5,deaths:5,assists:4,goldPerMinute:450,experiencePerMinute:500,numLastHits:150,numDenies:5,networth:12000,level:20,heroDamage:15000,towerDamage:1000,heroHealing:0,imp:null,isVictory:false}
+assert.equal(resolveImpact({...input,mapPlays:p},1800,null).source,'model')
+assert.equal(resolveImpact({...input,mapPlays:{...p,score:100}},1800,null).value,resolveImpact({...input,mapPlays:{...p,score:-100}},1800,null).value,'episode balance must not replace general performance')
+assert(resolveImpact({...input,mapPlays:{...p,score:null}},1800,null),'missing movement score must not erase the statistical estimate')
 const livePath = 'server/data/replays/9038997807.json'
 if (existsSync(livePath)) {
   const r = JSON.parse(readFileSync(livePath)), h = JSON.parse(readFileSync('server/data/constants/heroes.json'))

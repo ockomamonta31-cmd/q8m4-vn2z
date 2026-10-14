@@ -35,6 +35,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { inferReplayPositions } from './gc/infer-replay-positions.mjs'
 import { impactPhases } from './gc/impact-phases.mjs'
 import { buildMapPlays } from './gc/map-plays.mjs'
+import { playerEvidence } from './gc/player-evidence.mjs'
 import { buildMatchTimeline } from './gc/build-timeline.mjs'
 import { createRankResolver, rankFields } from './player-ranks.mjs'
 
@@ -613,6 +614,10 @@ const handlers = {
       const me = m.players.find((p) => p.steamAccountId === id)
       if (!me) return null
       const role = replayPositionFor(m, me)
+      const replay = readJson(join(DATA, 'replays', `${m.id}.json`), null)
+      const team = m.players.filter(p=>p.isRadiant === me.isRadiant)
+      const slot = (me.isRadiant ? 0 : 128) + team.indexOf(me)
+      const plays = buildMapPlays(replay,m,CONSTANTS.heroes)
       return {
         id: m.id,
         startDateTime: m.startDateTime,
@@ -635,6 +640,12 @@ const handlers = {
           towerDamage: me.towerDamage,
           heroHealing: me.heroHealing,
           ...role,
+          evidence: playerEvidence(replay, slot, me.heroId, CONSTANTS.heroes),
+          mapPlays: plays?.[slot],
+          impactPhases: replayPhaseStats(m, me),
+          purchaseEvents: me.purchaseEvents,
+          teamKills: team.reduce((n,p)=>n+p.kills,0),
+          teamDamage: team.reduce((n,p)=>n+p.heroDamage,0),
           positionSource: role.positionSource,
           ...rankFields(me, ranks.get(id)),
           isVictory: me.isVictory,
@@ -671,6 +682,7 @@ const handlers = {
             ...(parsed ?? {}),
             ...(!parsed?.position && stratz ? stratz : {}),
             impactPhases: replayPhaseStats(match, p),
+            evidence: playerEvidence(spatialReplay,slotByPlayer.get(p),p.heroId,CONSTANTS.heroes),
             mapPlays: mapPlays?.[slotByPlayer.get(p)],
             name: profiles.get(p.steamAccountId)?.name ?? p.name ?? null,
           }
@@ -876,6 +888,11 @@ export function apiMiddleware(req, res) {
     res.setHeader('Content-Type', 'application/json; charset=utf-8')
     res.setHeader('Cache-Control', 'no-store')
     res.end(JSON.stringify(body))
+  }
+  if (req.method === 'GET' && /^\/api\/matches\/\d+\/coach\/(?:[0-4]|12[89]|13[0-2])$/.test(url.pathname)) {
+    const origin=process.env.REPLAY_INGEST_URL || 'https://stratz-personal.stratz-matchlab.workers.dev'
+    fetch(new URL(url.pathname,origin), {signal:AbortSignal.timeout(90000)}).then(async response=>respond(response.status,await response.json())).catch(()=>respond(502,{error:'ИИ-тренер временно недоступен. Факты реплея показаны ниже.'}))
+    return true
   }
   if (!route) {
     respond(404, { error: 'Неизвестный эндпоинт' })

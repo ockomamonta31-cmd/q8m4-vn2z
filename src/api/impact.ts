@@ -40,7 +40,7 @@ export type ImpactInput = Pick<MatchPlayer,
   'seasonRank' | 'heroId' | 'position' | 'kills' | 'deaths' | 'assists' |
   'goldPerMinute' | 'experiencePerMinute' | 'numLastHits' | 'numDenies' |
   'networth' | 'level' | 'heroDamage' | 'towerDamage' | 'heroHealing'
-> & Partial<Pick<MatchPlayer, 'stats' | 'mapPlays'>> & { teamKills?: number; teamDamage?: number }
+> & Partial<Pick<MatchPlayer, 'stats' | 'mapPlays' | 'evidence' | 'impactPhases' | 'purchaseEvents'>> & { teamKills?: number; teamDamage?: number }
 
 const bucketOf = (rank: number) => Math.max(10, Math.min(80, Math.floor(rank / 10) * 10))
 const sigmoid = (v: number) => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, v))))
@@ -71,7 +71,7 @@ function baselineFor(level: ImpactLevel, p: ImpactInput, rank: number, minutes: 
 interface ImpactContext { level: ImpactLevel; base: number[]; actual: number[]; win: WinModel }
 function impactContext(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactContext | null {
   if (!IMPACT_MODEL_READY || !Number.isFinite(durationSec) || durationSec <= 0) return null
-  const level = p.stats ? model.rich : model.base
+  const level = p.stats || p.evidence ? model.rich : model.base
   const minutes = Math.max(durationSec / 60, 1)
   const rank = p.seasonRank > 0 ? p.seasonRank : seasonRank && seasonRank > 0 ? seasonRank : 0
   const base = baselineFor(level, p, rank, minutes)
@@ -104,7 +104,24 @@ function impactContext(p: ImpactInput, durationSec: number, seasonRank: number |
     smokesBoughtPerMin: rates(s?.itemPurchases.filter((e) => e.itemId === 188).length),
     dustsBoughtPerMin: rates(s?.itemPurchases.filter((e) => e.itemId === 40).length),
   }
-  return { level, base, actual: level.features.map((f) => values[f] ?? 0),
+  if (!s && p.evidence) {
+    const e = p.evidence
+    // Unknown telemetry is imputed to the baseline, never treated as failure.
+    const observed: Record<string, number | null | undefined> = {
+      avgGoldFed: e.deaths?.length ? e.deaths.reduce((n,d)=>n+(d.goldFed??0),0)/e.deaths.length : null,
+      dieBacksPerMin: e.deaths ? rates(e.deaths.filter(d=>d.dieback).length) : null,
+      wardsObsPerMin: e.wards ? rates(e.wards.filter(w=>w.type==='observer').length) : null,
+      wardsSenPerMin: e.wards ? rates(e.wards.filter(w=>w.type==='sentry').length) : null,
+      dewardsPerMin: e.dewards != null ? rates(e.dewards) : null,
+      campStacksPerMin: e.stacks != null ? rates(e.stacks) : null,
+      runesPerMin: e.runes ? rates(e.runes.length) : null,
+      smokesBoughtPerMin: e.purchases ? rates(e.purchases.filter(x=>x.key==='smoke_of_deceit').length) : null,
+      dustsBoughtPerMin: e.purchases ? rates(e.purchases.filter(x=>x.key==='dust').length) : null,
+    }
+    for (const feature of level.features) if (!(feature in observed) && !(feature in values && model.base.features.includes(feature))) observed[feature] = null
+    for (const [key,v] of Object.entries(observed)) values[key] = v == null ? base[level.features.indexOf(key)] ?? 0 : v
+  }
+  return { level, base, actual: level.features.map((f) => values[f] ?? base[level.features.indexOf(f)] ?? 0),
     win: level.positionWins[String(p.position)] ?? level.win }
 }
 

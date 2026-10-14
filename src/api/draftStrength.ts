@@ -15,6 +15,7 @@
 //      выпадает из среднего, а не тянет его нулём.
 
 import type { MatchPlayer } from './types'
+import { laneMechanics } from './laneMechanics'
 import { laneGaps, relativeEdge } from './draft'
 import { AXES, calibrate, heroIndex, laneKitOf, pairSynergy, realizedIndex, roleOf, type Profile } from './heroProfile'
 
@@ -206,7 +207,8 @@ export function evaluateDraft(
       }
       const mateLift = mates.length ? mates.reduce((a, m) => a + m.lift, 0) / mates.length : 0
       return {
-        index: base === null ? null : base * (1 + 2 * mateLift),
+        // Whole-match pair win rates do not measure a lane's spell synergy.
+        index: base,
         coverage: side.length ? known.length / side.length : 0,
         mates,
       }
@@ -249,13 +251,14 @@ export function evaluateDraft(
     // взять её, называть такое равенством было бы враньём. Считаем по
     // округлённому проценту, чтобы подпись и цифра никогда не расходились.
     const p = share === null ? 50 : Math.round(share * 100)
-    const expectedSide: LaneSide = share === null ? 'even' : p >= 52 ? 'radiant' : p <= 48 ? 'dire' : 'even'
+    const expectedSide: LaneSide = share === null ? 'even' : p >= 56 ? 'radiant' : p <= 44 ? 'dire' : 'even'
     const expected = share === null ? null : {
       side: expectedSide,
       text: expectedSide === 'even'
-        ? `по драфту линия равная: ${p}% против ${100 - p}%`
-        : `по драфту линию должна была взять ${SIDE[expectedSide]}: ${p}% против ${100 - p}%`,
+        ? `явного преимущества не найдено: доля индексов ${p}:${100 - p}`
+        : `ориентир по потенциалу — ${SIDE[expectedSide]}: доля индексов ${p}:${100 - p}; это не вероятность победы на линии`,
       lines: [
+        ...(kitOff ? [] : laneMechanics(r,d,name)),
         ...(kitOff ? ['режим Draft: способности задрафчены, поэтому контроль спелов не считаем — только фарм, драка и поддержка'] : []),
         ...pairLines,
         ...spellsOnLane.slice(0, 4),

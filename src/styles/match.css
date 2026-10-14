@@ -765,3 +765,17 @@
   .edik-note h3 { font-size: 24px; }
   .edik-route { width: 100%; max-width: 280px; }
 }
+
+.edik-ai { padding: 28px 0; border-top: 1px solid var(--line); margin-top: 24px; }
+.edik-ai > div > h3 { font: 400 28px/1.25 var(--display); }
+.edik-ai > div > p, .edik-ai > p { max-width: 72ch; line-height: 1.65; margin-top: 12px; color: var(--text-dim); }
+.edik-ai > button { padding: 12px 20px; margin: 20px 0; min-height: 44px; background: var(--gold); color: var(--bg); font-weight: 600; }
+.edik-ai > button:hover { filter: brightness(1.1); }
+.edik-ai > button:disabled { opacity: .55; cursor: default; }
+.edik-ai .edik-note { display: block; max-width: 75ch; }
+.edik-ai .edik-note > p { margin-top: 16px; line-height: 1.7; }
+.edik-references { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; margin-top: 16px; }
+.edik-references a { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
+.edik .analysis-method { margin: 20px 0; }
+.edik .analysis-method p { overflow-wrap: anywhere; }
+.edik button:focus-visible, .edik a:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }

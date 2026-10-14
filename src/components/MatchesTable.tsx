@@ -87,13 +87,7 @@ export default function MatchesTable({
       </div>
 
       <p className="pnote" style={{ marginTop: 'var(--sp-16)' }}>
-        Показано {matches.length} матчей. Импакт считает{' '}
-        {modelInfo
-          ? `модель на ${modelInfo.matches.toLocaleString('ru-RU')} матчах, AUC ${modelInfo.auc.toFixed(2)}`
-          : estimator
-            ? `локальная модель на ${estimator.samples} матчах этого профиля`
-            : 'оценка по линии статов'
-        }. Наведи на строку — покажет LH/DN, XPM и ID матча.
+        Показано {matches.length} матчей. Оценка v5 общая для профиля и матча: герой, роль, медаль, статистика и доступные события реплея. Без разобранного реплея оценка предварительная. 0 — около нормы; +100 не означает идеальную игру.
       </p>
     </>
   )

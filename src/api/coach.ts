@@ -2,6 +2,7 @@ import type { LaneCall } from './draftStrength'
 import type { MapPlay, MatchPlayer } from './types'
 import type { MatchTimeline, RankedTeamfight } from './timeline'
 import { fmtDuration } from './formats'
+import { trainingFacts } from './training'
 
 export interface CoachNote {
   title: string
@@ -45,7 +46,7 @@ function episodeNote(play: MapPlay): CoachNote {
 }
 
 export function reviewLane(player: MatchPlayer, lane: LaneCall | null, timeline: MatchTimeline | null): CoachNote[] {
-  const notes: CoachNote[] = []
+  const notes: CoachNote[] = trainingFacts(player, 600).filter(n=>n.section === 'lane')
   const early = earlyPhase(player)
   if (!early) return [{ title: 'Начало игры ещё не измерено', status: 'info', fact: 'В данных нет первых десяти минут этого игрока.', advice: 'После разбора реплея здесь появятся фарм, опыт и эпизоды. Финальные показатели не заменяют результат линии.' }]
   if (lane) {
@@ -79,6 +80,10 @@ export function reviewFight(player: MatchPlayer, fight: RankedTeamfight, timelin
     fact: `${line.kills} убийств, ${line.deaths} смертей, ${line.damage.toLocaleString('ru-RU')} урона, ${line.healing.toLocaleString('ru-RU')} лечения; изменение золота ${line.gold >= 0 ? '+' : ''}${line.gold}.`,
     advice: line.deaths === 0 && line.damage === 0 && line.kills === 0 && line.healing === 0 ? 'Участие уроном или лечением не зафиксировано. Проверь, был ли ты на другой цели; это ещё не означает, что следовало прийти.' : 'Оцени порядок действий, а не только объём урона: успел ли ты реализовать свою задачу до смерти или отхода?' })
   const deaths = timeline.kills.filter(k => k.t >= fight.t && k.t <= fight.end && k.victimHeroId === player.heroId)
+  const measured = player.evidence?.fights?.find(f=>Math.abs(f.t-fight.t)<5)
+  if(measured) notes.push({title:'Способности и предметы в этом бою',status:'info',t:fight.t,
+    fact:`Способности: ${Object.entries(measured.abilities??{}).map(([k,v])=>`${k} ×${v}`).join(', ')||'не записаны'}. Предметы: ${Object.entries(measured.items??{}).map(([k,v])=>`${k} ×${v}`).join(', ')||'не записаны'}.`,
+    advice:'Сравни применение с задачей героя. Неиспользованная способность — повод проверить дальность, ману и готовность; журнал применений не доказывает, что её можно было нажать.'})
   const first = timeline.kills.find(k => k.t >= fight.t && k.t <= fight.end)
   if (first && first.victimHeroId === player.heroId) notes.push({ title: 'Ты погиб первым в этом бою', status: 'review', t: first.t,
     fact: `Первая зафиксированная смерть — твоя, на ${fmtDuration(first.t)}.`,
@@ -91,10 +96,11 @@ export function reviewFight(player: MatchPlayer, fight: RankedTeamfight, timelin
   return notes
 }
 
-export function reviewMatch(player: MatchPlayer): CoachNote[] {
+export function reviewMatch(player: MatchPlayer, duration = 2500, opponents: MatchPlayer[] = []): CoachNote[] {
   const plays = player.mapPlays
-  if (!plays) return [{ title: 'Маршруты ещё не разобраны', status: 'info', fact: 'В этом матче нет сохранённых эпизодов движения игрока.', advice: 'Когда появится пространственный разбор реплея, Эдик сможет сопоставить подходы, размены и объекты.' }]
+  const training = trainingFacts(player,duration,opponents).filter(n=>n.section!=='lane')
+  if (!plays) return [...training, { title: 'Маршруты ещё не разобраны', status: 'info', fact: 'В этом матче нет сохранённых эпизодов движения игрока.', advice: 'Когда появится пространственный разбор реплея, Эдик сможет сопоставить подходы, размены и объекты.' }]
   const negative = plays.episodes.filter(e => e.verdict < 0).slice(0, 3)
   const positive = plays.episodes.filter(e => e.verdict > 0).sort((a, b) => Number(b.kind === 'objective') - Number(a.kind === 'objective')).slice(0, 2)
-  return [{ title: 'В каких условиях ты играл', status: 'info', fact: `К 15:00 перевес команды ${plays.teamGoldAt15 >= 0 ? '+' : ''}${plays.teamGoldAt15.toLocaleString('ru-RU')} золота. Разобрано ${Math.round(plays.coverage * 100)}% координатных отсчётов.`, advice: 'Отставание команды — контекст для решений. Оно не делает каждый риск ошибкой, а итог матча не перечёркивает полезные действия.' }, ...negative.map(episodeNote), ...positive.map(episodeNote)]
+  return [{ title: 'В каких условиях ты играл', status: 'info', fact: `К 15:00 перевес команды ${plays.teamGoldAt15 >= 0 ? '+' : ''}${plays.teamGoldAt15.toLocaleString('ru-RU')} золота. Разобрано ${Math.round(plays.coverage * 100)}% координатных отсчётов.`, advice: 'Отставание команды — контекст для решений. Оно не делает каждый риск ошибкой, а итог матча не перечёркивает полезные действия.' }, ...training, ...negative.map(episodeNote), ...positive.map(episodeNote)]
 }

@@ -82,7 +82,7 @@ const DB = {
   },
   async batch(statements) { return Promise.all(statements.map(s => s.run())) },
 }
-put('match:12345', { ...raw, players: raw.players.map((p, i) => ({ ...p, steamAccountId: i === 0 ? 1 : 0, abilityUpgrades: [] })) })
+put('match:12345', { ...raw, players: raw.players.map((p, i) => ({ ...p, steamAccountId: i === 0 ? 1 : 0, kills:2,heroDamage:123,abilityUpgrades: [] })) })
 put('replay-data:v1:12345', {})
 put('history:1', { rows: [{ id: 12345, seq: 1 }], total: 1 })
 for (let id = 1; id <= 10; id++) put('profile:' + id, { name: 'p' + id, avatar: null })
@@ -108,6 +108,13 @@ try {
   const history = await (await request('/api/player/1/matches')).json()
   assert.equal(history[0].player.seasonRank, 45)
   assert.equal(history[0].player.rankScope, 'current')
+  const evidence={version:1,curve:[[0,0,600,0,0,0,0,0,0,0]],lane:{damage:null,damageTaken:null,attacks:null,spellHits:null,activeMinutes:null},deaths:[],wards:[],uses:[],fights:[],purchases:[],runes:[],dewards:0,stacks:0,stuns:0,itemUses:{}}
+  assert.equal((await request('/api/internal/replay/12345',{method:'POST',headers,body:JSON.stringify({players:[{playerSlot:0,position:1,positionSource:'replay',positionVersion:2,evidence}]})})).status,200)
+  const enrichedMatch=await (await request('/api/matches/12345')).json()
+  const enrichedHistory=await (await request('/api/player/1/matches')).json()
+  assert.deepEqual(enrichedHistory[0].player.evidence,enrichedMatch.players[0].evidence,'Worker history must preserve replay evidence')
+  assert.equal(enrichedHistory[0].player.position,enrichedMatch.players[0].position)
+  assert(Number.isFinite(enrichedHistory[0].player.teamKills),'history must return real team totals')
 } finally { globalThis.fetch = originalFetch }
 console.log('PASS Worker: match/profile/history ranks, recovered IDs, ingest authentication and validation')
 

@@ -56,7 +56,7 @@ function TeamTable({ side, board, heroMap, itemMap, durationSec }: {
 
       <div className="thead">
         <span>Игрок</span>
-        <span>{side.players.every(p => p.mapPlays) ? 'Баланс эпизодов' : 'Стат. импакт'}</span>
+        <span>Оценка игры</span>
         <span>K / D / A</span>
         <span>Нетворс</span>
         <span>GPM / XPM</span>
@@ -194,7 +194,7 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec, best }:
               <Icon.External size={14} />
             </a>
           </div>
-          {!p.mapPlays && p.__score?.source === 'model' && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
+          {p.__score?.source === 'model' && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
           <BuildTimeline upgrades={p.abilityUpgrades} heroId={p.heroId} />
           <PurchaseTimeline events={p.purchaseEvents} itemMap={itemMap} />
         </div>

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import type { ItemInfo, MatchPlayer } from '../../api/types'
 import { itemImageUrl } from '../../api'
-import { personalImpactBreakdown, type ImpactBreakdown } from '../../api/impact'
+import { assessPlayer } from '../../api/assessment'
 import { signed, type ImpactScore } from '../../api/score'
 import { rankName, rankDescription } from '../../api/formats'
 
@@ -132,14 +132,8 @@ export function PurchaseTimeline({ events, itemMap }: { events: MatchPlayer['pur
 }
 
 export function ImpactPanel({ player, durationSec, score }: { player: MatchPlayer; durationSec: number; score: ImpactScore }) {
-  const details = personalImpactBreakdown(player, durationSec, null)
-  const groups = [...new Set(details?.factors.map((factor) => factor.section) ?? [])]
+  const assessment = assessPlayer(player, durationSec, null)
   const minutes = durationSec / 60
-  const format = (factor: ImpactBreakdown['factors'][number], value: number) => {
-    if (factor.unit === 'share') return `${(value * 100).toLocaleString('ru-RU', { maximumFractionDigits: 1 })}%`
-    const total = factor.unit === 'rate' && !factor.label.endsWith('/мин')
-    return (total ? value * minutes : value).toLocaleString('ru-RU', { maximumFractionDigits: 1 })
-  }
   const phases = player.impactPhases ?? []
   const columns = ['K / D', 'LH', 'XP', 'Нетворс', 'Урон героям', 'Башням', 'Золото']
 
@@ -149,25 +143,10 @@ export function ImpactPanel({ player, durationSec, score }: { player: MatchPlaye
         <b>Почему {signed(score.value)}</b>
         <span className="dim" title={rankDescription(player.rankSource, player.rankScope, player.rankFetchedAt)}>норма для {minutes.toLocaleString('ru-RU', { maximumFractionDigits: 1 })} мин · роль и герой учтены · {player.seasonRank > 0 ? `${rankName(player.seasonRank)}${player.rankScope === 'current' ? ' сейчас' : ''}` : 'ранг неизвестен — общая норма роли'}</span>
       </div>
-      <p className="dim t12">Оценка доступной статистики. {player.stats ? 'События поддержки учтены.' : 'Данных о вардах и сейвах нет.'} Перемещения и камбэк команды в оценку не входят.</p>
-      <div className="impd">
-        {groups.map((group) => {
-          const factors = details?.factors.filter((factor) => factor.section === group) ?? []
-          if (!factors.length) return null
-          const groupScore = factors.reduce((sum, factor) => sum + factor.contribution, 0)
-          return (
-            <div key={group}>
-              <div className="det-r"><b>{group}</b><span className={groupScore >= 0 ? 'pos' : 'neg'}>{signed(groupScore)}</span></div>
-              {factors.map((factor) => (
-                <div className="det-r" key={factor.label}>
-                  <span>{factor.label} <span className="dim t12">факт {format(factor, factor.actual)} · обычно {format(factor, factor.baseline)}</span></span>
-                  <b className={factor.contribution >= 0 ? 'pos' : 'neg'}>{signed(factor.contribution)}</b>
-                </div>
-              ))}
-            </div>
-          )
-        })}
-      </div>
+      <p className="dim t12">{assessment?.note}</p>
+      {assessment?.factors.map(f=><div className="det-r" key={f.label}><span>{f.label}<span className="dim t12"> · {f.detail}</span></span><b>{signed(f.contribution)}</b></div>)}
+      <p className="dim t12">Не измерено: {assessment?.missing.join('; ')}.</p>
+
 
       {phases.length > 0 && (
         <div className="impd" style={{ marginTop: 'var(--sp-16)' }}>

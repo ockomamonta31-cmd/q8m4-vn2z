@@ -3,8 +3,10 @@ import heroes from '../server/data/constants/heroes.json'
 import items from '../server/data/constants/items.json'
 import { createRankResolver, rankFields, validRank } from '../server/player-ranks.mjs'
 import { validMapPlays } from '../server/gc/map-plays.mjs'
+import { validEvidence } from '../server/gc/player-evidence.mjs'
+import { coachResponse } from './coach'
 
-interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; AUTH_SECRET?: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string; GITHUB_DISPATCH_TOKEN?: string; GITHUB_REPO?: string; REPLAY_MATCHES_PER_RUN?: string }
+interface Env { DB: D1Database; AI?: Ai; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; AUTH_SECRET?: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string; GITHUB_DISPATCH_TOKEN?: string; GITHUB_REPO?: string; REPLAY_MATCHES_PER_RUN?: string }
 const PRIVATE_ID = 0xffffffff
 const modes: Record<number, string> = { 1:'ALL_PICK',2:'CAPTAINS_MODE',3:'RANDOM_DRAFT',4:'SINGLE_DRAFT',5:'ALL_RANDOM',11:'MID_ONLY',12:'LEAST_PICKED',13:'LIMITED_HEROES',16:'CAPTAINS_DRAFT',17:'BALANCED_DRAFT',18:'ABILITY_DRAFT',19:'EVENT',20:'ARDM',21:'ONE_VS_ONE_MID',22:'ALL_DRAFT',23:'TURBO',24:'MUTATION',25:'COACHES_CHALLENGE' }
 const lobbies: Record<number, string> = { 0:'PUBLIC_MATCH',1:'PRACTICE',7:'RANKED',8:'MID_ONE',9:'COMPETITIVE' }
@@ -195,7 +197,8 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
       const fights=timeline?.teamfights??[]
       const enriched=!timeline||fights.length===0||Array.isArray(fights[0]?.lines)
       const spatial=entries.length===10&&entries.every((x:any)=>x.mapPlays?.version===1)
-      if(positioned&&enriched&&spatial) done.add(id)
+      const coached=entries.length===10&&entries.every((x:any)=>x.evidence?.version===1)
+      if(positioned&&enriched&&spatial&&coached) done.add(id)
     }
   }
   return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))
@@ -358,15 +361,16 @@ export default {
       if(raw.length>1_000_000) return json({error:'Payload too large'},413)
       let data:any; try { data=JSON.parse(raw) } catch { return json({error:'Invalid JSON'},400) }
       if(!Array.isArray(data.players) || data.players.length>10) return json({error:'Expected player timeline array'},400)
-      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];mapPlays?:any;position?:number;positionSource?:'replay'|'stats';lane?:'safelane'|'mid'|'offlane';positionVersion?:number}>= {}
+      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];mapPlays?:any;evidence?:any;position?:number;positionSource?:'replay'|'stats';lane?:'safelane'|'mid'|'offlane';positionVersion?:number}>= {}
       for(const row of data.players) {
         const slot=Number(row.playerSlot)
         if(!Number.isInteger(slot)||slot<0||slot>255) return json({error:'Invalid player slot'},400)
         const purchases=Array.isArray(row.purchaseEvents)?row.purchaseEvents:[], upgrades=Array.isArray(row.abilityUpgrades)?row.abilityUpgrades:[]
         const position=Number(row.position)
+        if(!validEvidence(row.evidence)) return json({error:'Invalid player evidence'},400)
         if(!validMapPlays(row.mapPlays)) return json({error:'Invalid map plays'},400)
         const impactPhases=Array.isArray(row.impactPhases)?row.impactPhases.slice(0,3).filter((x:any)=>x&&typeof x.label==='string').map((x:any)=>Object.fromEntries(['label','kills','deaths','gold','networth','lastHits','experience','heroDamage','towerDamage'].map(k=>[k,k==='label'?x[k]:Math.max(0,Math.trunc(Number(x[k])||0))]))):undefined
-        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,mapPlays:row.mapPlays??undefined,positionVersion:Math.max(0,Math.trunc(Number(row.positionVersion)||0)),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats',...(row.positionSource==='replay'&&(row.lane==='safelane'||row.lane==='mid'||row.lane==='offlane')?{lane:row.lane}:{})}:{})}
+        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,evidence:row.evidence??undefined,mapPlays:row.mapPlays??undefined,positionVersion:Math.max(0,Math.trunc(Number(row.positionVersion)||0)),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats',...(row.positionSource==='replay'&&(row.lane==='safelane'||row.lane==='mid'||row.lane==='offlane')?{lane:row.lane}:{})}:{})}
       }
       await save(env,`replay-data:v1:${id}`,bySlot)
       // Global charts (advantage curve, event feed) ride along when the parser
@@ -388,6 +392,14 @@ export default {
       if(request.method!=='GET') return json({error:'Method not allowed'},405)
       return json(await match(env,Number(replayMatch[1])))
     }
+    const coach=p.match(/^\/api\/matches\/(\d+)\/coach\/(0|1|2|3|4|128|129|130|131|132)$/)
+    if(coach) {
+      if(request.method!=='GET') return json({error:'Method not allowed'},405)
+      const id=Number(coach[1]),x=await rankedMatch(env,await match(env,id)), replay=await replayData(env,id)
+      const order={r:0,d:0}
+      const players=x.players.map((p:any)=>{const slot=p.isRadiant?order.r++:128+order.d++,parsed=replay?.[String(slot)];return {...p,position:parsed?.position??p.position,lane:parsed?.lane,evidence:parsed?.evidence,mapPlays:parsed?.mapPlays,impactPhases:parsed?.impactPhases}})
+      return coachResponse(env,{...x,players},Number(coach[2]))
+    }
     if(request.method!=='GET') return json({error:'Method not allowed'},405)
     if(p==='/api/health') return json({ok:true,steamKey:Boolean(env.STEAM_WEB_API_KEY)})
     if(p==='/api/constants/heroes') return json(heroes)
@@ -395,13 +407,13 @@ export default {
     let m=p.match(/^\/api\/profile\/(\d+)$/)
     if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h,rs]=await Promise.all([profiles(env,[id]),history(env,id),ranks(env,[id])]); const info=ps.get(id), rank=rs.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:rank?.tier??null,rankSource:rank?.source??null,rankScope:rank?.scope??null,rankFetchedAt:rank?.fetchedAt??null,rankIsCore:null}) }
     m=p.match(/^\/api\/player\/(\d+)\/matches$/)
-    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take),rank=(await ranks(env,[id])).get(id);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),role=(await replayData(env,x.id))?.[String(slot)];return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:role?.position??0,positionSource:role?.positionSource,...rankFields(me,rank),isVictory:me.isVictory,imp:null}}}))) }
+    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take),rank=(await ranks(env,[id])).get(id);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),role=(await replayData(env,x.id))?.[String(slot)];return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,position:role?.position??0,positionSource:role?.positionSource,lane:role?.lane,evidence:role?.evidence,mapPlays:role?.mapPlays,impactPhases:role?.impactPhases,purchaseEvents:role?.purchaseEvents,teamKills:team.reduce((n:number,p:any)=>n+p.kills,0),teamDamage:team.reduce((n:number,p:any)=>n+p.heroDamage,0),...rankFields(me,rank),isVictory:me.isVictory,imp:null}}}))) }
     m=p.match(/^\/api\/matches\/(\d+)$/)
     if(m) {
       const id=Number(m[1]),x=await rankedMatch(env,await match(env,id))
       const [ps,replay,draft]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id),matchDraft(env,id)])
       const purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0}
-      const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??p.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases,mapPlays:parsed?.mapPlays}})
+      const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??p.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases,evidence:parsed?.evidence,mapPlays:parsed?.mapPlays}})
       return json(withDraft({...x,players},draft))
     }
     m=p.match(/^\/api\/matches\/(\d+)\/timeline$/)

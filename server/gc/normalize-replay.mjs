@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { inferReplayPositions } from './infer-replay-positions.mjs'
 import { buildMatchTimeline } from './build-timeline.mjs'
 import { buildMapPlays } from './map-plays.mjs'
+import { playerEvidence } from './player-evidence.mjs'
 
 const [id] = process.argv.slice(2)
 if (!/^\d+$/.test(id ?? '')) {
@@ -56,6 +57,8 @@ const replayPlayers = match.players.map((p) => {
   const parsed = replay.players.find((x) => Number(x.player_slot) === slot)
   if (!parsed) throw new Error(`Replay lacks player_slot ${slot}`)
   const impactPhases = phasesFor(parsed)
+  const evidence = playerEvidence(replay, slot, p.heroId, heroes)
+  p.evidence = evidence
   p.impactPhases = impactPhases
   p.purchaseEvents = []
   for (const e of parsed.purchase_log ?? []) {
@@ -65,7 +68,7 @@ const replayPlayers = match.players.map((p) => {
     p.purchaseEvents.push({ time: Number(e.time) || 0, itemId }); purchases++
   }
   const role = detectedPositions.get(slot)
-  return { playerSlot: slot, positionVersion: 2, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, mapPlays: mapPlays?.[slot], ...(role ?? {}) }
+  return { playerSlot: slot, positionVersion: 2, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, evidence, mapPlays: mapPlays?.[slot], ...(role ?? {}) }
 })
 const path = join(data, 'matches', `${id}.json`)
 await writeFile(path, JSON.stringify(match))
