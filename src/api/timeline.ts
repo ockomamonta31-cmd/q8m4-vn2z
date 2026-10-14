@@ -109,30 +109,63 @@ export interface RankedTeamfight extends Teamfight {
   /** radiantGold − direGold; сходится со строками игроков, в отличие от swing */
   fightGold: number
   /** сдвиг карты вокруг драки — шире самой возни и включает последствия */
-  mapSwing: number
-  /** вес сортировки: сначала куш драки, без строк — сдвиг карты, без него — масштаб */
+  mapSwing: number | null
+  /** Explainable relative state-change heuristic; not a win probability. */
   weight: number
+  beforeGold: number | null
+  afterGold: number | null
+  reasons: string[]
+  keyCandidate: boolean
 }
 
-/**
- * Драки по важности. Берём золото, которое стороны унесли именно из возни: оно
- * сходится со строками игроков. Сдвиг карты (swing) считается по окну шире драки
- * и включает башни, крипов и добивания после, поэтому у него бывает обратный знак
- * — как поддержка он полезен, по нему ранжировать нельзя.
- */
+/** Rank measured state changes; a fight which closes an established lead is labelled separately. */
 export function rankTeamfights(timeline: MatchTimeline | null): RankedTeamfight[] {
   const fights = timeline?.teamfights ?? []
+  const series = timeline?.series ?? []
+  const at = (t: number) => series.filter(p => p.t <= t).at(-1)?.gold ?? null
   return fights.map((fight): RankedTeamfight => {
     const lines = fight.lines ?? []
     const radiantGold = lines.filter((l) => l.slot < 128).reduce((sum, l) => sum + l.gold, 0)
     const direGold = lines.filter((l) => l.slot >= 128).reduce((sum, l) => sum + l.gold, 0)
     const fightGold = radiantGold - direGold
     const winner: RankedTeamfight['winner'] = fight.radiantKills === fight.direKills ? 'even' : fight.radiantKills > fight.direKills ? 'radiant' : 'dire'
-    const weight = lines.length
-      ? Math.abs(fightGold)
-      : fight.swing == null
-        ? fight.deaths * 1000 + (fight.buybacks ?? 0) * 500
-        : Math.abs(fight.swing)
-    return { ...fight, radiantGold, direGold, fightGold, mapSwing: fight.swing ?? 0, winner, weight }
-  }).sort((a, b) => b.weight - a.weight)
+    const beforeGold = at(fight.t)
+    const after = series.find(p => p.t >= (Math.floor(fight.end / 60) + 1) * 60 && p.t <= fight.end + 120)
+    const afterGold = after?.gold ?? null
+    // A truncated end-of-match series cannot measure a post-fight gold change.
+    const mapSwing = series.length && !after ? null : fight.swing ?? (beforeGold !== null && afterGold !== null ? afterGold - beforeGold : null)
+    // ponytail: explainable heuristic, not a calibrated causal model of fight importance.
+    const economy = 6000 + fight.t / 60 * 2000
+    const next = Math.min(...fights.filter(f => f.t > fight.end).map(f => f.t), Infinity)
+    const until = Math.min(fight.end + 90, next)
+    const side = winner === 'even' ? null : winner === 'radiant'
+    const objects = side === null ? [] : (timeline?.structures ?? []).filter(o => o.t >= fight.end && o.t < until && o.radiant === side && o.kind !== 'fort')
+    const roshans = side === null ? [] : (timeline?.roshans ?? []).filter(o => o.t >= fight.end && o.t < until && o.radiant === side)
+    const later = series.filter(p => p.t >= fight.end + 60 && p.t <= fight.end + 360 && p.t < next)
+    const reversal = beforeGold !== null && Math.abs(beforeGold) >= 1000 && later.length >= 3
+      && later.at(-1)!.t - later[0].t >= 120
+      && later.every(p => Math.sign(p.gold) === -Math.sign(beforeGold) && Math.abs(p.gold) >= 500)
+    const meaningfulSwing = mapSwing !== null && Math.abs(mapSwing) >= Math.max(1500, Math.abs(beforeGold ?? 0) * .25)
+    const margin = Math.abs(fight.radiantKills - fight.direKills)
+    const preceding = series.filter(p => p.t >= fight.t - 300 && p.t <= fight.t)
+    const winnerSign = winner === 'radiant' ? 1 : winner === 'dire' ? -1 : 0
+    const establishedLead = preceding.length >= 3 && preceding.at(-1)!.t - preceding[0].t >= 120
+      && preceding.every(p => Math.sign(p.gold) === winnerSign && Math.abs(p.gold) >= economy * .12)
+    const reasons: string[] = []
+    if (establishedLead) reasons.push('Победитель боя уже минимум две минуты держал большой отрыв. Этот бой укрепил существующее преимущество; переломом его не считаем.')
+    if (reversal) reasons.push('После драки сменился лидер по золоту; новый перевес держался минимум две минуты до следующей драки.')
+    if (mapSwing !== null) reasons.push(`Изменение перевеса Radiant за окно драки и следующую минуту: ${mapSwing >= 0 ? '+' : '−'}${Math.abs(mapSwing).toLocaleString('ru-RU')} золота.`)
+    if (objects.length || roshans.length) reasons.push(`В следующие 90 секунд до новой драки ${winner === 'radiant' ? 'Radiant' : 'Dire'} забрали: башни — ${objects.filter(o => o.kind === 'tower').length}, казармы — ${objects.filter(o => o.kind === 'barracks').length}, Рошан — ${roshans.length}. Это последовательность событий, причинная связь не доказана.`)
+    if (mapSwing === null) reasons.push('После боя нет достаточной выборки золота; изменение перевеса не измерено.')
+    const objectWeight = Math.min(6, objects.reduce((n, o) => n + (o.kind === 'barracks' ? 2 : 1), 0) + roshans.length * 2)
+    const weight = (Math.abs(mapSwing ?? 0) / economy * 100 + Math.abs(fightGold) / economy * 35
+      + margin / Math.max(3, fight.deaths) * 3 + objectWeight) * (establishedLead ? .35 : 1) + (reversal ? 10 : 0)
+    const keyCandidate = !establishedLead && (reversal || meaningfulSwing && (margin >= 2 || objectWeight >= 1))
+    return { ...fight, radiantGold, direGold, fightGold, mapSwing, winner, weight, beforeGold, afterGold, reasons, keyCandidate }
+  }).sort((a, b) => b.weight - a.weight || a.t - b.t)
+}
+
+/** No automatic winner: the top row needs evidence of a meaningful state change. */
+export function keyTeamfight(timeline: MatchTimeline | null) {
+  return rankTeamfights(timeline).find(f => f.keyCandidate) ?? null
 }

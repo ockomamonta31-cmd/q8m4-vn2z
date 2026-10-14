@@ -23,10 +23,11 @@ import DraftPower from '../components/match/DraftPower'
 import { useDraftRating } from '../components/match/useDraftRating'
 import TimelinePanel from '../components/match/Timeline'
 import Teamfights from '../components/match/Teamfights'
+import Edik from '../components/match/Edik'
 import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Charts'
 
-type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft' | 'builds'
-const TABS: TabId[] = ['overview', 'roster', 'charts', 'timeline', 'draft', 'builds']
+type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft' | 'builds' | 'edik'
+const TABS: TabId[] = ['overview', 'roster', 'charts', 'timeline', 'draft', 'builds', 'edik']
 const NO_PLAYERS: MatchPlayer[] = []
 
 export default function MatchPage() {
@@ -131,6 +132,7 @@ export default function MatchPage() {
   const hasBuilds = allPlayers.some((p) => p.abilityUpgrades.length > 0)
   const tabs = [
     { id: 'overview' as const, label: 'Обзор' },
+    { id: 'edik' as const, label: 'Эдик' },
     { id: 'roster' as const, label: 'Игроки' },
     { id: 'charts' as const, label: 'Графики', disabled: !timeline, hint: timeline ? undefined : 'Реплей ещё не разобран — кривой преимущества нет' },
     { id: 'timeline' as const, label: 'Таймлайн', disabled: !hasEvents, hint: hasEvents ? undefined : 'Событий реплея нет' },
@@ -154,6 +156,7 @@ export default function MatchPage() {
       {tab === 'overview' && (
         <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
           <Insights items={insights} />
+          <div className="edik-entry"><div><h2>Разобрать свою игру с Эдиком</h2><p>Выбери игрока и эпизод: линия, конкретный файт или действия за весь матч.</p></div><button type="button" className="btn" onClick={() => setTab('edik')}>Открыть разбор</button></div>
 
           <div className="sec">
             {timeline && <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />}
@@ -254,15 +257,17 @@ export default function MatchPage() {
 
       {tab === 'draft' && hasDraft && (
         <div role="tabpanel" id="panel-draft" aria-labelledby="tab-draft">
-          <Draft heroMap={heroMap} match={match} />
+          <DraftPower rating={rating} heroMap={heroMap} />
           <div className="sec">
             <DraftReview players={allPlayers} heroMap={heroMap} rating={rating} />
           </div>
           <div className="sec">
-            <DraftPower rating={rating} heroMap={heroMap} />
+            <details className="analysis-method"><summary>История пиков и банов</summary><Draft heroMap={heroMap} match={match} /></details>
           </div>
         </div>
       )}
+
+      {tab === 'edik' && <div role="tabpanel" id="panel-edik" aria-labelledby="tab-edik"><Edik key={match.id} match={match} timeline={timeline} rating={rating} heroMap={heroMap} meSlot={meSlot} initialFight={params.has('fight') && Number.isInteger(Number(params.get('fight'))) ? Number(params.get('fight')) : null} /></div>}
 
       {tab === 'builds' && (
         <div role="tabpanel" id="panel-builds" aria-labelledby="tab-builds">

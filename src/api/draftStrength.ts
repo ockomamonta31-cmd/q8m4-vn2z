@@ -90,9 +90,9 @@ export type DraftRating = {
 
 /** Коридор карты: наша лёгкая линия — это их сложная. */
 const LANES: { key: string; label: string; note: string; radiant: string; dire: string }[] = [
-  { key: 'safelane', label: 'Линия керри', note: 'наш керри и его саппорт против их оффлейнера', radiant: 'safelane', dire: 'offlane' },
+  { key: 'safelane', label: 'Нижняя линия', note: 'Лёгкая Radiant против сложной Dire', radiant: 'safelane', dire: 'offlane' },
   { key: 'mid', label: 'Мид', note: 'мидер против мидера', radiant: 'mid', dire: 'mid' },
-  { key: 'offlane', label: 'Линия оффлейна', note: 'наш оффлейнер против их керри', radiant: 'offlane', dire: 'safelane' },
+  { key: 'offlane', label: 'Верхняя линия', note: 'Сложная Radiant против лёгкой Dire', radiant: 'offlane', dire: 'safelane' },
 ]
 
 /** Роль → коридор: 1 и 5 стоят на лёгкой, 2 в миде, 3 и 4 на сложной. */
@@ -121,7 +121,7 @@ const LANE_AXES = ['farm', 'fight', 'support', 'control', 'burst']
  * расчёт контроля по файлам Valve описывает не этот матч. Такую линию считаем
  * только по фарму, драке и поддержке и говорим об этом прямо.
  */
-const KIT_MODES_OFF = new Set(['ALL_DRAFT', 'ABILITY_DRAFT'])
+const KIT_MODES_OFF = new Set(['ABILITY_DRAFT'])
 
 /**
  * Чем линия выигрывается до фарма. Числа не максимальные: контроль и урон
@@ -158,7 +158,7 @@ export function evaluateDraft(
     return {
       player: p,
       role: roles.get(p)!,
-      roleFromReplay: p.position >= 1 && p.position <= 5,
+      roleFromReplay: p.position >= 1 && p.position <= 5 && p.positionSource !== 'stats',
       index: idx ? idx.total : null,
       axes: idx?.axes ?? {},
       games: idx?.games ?? 0,
@@ -168,7 +168,7 @@ export function evaluateDraft(
   })
 
   // --- линии
-  const realLanes = players.some((p) => p.lane)
+  const realLanes = players.every((p) => p.lane && p.positionSource !== 'stats')
   const lanes: LaneCall[] = LANES.map((lane) => {
     const r = radiant.filter((p) => laneKey(p, roles.get(p)!) === lane.radiant)
     const d = dire.filter((p) => laneKey(p, roles.get(p)!) === lane.dire)

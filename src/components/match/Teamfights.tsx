@@ -4,7 +4,7 @@
 
 import { useState } from 'react'
 import type { HeroInfo, MatchDetails } from '../../api/types'
-import { rankTeamfights } from '../../api/timeline'
+import { keyTeamfight, rankTeamfights } from '../../api/timeline'
 import { heroImageUrl } from '../../api/heroes'
 import { fmtDuration } from '../../api/formats'
 import { fmtK } from '../../pages/match-model'
@@ -45,6 +45,7 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
   limit?: number
 }) {
   const all = rankTeamfights(timeline)
+  const key = keyTeamfight(timeline)
   const fights = limit ? all.slice(0, limit) : all
   const [open, setOpen] = useState<number | null>(fights[0]?.index ?? null)
   const who = useSlotMap(match)
@@ -56,10 +57,10 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
     <section className="chart">
       <div className="chart-h">
         <div>
-          <div className="chart-t">Тимфайты по важности</div>
+          <div className="chart-t">Какие бои изменили игру</div>
           <div className="chart-s">
             {hasLines
-              ? 'Отсортированы по золоту, которое стороны унесли из возни, — оно сходится со строками игроков. Нажми на драку — покажет вклад каждого.'
+              ? 'Смотрим изменение перевеса относительно стадии игры, смену лидера и объекты после боя. Открой бой, чтобы увидеть основание и строки игроков.'
               : `${fights.length} драк от трёх смертей. Пересобери реплей, чтобы добавить вклад каждого игрока.`}
           </div>
         </div>
@@ -69,10 +70,12 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
         </div>
       </div>
 
+      {!key && <p className="analysis-caption">По записанным событиям убедительный перелом не найден. Первая строка не объявляется решающей.</p>}
+
       <ol className="flist">
         {fights.map((fight, rank) => {
           const expanded = open === fight.index
-          const decisive = rank === 0
+          const decisive = fight.index === key?.index
           const side = fight.winner === 'even' ? null : fight.winner === 'radiant' ? 'r' : 'd'
           return (
             <li key={fight.index} className={`frow${expanded ? ' open' : ''}${decisive ? ' top' : ''}`}>
@@ -101,20 +104,22 @@ export default function Teamfights({ timeline, heroMap, match, meSlot, limit }: 
                     ? `${fight.fightGold >= 0 ? '+' : '−'}${fmtK(Math.abs(fight.fightGold))}`
                     : `${fight.deaths} ×`}
                   <small>{fight.lines?.length ? 'золота в драке' : 'масштаб'}</small>
-                  {fight.swing != null && Math.abs(fight.mapSwing - fight.fightGold) > 900 && (
+                  {fight.mapSwing != null && Math.abs(fight.mapSwing - fight.fightGold) > 900 && (
                     <em title="Сдвиг преимущества на карте за окно вокруг драки — сюда попадают башни, крипы и добивания после возни, поэтому цифра может отличаться и даже иметь обратный знак">
                       карта {fight.mapSwing >= 0 ? '+' : '−'}{fmtK(Math.abs(fight.mapSwing))}
                     </em>
                   )}
                 </span>
-                {decisive && <span className="badge">решающая</span>}
+                <span className="badge">{decisive ? 'ключевой по данным' : ''}</span>
                 <Icon.Chevron size={12} className="c-go" />
               </button>
 
+              {expanded && <div className="fight-reasons"><h3>Почему этот бой здесь</h3><ul>{fight.reasons.map(r => <li key={r}>{r}</li>)}</ul><a href={`?tab=edik&fight=${fight.index}`}>Разобрать бой с Эдиком</a></div>}
               {expanded && fight.lines?.length ? (
                 <div className="fcols">
                   {[true, false].map((radiant) => (
                     <div className="fcol" key={radiant ? 'r' : 'd'}>
+                      <h4 className={radiant ? 'pos' : 'neg'}>{radiant ? 'Radiant' : 'Dire'}</h4>
                       <div className="fcolh">
                         <span />
                         <span />

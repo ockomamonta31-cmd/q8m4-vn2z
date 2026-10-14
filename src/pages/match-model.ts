@@ -4,7 +4,7 @@
 
 import type { MatchDetails, MatchPlayer } from '../api/types'
 import type { MatchTimeline } from '../api/timeline'
-import { peakAdvantage, rankTeamfights, turningPoint } from '../api/timeline'
+import { keyTeamfight, peakAdvantage, rankTeamfights, turningPoint } from '../api/timeline'
 import { fmtDuration } from '../api/formats'
 import type { ImpactScore } from '../api/score'
 
@@ -162,18 +162,15 @@ export function buildInsights(match: MatchDetails, board: MatchBoard, timeline: 
   }
 
   const ranked = rankTeamfights(timeline)
-  const decisive = ranked[0]
-  if (decisive && Math.abs(decisive.weight) >= 800) {
-    const gained = decisive.fightGold >= 0
-    const side = decisive.fightGold === 0 ? null : gained ? board.radiant : board.dire
+  const decisive = keyTeamfight(timeline)
+  if (decisive) {
+    const side = decisive.winner === 'even' ? null : decisive.winner === 'radiant' ? board.radiant : board.dire
     out.push({
       tone: side ? (side.radiant ? 'r' : 'd') : '',
       icon: 'flame',
-      label: 'Решающий тимфайт',
+      label: 'Ключевой бой по данным',
       value: fmtDuration(decisive.t),
-      note: side
-        ? `${side.label} выиграл драку ${decisive.radiantKills}:${decisive.direKills} и унёс ${fmtK(Math.abs(decisive.fightGold))} золота против ${fmtK(Math.abs(gained ? decisive.direGold : decisive.radiantGold))} у соперника.`
-        : `Размен ${decisive.radiantKills}:${decisive.direKills} при ${decisive.deaths} смертях — обе стороны остались примерно при своём.`,
+      note: `${side ? side.label + ' впереди по убийствам. ' : ''}${decisive.reasons.join(' ')}`,
     })
   }
 
@@ -208,7 +205,7 @@ export function buildInsights(match: MatchDetails, board: MatchBoard, timeline: 
       icon: 'target',
       label: 'Счёт по дракам',
       value: `${wonR} : ${wonD}`,
-      note: `${ranked.length} потасовок от трёх смертей. ${lead ? `${lead.label} выиграл больше.` : 'Поровну — решающей стала одна, см. выше.'} Всего байбеков в них: ${ranked.reduce((sum, f) => sum + (f.buybacks ?? 0), 0)}.`,
+      note: `${ranked.length} боёв от трёх смертей. ${lead ? `${lead.label} выиграл больше по счёту убийств.` : 'Поровну по счёту убийств.'} Всего байбеков: ${ranked.reduce((sum, f) => sum + (f.buybacks ?? 0), 0)}.`,
     })
   }
 

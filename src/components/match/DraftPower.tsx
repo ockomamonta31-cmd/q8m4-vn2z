@@ -16,7 +16,7 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
       <section className="dp">
         <header className="chart-h">
           <div>
-            <div className="chart-t">Предсказание и реальность</div>
+            <h2 className="chart-t">Что давал драфт</h2>
             <div className="chart-s">Профиль героев из нашей базы ещё не подгрузился — предсказания нет</div>
           </div>
         </header>
@@ -30,55 +30,13 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
 
   return (
     <section className="dp">
-      <header className="chart-h">
-        <div>
-          <div className="chart-t">Предсказание и реальность</div>
-          <div className="chart-s">
-            По драфту: {call.text === 'равные' ? 'драфты равны' : call.text} · вероятность победы Radiant {pct(rating.prediction.probability)}
-            {rating.prediction.games >= 20 ? ` (такие оценки в нашей базе выигрывали ${pct(rating.prediction.probability)} на ${rating.prediction.games} матчах)` : ''}
-          </div>
-        </div>
-      </header>
-
-      <div className="dp-predict">
-        <div className="dp-total">
-          <span className="dp-total-r" style={{ width: `${rating.total.radiant}%` }} />
-          <span className="dp-total-d" style={{ width: `${rating.total.dire}%` }} />
-          <b className="dp-total-l">{rating.total.radiant.toFixed(0)}</b>
-          <b className="dp-total-rr">{rating.total.dire.toFixed(0)}</b>
-        </div>
-        <div className="dp-facts">
-          <div className="dp-fact">
-            <span className="dim t12">предсказание</span>
-            <b>{rating.total.radiant.toFixed(0)} : {rating.total.dire.toFixed(0)}</b>
-            <span className="dim t12">{pct(rating.prediction.probability)} — Radiant</span>
-          </div>
-          <div className="dp-fact">
-            <span className="dim t12">итог матча</span>
-            <b>{winner ? (winner === 'radiant' ? 'Radiant' : 'Dire') : '—'}</b>
-            <span className={hit === null ? 'dim t12' : hit ? 'pos t12' : 'neg t12'}>
-              {hit === null ? 'исхода нет' : hit ? 'предсказание сработало' : 'предсказание не сработало'}
-            </span>
-          </div>
-          {rating.model && (
-            <div className="dp-fact">
-              <span className="dim t12">модель на нашей базе</span>
-              <b>{pct(rating.model.matchAccuracy)}</b>
-              <span className="dim t12">угаданных матчей из {rating.model.matches}</span>
-            </div>
-          )}
-        </div>
+      <header className="chart-h"><div><h2 className="chart-t">Что давал драфт</h2><p className="chart-s">Сила составов по профилям героев. Исполнение в матче смотрим отдельно.</p></div></header>
+      <div className="draft-verdict">
+        <div><h3>{call.text === 'равные' ? 'Явного фаворита нет' : call.text === 'перевес Radiant' ? 'Профили дают перевес Radiant' : 'Профили дают перевес Dire'}</h3><p>{call.text === 'равные' ? 'Разница между составами мала. Исход матча нельзя объяснить одним драфтом.' : 'Модель сравнивает средние показатели этих героев на своих ролях. Это ориентир для разбора, а не гарантия победы.'}</p></div>
+        <div className="draft-outcome"><span>Фактический победитель</span><b className={winner === 'radiant' ? 'pos' : winner === 'dire' ? 'neg' : 'dim'}>{winner === 'radiant' ? 'Radiant' : winner === 'dire' ? 'Dire' : 'Неизвестен'}</b><span>{call.text === 'равные' ? 'При равных драфтах прогноз победителя не заявлен' : hit === null ? 'Итог ещё не записан' : hit ? 'Фаворит по профилям победил' : 'Победил соперник фаворита'}</span></div>
       </div>
-
-      <div className="dr-block">
-        <h4 className="dr-h">Что пошло не так</h4>
-        <ul className="dp-why">
-          {rating.why.map((w, i) => (
-            <li key={i} className={w.tone}>{w.text}</li>
-          ))}
-        </ul>
-      </div>
-
+      <div className="draft-scale"><div><b className="pos">Radiant {rating.total.radiant.toFixed(0)}</b><span>Доля модельной силы · сумма 100</span><b className="neg">Dire {rating.total.dire.toFixed(0)}</b></div><div className="draft-scale-track"><i style={{width: rating.total.radiant + '%'}} /></div></div>
+      <p className="analysis-caption">Ниже — сравнение свойств составов. В числах сначала Radiant, затем Dire.</p>
       <ul className="dp-axes">
         {rating.axes.map((a) => (
           <li key={a.key} className="dp-axis">
@@ -93,14 +51,14 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
                 : <i className="d" style={{ width: `${Math.min(50, ((0.5 - a.share) / 0.12) * 50)}%`, right: '50%' }} />}
             </span>
             <span className="dp-n">
-              <b className={a.share > 0.5 ? 'pos' : a.share < 0.5 ? 'neg' : 'dim'}>{(a.share * 100).toFixed(0)}:{((1 - a.share) * 100).toFixed(0)}</b>
+              <b className={Math.abs(a.share - .5) < .02 ? 'dim' : a.share > .5 ? 'pos' : 'neg'}>{Math.abs(a.share - .5) < .02 ? 'Примерно равно' : a.share > .5 ? 'Перевес Radiant' : 'Перевес Dire'}</b>
               <span className="dim t12">{a.rValue.toFixed(2)}× против {a.dValue.toFixed(2)}× · {a.games.toLocaleString('ru-RU')} матчей</span>
             </span>
           </li>
         ))}
       </ul>
 
-      <div className="dp-teams">
+      <details className="analysis-method"><summary>Средний профиль каждого героя и показатели в этом матче</summary><p>1,00× — средний показатель героя на этой роли. Итоговые показатели матча описывают исполнение и условия игры, а не ошибку в выборе героя.</p><div className="dp-teams">
         {([true, false] as const).map((radiant) => (
           <div key={radiant ? 'r' : 'd'} className={`dp-side ${radiant ? 'r' : 'd'}`}>
             <h4 className={`dr-team ${radiant ? 'r' : 'd'}`}>{radiant ? 'Radiant' : 'Dire'}</h4>
@@ -133,7 +91,9 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
           </div>
         ))}
       </div>
-
+      </details>
+      <details className="analysis-method"><summary>Данные модели и ограничения</summary>
+      <p>Оценки такого диапазона в нашей базе выигрывали за Radiant в {pct(rating.prediction.probability)} случаев ({rating.prediction.games} матчей). Это наблюдение в базе, не проверенная вероятность этого матча. {rating.model && <>Совпадение с победителем в базе: {pct(rating.model.matchAccuracy)} на {rating.model.matches} матчах.</>}</p>
       <p className="pnote">
         Как считаем: берём средние статы Valve по каждому герою на его роли из
         нашей базы ({rating.corpus} матчей) и делим на среднее по этой роли — 1.00
@@ -144,7 +104,7 @@ export default function DraftPower({ rating, heroMap }: { rating: DraftRating | 
         что герой обещает в среднем и что он выдал здесь, в одних и тех же
         единицах; из разницы и сложен разбор расхождения.
         Это разбор драфта, а не ставка.
-      </p>
+      </p></details>
     </section>
   )
 }

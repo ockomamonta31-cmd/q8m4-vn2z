@@ -5,10 +5,11 @@ import { useEffect, useState } from 'react'
 import type { HeroInfo, MatchPlayer } from '../../api/types'
 import { heroImageUrl } from '../../api/heroes'
 import { ATTR_RU, ATTACK_RU, TAG_ORDER, TAG_RU, getHeroMeta, type HeroMeta } from '../../api/heroMeta'
-import { draftNotes, teamProfile, type TeamProfile } from '../../api/draft'
+import { teamProfile, type TeamProfile } from '../../api/draft'
 import { roleModelStats } from '../../api/roleModel'
 import { type DraftRating, type LaneCall } from '../../api/draftStrength'
 import RoleIcon from '../RoleIcon'
+import { earlyPhase, laneMeasurements } from '../../api/coach'
 
 function Side({ team }: { team: TeamProfile }) {
   return (
@@ -38,104 +39,42 @@ function Side({ team }: { team: TeamProfile }) {
   )
 }
 
-function Hero({ player, heroMap, side }: { player: MatchPlayer | null; heroMap: Map<number, HeroInfo>; side: 'r' | 'd' }) {
-  if (!player) return <span className={`lm-hero ${side} empty`}>на этой линии с той стороны никого</span>
+function Hero({ player, heroMap, side }: { player: MatchPlayer; heroMap: Map<number, HeroInfo>; side: 'r' | 'd' }) {
   const h = heroMap.get(player.heroId)
-  const early = laning(player)
-  return (
-    <span className={`lm-hero ${side}`}>
-      <RoleIcon position={player.position} source={player.positionSource} lane={player.lane} size={24} />
-      <span className={`port xs ${side}`}>{h && <img src={heroImageUrl(h.shortName)} alt="" loading="lazy" />}</span>
-      <span className="lm-hero-txt">
-        <b>{h?.name ?? `герой #${player.heroId}`}</b>
-        {early
-          ? <span className="dim t12">{early.lastHits} LH · {early.experience.toLocaleString('ru-RU')} XP · {early.gold.toLocaleString('ru-RU')} золота за 10 мин</span>
-          : <span className="dim t12">{player.goldPerMinute} GPM · {player.experiencePerMinute} XPM · {player.numLastHits} LH — за весь матч</span>}
-      </span>
-    </span>
-  )
-}
-
-const fmt = (n: number) => `${n > 0 ? '+' : ''}${n.toFixed(0)}`
-
-/** Первые 10 минут героя из нашего разбора реплея — это и есть линия. */
-const laning = (p: MatchPlayer) => p.impactPhases?.find((x) => x.label.startsWith('Начало')) ?? null
-
-function Call({ kind, title, call, missing }: { kind: 'expected' | 'result'; title: string; call: LaneCall['expected'] | LaneCall['laning']; missing: string }) {
-  return (
-    <div className={`lm-call ${kind}`}>
-      <span className="lm-call-k">{title}</span>
-      {call ? (
-        <>
-          <b className="lm-call-t">{call.text}</b>
-          {!!call.lines.length && (
-            <ul className="lm-call-l">
-              {call.lines.map((l) => <li key={l}>{l}</li>)}
-            </ul>
-          )}
-        </>
-      ) : <b className="lm-call-t dim">{missing}</b>}
-    </div>
-  )
+  const early = earlyPhase(player)
+  return <div className={`lane-player ${side}`}>
+    {h && <img src={heroImageUrl(h.shortName)} alt="" width="48" height="28" loading="lazy" />}
+    <div><b>{h?.name ?? `Герой #${player.heroId}`}</b><span>{player.name ?? 'Скрытый профиль'}</span></div>
+    <RoleIcon position={player.position} source={player.positionSource} lane={player.lane} size={24} />
+    {early && <span className="lane-player-farm">Добивания: {early.lastHits} · смерти: {early.deaths}</span>}
+  </div>
 }
 
 function Lane({ lane, heroMap }: { lane: LaneCall; heroMap: Map<number, HeroInfo> }) {
-  return (
-    <section className="lm">
-      <header className="lm-h">
-        <span className="lm-t-wrap">
-          <h5 className="lm-t">{lane.label}</h5>
-          <span className="dim t12">{lane.note}</span>
-        </span>
-        <span className={`lm-badge ${lane.expected?.side === 'even' ? 'dim' : lane.hit === null ? 'dim' : lane.hit ? 'pos' : 'neg'}`}>
-          {lane.expected?.side === 'even'
-            ? 'драфт обещал равную'
-            : lane.hit === null
-              ? 'проверить нечем'
-              : lane.hit ? 'совпало' : 'не совпало'}
-        </span>
-      </header>
-
-      <div className="lm-calls">
-        <Call kind="expected" title="Что обещал драфт" call={lane.expected} missing="предсказать нечего: профилей этих героев на этих ролях мало" />
-        <Call kind="result" title="Первые 10 минут — сама линия" call={lane.laning} missing="реплей не разобран: чем закончилась именно линия, не измерено" />
-      </div>
-
-      {!!lane.full && (
-        <details className="lm-full">
-          <summary>Вся игра этой парой — это не итог линии, а что стороны вынесли из матча</summary>
-          <ul className="lm-call-l">
-            {lane.full.lines.map((l) => <li key={l}>{l}</li>)}
-          </ul>
-        </details>
-      )}
-
-      <ul className="lm-pairs">
-        {lane.pairs.map((pair, i) => {
-          const r = pair.radiant
-          const d = pair.dire
-          const rl = r ? laning(r) : null
-          const dl = d ? laning(d) : null
-          const gap = rl && dl ? { lh: rl.lastHits - dl.lastHits, xp: rl.experience - dl.experience, gold: rl.gold - dl.gold } : null
-          return (
-            <li className="lm-pair" key={`${i}-${r?.heroId ?? 'x'}-${d?.heroId ?? 'x'}`}>
-              <Hero player={r} heroMap={heroMap} side="r" />
-              <span className="lm-vs">против</span>
-              <Hero player={d} heroMap={heroMap} side="d" />
-              <span className="lm-d">
-                {gap
-                  ? <>
-                    <b className={gap.lh > 0 ? 'pos' : gap.lh < 0 ? 'neg' : 'dim'}>{fmt(gap.lh)} LH</b>
-                    <span className="dim t12">{fmt(gap.xp)} XP · {fmt(gap.gold)} золота за 10 мин</span>
-                  </>
-                  : <span className="dim t12">{r && d ? 'первых 10 минут нет в разборе' : 'прямого соперника нет'}</span>}
-              </span>
-            </li>
-          )
-        })}
-      </ul>
-    </section>
-  )
+  const totals = laneMeasurements(lane)
+  const result = lane.laning?.side
+  const expected = lane.expected?.side
+  const metrics = totals ? [
+    { label: 'Золото', r: totals.r.gold, d: totals.d.gold },
+    { label: 'Опыт', r: totals.r.experience, d: totals.d.experience },
+    { label: 'Добивания', r: totals.r.lastHits, d: totals.d.lastHits },
+    { label: 'Смерти игроков группы', r: totals.r.deaths, d: totals.d.deaths },
+  ] : []
+  return <section className="lane-review">
+    <header className="lane-heading"><div><h3>{lane.label}</h3><p>{lane.note}</p></div>
+      <div className={`lane-result ${result === 'radiant' ? 'pos' : result === 'dire' ? 'neg' : 'dim'}`}><b>{!result ? 'Итог не измерен' : result === 'even' ? 'Примерно равная' : `Перевес ${result === 'radiant' ? 'Radiant' : 'Dire'}`}</b><span>Первые 10 минут</span></div>
+    </header>
+    <div className="lane-lineups">{([true, false] as const).map(radiant => <div key={String(radiant)}>
+      <h4 className={radiant ? 'pos' : 'neg'}>{radiant ? 'Radiant' : 'Dire'}</h4>
+      {(radiant ? lane.radiant : lane.dire).map(p => <Hero key={p.heroId} player={p} heroMap={heroMap} side={radiant ? 'r' : 'd'} />)}
+    </div>)}</div>
+    {totals ? <table className="lane-metrics"><caption>Что получили игроки этой линии к 10:00</caption><thead><tr><th scope="col">Показатель</th><th scope="col">Radiant</th><th scope="col">Dire</th></tr></thead><tbody>
+      {metrics.map(m => <tr key={m.label}><th scope="row">{m.label}</th><td>{m.r.toLocaleString('ru-RU')}</td><td>{m.d.toLocaleString('ru-RU')}</td></tr>)}
+    </tbody></table> : <p className="analysis-empty">Первые десять минут не разобраны. По итоговым показателям матча нельзя восстановить результат линии.</p>}
+    <div className="lane-expectation"><b>Ожидание по составу</b><span>{!lane.expected ? 'Профилей героев недостаточно.' : expected === 'even' ? 'Без заметного перевеса.' : `Перевес ${expected === 'radiant' ? 'Radiant' : 'Dire'} по профилям героев.`}</span>{lane.share !== null && <span>Доля модельной силы: Radiant {Math.round(lane.share * 100)} / Dire {100 - Math.round(lane.share * 100)}. Это не шанс победы.</span>}</div>
+    <details className="analysis-method"><summary>Почему ожидали такой результат</summary><ul>{lane.expected?.lines.map(l => <li key={l}>{l}</li>) ?? <li>Нет достаточной выборки.</li>}</ul></details>
+    {lane.full && <details className="analysis-method"><summary>Показатели этой группы за весь матч</summary><ul>{lane.full.lines.map(l => <li key={l}>{l}</li>)}</ul></details>}
+  </section>
 }
 
 export default function DraftReview({ players, heroMap, rating }: {
@@ -146,17 +85,15 @@ export default function DraftReview({ players, heroMap, rating }: {
   const [meta, setMeta] = useState<Map<number, HeroMeta> | null>(null)
   useEffect(() => { let alive = true; getHeroMeta().then((m) => alive && setMeta(m)); return () => { alive = false } }, [])
 
-  if (!meta || meta.size === 0) return null
-
-  const radiant = teamProfile(players, true, meta)
-  const dire = teamProfile(players, false, meta)
+  const radiant = meta ? teamProfile(players, true, meta) : null
+  const dire = meta ? teamProfile(players, false, meta) : null
 
   return (
     <section className="dr-review">
       <header className="chart-h">
         <div>
-          <div className="chart-t">Линии</div>
-          <div className="chart-s">Мид против мида, керри с саппортом против чужого оффлейна — как это устроено на карте</div>
+          <h2 className="chart-t">Как закончились линии</h2>
+          <div className="chart-s">Состав каждой стороны и измеренный результат к 10:00. Верх и низ названы по карте.</div>
         </div>
       </header>
 
@@ -165,31 +102,16 @@ export default function DraftReview({ players, heroMap, rating }: {
           {rating.lanes.map((lane) => <Lane key={lane.key} lane={lane} heroMap={heroMap} />)}
         </div>
       ) : (
-        <p className="pnote">Профиль героев ещё не подгрузился — линии без предсказания.</p>
+        <p className="analysis-empty">Профили героев загружаются. Измеренные показатели появятся вместе с группами линий.</p>
       )}
+      {rating && !rating.realLanes && <p className="analysis-caption">Распределение по линиям оценено по ролям; фактические линии в данных не указаны.</p>}
+      <details className="analysis-method"><summary>Как определяем итог и насколько надёжен прогноз</summary>
+        <p>Итог — большинство из трёх замеров: золото, опыт, добивания. Разница до 3% считается равной. Это показатели игроков группы за первые десять минут, включая выходы с линии; место каждой смерти здесь не утверждается.</p>
+        <p>Прогноз основан на профилях героев на их ролях, база — {rating?.corpus ?? '…'} матчей. Проверено линий с измеренным началом: {rating?.model?.lanesMeasured ?? 0}. Малая выборка не позволяет считать прогноз надёжным.</p>
+        {rating && !rating.realLanes && <p>Распределение по линиям оценено по ролям. Модель ролей обучена на {roleModelStats.teams.toLocaleString('ru-RU')} командах; точность на её проверочной выборке {Math.round(roleModelStats.accuracy * 100)}%.</p>}
+      </details>
 
-      <p className="pnote">
-        Линия — это первые ~10 минут, и измеряются они только в разобранном реплее:
-        справа то, что стороны нафармили и получили за этот отрезок (добивания, опыт,
-        золото), а линию отдаём той стороне, за которой большинство замеров. Слева —
-        что обещал драфт: как эти герои на этих ролях стоят такие линии по нашей базе
-        ({rating ? rating.corpus : '…'} матчей) по осям фарма, драки и поддержки
-        {rating?.kitOff
-          ? '. В Draft-режиме способности задрафчены, поэтому контроль спелов сюда не берём.'
-          : '. Контроль и урон спелов считаются не максимальными уровнями, а теми, до которых этот герой реально доходит к 10-й минуте (по прокачке из наших матчей), — шестисекундный ульт Бейна в линию не попадает, его там просто ещё нет.'}
-        {' '}Числа за весь матч вынесены отдельно и линией не называются.
-        {rating?.model && (rating.model.lanesMeasured >= 50
-          ? ` Предсказание проверено на ${rating.model.lanesMeasured} разобранных линиях — совпало в ${(rating.model.laneAccuracy * 100).toFixed(0)}% случаев.`
-          : ` Проверить предсказание линии пока можно только на ${rating?.model ? rating.model.lanesMeasured : 0} разобранных линиях — это капля, выводом не называем.`)}
-        {rating && (() => {
-          const known = rating.heroes.filter((h) => h.roleFromReplay).length
-          if (known === rating.heroes.length) return ' Роли всех игроков настоящие — из разобранного реплея или разбора матча.'
-          const pct = (x: number) => Math.round(x * 100)
-          return ` У ${rating.heroes.length - known} игроков роль в данных не указана — она оценена по экономике матча; на нашей размеченной базе модель угадывает роль в ${pct(roleModelStats.accuracy)}% случаев, а линию — в ${pct(roleModelStats.laneAccuracy)}% (простой порядок по нетворсу — ${pct(roleModelStats.farmOrderAccuracy)}%).`
-        })()}
-        {rating && !rating.realLanes ? ' То, кто на какой линии стоит, в этом матче тоже оценка: разобранного реплея с движением по карте нет.' : ''}
-      </p>
-
+      {radiant && dire && <details className="analysis-method"><summary>Свойства составов по тегам Valve</summary>
       <div className="dr-block">
         <h4 className="dr-h">Состав по тегам Valve</h4>
         <div className="dr-cols">
@@ -198,21 +120,8 @@ export default function DraftReview({ players, heroMap, rating }: {
         </div>
       </div>
 
-      <div className="dr-block">
-        <h4 className="dr-h">Что следует из состава</h4>
-        <div className="dr-cols">
-          {([radiant, dire] as const).map((t) => {
-            const notes = draftNotes(t, t.radiant ? dire : radiant)
-            return (
-              <ul className={`dr-notes ${t.radiant ? 'r' : 'd'}`} key={t.radiant ? 'r' : 'd'}>
-                {notes.length
-                  ? notes.map((n) => <li key={n}>{n}</li>)
-                  : <li className="dim">Состав без явных перекосов по тегам.</li>}
-              </ul>
-            )
-          })}
-        </div>
-      </div>
+      <p>Теги описывают общие свойства героев. Они не определяют тип нанесённого урона, доступные в этом матче способности или причину поражения.</p>
+      </details>}
     </section>
   )
 }

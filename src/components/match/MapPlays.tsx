@@ -16,7 +16,7 @@ function factsOf(e: MapPlay) {
   if (e.kind === 'objective') return `${(f.damage ?? 0).toLocaleString('ru-RU')} урона по ${towerName(f.target)}. ${f.destroyed ? 'Объект уничтожен в течение 30 с.' : 'Объект остался цел.'}`
   return `Участие в ${f.kills} убийствах подтверждено уроном или добиванием и позицией; своих смертей ${f.deaths}. Рядом перед эпизодом: ${f.allies} союзных героев, включая игрока, и ${f.enemies} вражеских.`
 }
-function Route({ play, heroId }: { play: MapPlay; heroId: number }) {
+export function Route({ play, heroId }: { play: MapPlay; heroId: number }) {
   const segments: string[] = []
   let line = ''
   play.route.forEach((p, i) => {
