@@ -283,14 +283,15 @@ export default {
   /**
    * GitHub не отдаёт этому репозиторию запуски по cron (0 срабатываний,
    * disable/enable не помог), поэтому будильник живёт здесь, на Cloudflare,
-   * и будит GitHub через repository_dispatch. Пустую очередь не будим —
-   * иначе runner тратил бы минуту на npm ci впустую.
+   * и будит GitHub через repository_dispatch. Для одних рангов запускаем
+   * только их сборщик, без установки зависимостей и парсера реплеев.
    */
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     if (!env.GITHUB_DISPATCH_TOKEN || !env.GITHUB_REPO) { console.error('cron: GITHUB_DISPATCH_TOKEN/GITHUB_REPO not set'); return }
     const perRun = Math.max(1, Number(env.REPLAY_MATCHES_PER_RUN) || 5)
     const pending = await pendingMatchIds(env, perRun)
-    if (!pending.length) return
+    const rankPending = await env.DB.prepare("SELECT 1 AS queued FROM cache WHERE key GLOB 'rank-pending:v1:*' LIMIT 1").first()
+    if (!pending.length && !rankPending) return
     const res = await fetch(`https://api.github.com/repos/${env.GITHUB_REPO}/dispatches`, {
       method: 'POST',
       headers: {
@@ -299,7 +300,7 @@ export default {
         'user-agent': 'dota-match-lab-cron',
       },
       // 204 без тела — GitHub просто ставит раннер в очередь
-      body: JSON.stringify({ event_type: 'replay-backfill', client_payload: { limit: perRun, matchIds: pending } }),
+      body: JSON.stringify({ event_type: pending.length ? 'replay-backfill' : 'rank-refresh', client_payload: { limit: perRun, matchIds: pending } }),
     })
     if (res.status !== 204) console.error('cron: repository_dispatch failed', res.status, (await res.text()).slice(0, 300))
   },

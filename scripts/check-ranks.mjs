@@ -64,8 +64,15 @@ const DB = {
     let args = []
     return {
       bind(...values) { args = values; return this },
-      async first() { return db.get(args[0]) ?? null },
-      async all() { return { results: [...db].filter(([key]) => key.startsWith('rank-pending:v1:')).map(([, value]) => value).slice(0, 10) } },
+      async first() {
+        if (sql.startsWith('SELECT 1 AS queued')) return [...db.keys()].some(key => key.startsWith('rank-pending:v1:')) ? { queued: 1 } : null
+        return db.get(args[0]) ?? null
+      },
+      async all() {
+        if (sql.includes('WHERE key IN')) return { results: [...db].filter(([key]) => args.includes(key)).map(([key, value]) => ({ key, ...value })) }
+        const prefix = sql.includes("'history:*'") ? 'history:' : 'rank-pending:v1:'
+        return { results: [...db].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value).slice(0, 10) }
+      },
       async run() {
         if (sql.startsWith('DELETE')) db.delete(args[0])
         else db.set(args[0], { value: args[1], updated_at: args[2] })
@@ -103,3 +110,28 @@ try {
   assert.equal(history[0].player.rankScope, 'current')
 } finally { globalThis.fetch = originalFetch }
 console.log('PASS Worker: match/profile/history ranks, recovered IDs, ingest authentication and validation')
+
+// A rank-only backlog must wake its runner even after all replays are parsed.
+db.clear()
+const dispatches = []
+globalThis.fetch = async (url, options) => {
+  assert.equal(url, 'https://api.github.com/repos/test/repo/dispatches')
+  dispatches.push(JSON.parse(options.body))
+  return new Response(null, { status: 204 })
+}
+const cronEnv = { ...env, GITHUB_DISPATCH_TOKEN: 'test-dispatch-token', GITHUB_REPO: 'test/repo' }
+try {
+  await worker.scheduled({}, cronEnv)
+  assert.equal(dispatches.length, 0, 'empty queues do not start runners')
+  put('rank-pending:v1:1', { key: '1' })
+  await worker.scheduled({}, cronEnv)
+  assert.equal(dispatches.at(-1).event_type, 'rank-refresh', 'rank-only queue starts only rank runner')
+  put('history:1', { rows: [{ id: 12345 }] })
+  await worker.scheduled({}, cronEnv)
+  assert.equal(dispatches.at(-1).event_type, 'replay-backfill', 'both queues wake both workflows')
+  assert.deepEqual(dispatches.at(-1).client_payload.matchIds, [12345])
+  db.delete('rank-pending:v1:1')
+  await worker.scheduled({}, cronEnv)
+  assert.equal(dispatches.at(-1).event_type, 'replay-backfill', 'replay-only queue still runs')
+} finally { globalThis.fetch = originalFetch }
+console.log('PASS cron: empty, rank-only, replay-only and combined queues')

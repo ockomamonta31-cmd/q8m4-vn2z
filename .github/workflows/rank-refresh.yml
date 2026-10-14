@@ -1,7 +1,7 @@
 name: Public player ranks
 on:
   repository_dispatch:
-    types: [replay-backfill]
+    types: [replay-backfill, rank-refresh]
   schedule:
     - cron: '*/10 * * * *'
   workflow_dispatch:
