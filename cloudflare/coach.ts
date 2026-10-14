@@ -23,7 +23,7 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
   })})
   if(context.length>18000) return Response.json({error:'Слишком большой контекст разбора'}, {status:422})
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(context)))).map(v=>v.toString(16).padStart(2,'0')).join('')
-  const key=`coach:glm47:v7:${match.id}:${slot}:${hash}`
+  const key=`coach:glm47:v8:${match.id}:${slot}:${hash}`
   const cached=await env.DB.prepare('SELECT value FROM cache WHERE key=?').bind(key).first<{value:string}>()
   if(cached) return answer(JSON.parse(cached.value))
   if(!env.AI) return Response.json({error:'ИИ-тренер на сервере пока не подключён. Измеренный разбор доступен ниже.'},{status:503})
@@ -47,9 +47,11 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
     const clean=(typeof raw==='string'?raw:JSON.stringify(raw)).replace(/<think>[\s\S]*?<\/think>/g,'').replace(/^```(?:json)?\s*|\s*```$/g,'').trim()
     let parsed
     try { parsed=JSON.parse(clean) } catch { console.warn('coach incomplete JSON',Object.keys(output),clean.slice(-350));throw new Error('Incomplete JSON') }
-    if(typeof parsed.summary!=='string'||parsed.summary.length>2000||!Array.isArray(parsed.priorities)||parsed.priorities.length<1||parsed.priorities.length>8) throw new Error('Invalid coach output')
+    if(typeof parsed.summary!=='string'||parsed.summary.length>2000||!Array.isArray(parsed.priorities)||parsed.priorities.length!==4) throw new Error('Incomplete coaching priorities')
     // The summary has no citations: keep numerical assertions in cited facts.
     if(/\d/.test(parsed.summary)) throw new Error('Uncited numerical summary')
+    if(/перестал умирать|больше не умирал|не умирал после|кажд.{0,15}выход|все.{0,15}драк/i.test(parsed.summary))throw new Error('Unsupported whole-game claim')
+    if(new Set(parsed.priorities.flatMap((p:any)=>p.factIds??[])).size<3)throw new Error('Repeated coaching evidence')
     const priorities=parsed.priorities.map((p:any)=>{
       if(!Array.isArray(p.factIds)||!p.factIds.length||p.factIds.length>3||p.factIds.some((id:any)=>typeof id!=='string'||!facts.some(f=>f.id===id))) throw new Error('Unknown evidence citation')
       for(const k of ['title','explanation','nextGame']) if(typeof p[k]!=='string'||p[k].length>2400) throw new Error('Invalid coach text')
@@ -57,6 +59,8 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
       const factualNumbers=new Set(cited.flatMap((f:any)=>f.fact.match(/\d+(?:[.,:]\d+)*/g)??[]))
       const claims=p.explanation.match(/\d+(?:[.,:]\d+)*/g)??[]
       if(claims.some((n:string)=>!factualNumbers.has(n))||p.explanation.length<100||p.nextGame.length<30) throw new Error('Unverified or generic advice')
+      if(/старайся|улучши|получай больше|получать больше|фарми лучше|чаще участвуй/i.test(p.nextGame)||p.explanation.includes(p.nextGame)||!/проверь|запиши|сравни|отметь|пересмотри|назови|выбери|найди|останови|посчитай/i.test(p.nextGame))throw new Error('Non-specific coaching exercise')
+      if(/сильные игроки.{0,100}(имеют|набирают|умирают|добивают)/i.test(p.explanation))throw new Error('Examples presented as a universal norm')
       if(cited.some((f:any)=>f.section==='lane')) {
         const deaths=player.evidence!.deaths?.filter(d=>d.t>=0&&d.t<600).length
         for(const claim of p.explanation.matchAll(/(\d+)\s+(?:смерт(?:и|ей|ь))/g)) if(Number(claim[1])!==deaths) throw new Error('Incorrect lane death count')
@@ -64,7 +68,7 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
       if(player.position===1 && /без инициац|недостаточн.{0,40}инициац|фокус.{0,20}инициац/i.test(p.explanation+' '+p.nextGame)) throw new Error('Inappropriate carry initiation claim')
       return {title:p.title,explanation:p.explanation,nextGame:p.nextGame,facts:p.factIds.map((id:string)=>facts.find(f=>f.id===id))}
     })
-    const result={model:'GLM 4.7 Flash',version:7,generatedAt:Date.now(),summary:parsed.summary,priorities}
+    const result={model:'GLM 4.7 Flash',version:8,generatedAt:Date.now(),summary:parsed.summary,priorities}
     await env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(key,JSON.stringify(result),Date.now()).run()
     return answer(result)
   } catch(error) {
@@ -76,7 +80,7 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
       ...sections.filter(s=>s!=='lane').map(section=>facts.find(f=>f.section===section&&f.title.includes('предшествовало'))??facts.find(f=>f.section===section&&f.status==='review')??facts.find(f=>f.section===section)),
       facts.find(f=>f.title==='Восстановление после старта')].filter(Boolean)
     if(!chosen.some(f=>f!.section==='lane'))chosen.unshift(facts.find(f=>f.section==='lane'&&f.status==='review')??facts.find(f=>f.section==='lane'))
-    const result={model:'Разбор по подтверждённым событиям',version:7,generatedAt:Date.now(),
+    const result={model:'Разбор по подтверждённым событиям',version:8,generatedAt:Date.now(),
       summary:'Объяснение ИИ не прошло проверку конкретности или фактов. Ниже — измеренные эпизоды и рекомендации правил разбора; их источник указан отдельно.',
       priorities:chosen.filter(Boolean).map(f=>({title:f!.title,explanation:f!.advice,nextGame:f!.title.includes('слабом добивании')?'Пересмотри отмеченную минуту по каждому крипу. Запиши, какие добивания были доступны во время атак по герою. В следующей линии сначала забирай эти добивания и сравни результат.'
         :f!.section==='lane'?'Останови отмеченный эпизод перед первым попаданием контроля. Найди последнюю возможность отойти и проверь, что мог сделать ты и что уже сделал партнёр.'
