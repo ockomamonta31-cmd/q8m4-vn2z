@@ -40,7 +40,7 @@ export type ImpactInput = Pick<MatchPlayer,
   'seasonRank' | 'heroId' | 'position' | 'kills' | 'deaths' | 'assists' |
   'goldPerMinute' | 'experiencePerMinute' | 'numLastHits' | 'numDenies' |
   'networth' | 'level' | 'heroDamage' | 'towerDamage' | 'heroHealing'
-> & Partial<Pick<MatchPlayer, 'stats'>> & { teamKills?: number; teamDamage?: number }
+> & Partial<Pick<MatchPlayer, 'stats' | 'mapPlays'>> & { teamKills?: number; teamDamage?: number }
 
 const bucketOf = (rank: number) => Math.max(10, Math.min(80, Math.floor(rank / 10) * 10))
 const sigmoid = (v: number) => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, v))))

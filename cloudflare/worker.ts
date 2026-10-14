@@ -2,6 +2,7 @@
 import heroes from '../server/data/constants/heroes.json'
 import items from '../server/data/constants/items.json'
 import { createRankResolver, rankFields, validRank } from '../server/player-ranks.mjs'
+import { validMapPlays } from '../server/gc/map-plays.mjs'
 
 interface Env { DB: D1Database; ASSETS: Fetcher; STEAM_WEB_API_KEY: string; AUTH_SECRET?: string; STRATZ_API_TOKEN?: string; REPLAY_INGEST_TOKEN?: string; GITHUB_DISPATCH_TOKEN?: string; GITHUB_REPO?: string; REPLAY_MATCHES_PER_RUN?: string }
 const PRIVATE_ID = 0xffffffff
@@ -193,7 +194,8 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
       const timeline=store.get(`replay-timeline:v1:${id}`)
       const fights=timeline?.teamfights??[]
       const enriched=!timeline||fights.length===0||Array.isArray(fights[0]?.lines)
-      if(positioned&&enriched) done.add(id)
+      const spatial=entries.length===10&&entries.every((x:any)=>x.mapPlays?.version===1)
+      if(positioned&&enriched&&spatial) done.add(id)
     }
   }
   return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))
@@ -356,14 +358,15 @@ export default {
       if(raw.length>1_000_000) return json({error:'Payload too large'},413)
       let data:any; try { data=JSON.parse(raw) } catch { return json({error:'Invalid JSON'},400) }
       if(!Array.isArray(data.players) || data.players.length>10) return json({error:'Expected player timeline array'},400)
-      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];position?:number;positionSource?:'replay'|'stats';lane?:'safelane'|'mid'|'offlane';positionVersion?:number}>= {}
+      const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];mapPlays?:any;position?:number;positionSource?:'replay'|'stats';lane?:'safelane'|'mid'|'offlane';positionVersion?:number}>= {}
       for(const row of data.players) {
         const slot=Number(row.playerSlot)
         if(!Number.isInteger(slot)||slot<0||slot>255) return json({error:'Invalid player slot'},400)
         const purchases=Array.isArray(row.purchaseEvents)?row.purchaseEvents:[], upgrades=Array.isArray(row.abilityUpgrades)?row.abilityUpgrades:[]
         const position=Number(row.position)
+        if(!validMapPlays(row.mapPlays)) return json({error:'Invalid map plays'},400)
         const impactPhases=Array.isArray(row.impactPhases)?row.impactPhases.slice(0,3).filter((x:any)=>x&&typeof x.label==='string').map((x:any)=>Object.fromEntries(['label','kills','deaths','gold','networth','lastHits','experience','heroDamage','towerDamage'].map(k=>[k,k==='label'?x[k]:Math.max(0,Math.trunc(Number(x[k])||0))]))):undefined
-        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,positionVersion:Math.max(0,Math.trunc(Number(row.positionVersion)||0)),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats',...(row.positionSource==='replay'&&(row.lane==='safelane'||row.lane==='mid'||row.lane==='offlane')?{lane:row.lane}:{})}:{})}
+        bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,mapPlays:row.mapPlays??undefined,positionVersion:Math.max(0,Math.trunc(Number(row.positionVersion)||0)),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats',...(row.positionSource==='replay'&&(row.lane==='safelane'||row.lane==='mid'||row.lane==='offlane')?{lane:row.lane}:{})}:{})}
       }
       await save(env,`replay-data:v1:${id}`,bySlot)
       // Global charts (advantage curve, event feed) ride along when the parser
@@ -398,7 +401,7 @@ export default {
       const id=Number(m[1]),x=await rankedMatch(env,await match(env,id))
       const [ps,replay,draft]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id),matchDraft(env,id)])
       const purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0}
-      const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??p.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases}})
+      const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??p.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,impactPhases:parsed?.impactPhases,mapPlays:parsed?.mapPlays}})
       return json(withDraft({...x,players},draft))
     }
     m=p.match(/^\/api\/matches\/(\d+)\/timeline$/)

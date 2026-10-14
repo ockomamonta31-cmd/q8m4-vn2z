@@ -8,7 +8,7 @@ import type { PlayerMatch } from './types'
 export type ImpactScore = {
   value: number
   /** model — наша модель, imp — оценка источника, estimate — предсказание фолбэка */
-  source: 'model' | 'imp' | 'estimate'
+  source: 'replay' | 'model' | 'imp' | 'estimate'
   note: string
 }
 
@@ -23,6 +23,13 @@ export function resolveImpact(
   durationSec: number,
   seasonRank: number | null,
 ): ImpactScore | null {
+  const plays = row.mapPlays
+  if (plays?.version === 1 && plays.score === null) return null
+  if (plays?.version === 1 && plays.score !== null) return {
+    value: plays.score,
+    source: 'replay',
+    note: `Баланс подтверждённых эпизодов: ${plays.good} положительных разменов и объектов, ${plays.bad} отрицательных. Маршруты из реплея каждые ${plays.sampleSeconds} с. Это индекс результатов эпизодов, не обученная оценка правильности решений.`,
+  }
   const model = IMPACT_MODEL_READY ? personalImpact(row, durationSec, seasonRank) : null
   if (model !== null) {
     const info = impactModelInfo()

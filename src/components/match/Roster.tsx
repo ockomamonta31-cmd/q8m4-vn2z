@@ -14,6 +14,7 @@ import { ImpactMeter } from '../Impact'
 import RoleIcon from '../RoleIcon'
 import { Icon } from '../Icons'
 import { BuildTimeline, ImpactPanel, ItemSlot, PurchaseTimeline } from './Build'
+import MapPlaysPanel from './MapPlays'
 
 const number = (n: number) => n.toLocaleString('ru-RU')
 
@@ -49,13 +50,13 @@ function TeamTable({ side, board, heroMap, itemMap, durationSec }: {
         <span className="team-sum">
           <span><b>{side.kills}</b> убийств</span>
           <span><b>{number(side.networth)}</b> нетворс</span>
-          <span>импакт <b className={side.impactTotal >= 0 ? 'pos' : 'neg'}>{signed(side.impactTotal)}</b></span>
+          {side.players.every(p => p.mapPlays) ? <span>эпизоды <b className="pos">{side.players.reduce((s, p) => s + (p.mapPlays?.good ?? 0), 0)} +</b> / <b className="neg">{side.players.reduce((s, p) => s + (p.mapPlays?.bad ?? 0), 0)} −</b></span> : <span>стат. импакт <b className={side.impactTotal >= 0 ? 'pos' : 'neg'}>{signed(side.impactTotal)}</b></span>}
         </span>
       </header>
 
       <div className="thead">
         <span>Игрок</span>
-        <span>Импакт</span>
+        <span>{side.players.every(p => p.mapPlays) ? 'Баланс эпизодов' : 'Стат. импакт'}</span>
         <span>K / D / A</span>
         <span>Нетворс</span>
         <span>GPM / XPM</span>
@@ -192,7 +193,7 @@ function PlayerRow({ p, heroMap, itemMap, maxDamage, isMvp, durationSec, best }:
               <Icon.External size={14} />
             </a>
           </div>
-          {p.__score?.source === 'model' && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
+          {p.mapPlays ? <MapPlaysPanel plays={p.mapPlays} /> : p.__score?.source === 'model' && <ImpactPanel player={p} durationSec={durationSec} score={p.__score} />}
           <BuildTimeline upgrades={p.abilityUpgrades} heroId={p.heroId} />
           <PurchaseTimeline events={p.purchaseEvents} itemMap={itemMap} />
         </div>

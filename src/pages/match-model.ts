@@ -184,7 +184,7 @@ export function buildInsights(match: MatchDetails, board: MatchBoard, timeline: 
       icon: 'crown',
       label: 'MVP матча',
       value: label(player),
-      note: `Импакт ${score.value > 0 ? '+' : ''}${score.value} при ${player.kills}/${player.deaths}/${player.assists} и ${fmtK(player.networth)} нетворта.`,
+      note: `${score.source === 'replay' ? 'Баланс эпизодов' : 'Статистический импакт'} ${score.value > 0 ? '+' : ''}${score.value} при ${player.kills}/${player.deaths}/${player.assists} и ${fmtK(player.networth)} нетворта.`,
     })
   }
 

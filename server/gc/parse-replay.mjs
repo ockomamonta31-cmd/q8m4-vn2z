@@ -5,6 +5,8 @@
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
 
 const [matchId, suppliedCluster, suppliedSalt] = process.argv.slice(2)
 const integer = (x) => /^\d+$/.test(x ?? '') && Number.isSafeInteger(Number(x))
@@ -31,6 +33,25 @@ const outDir = join(root, 'data', 'replays')
 await mkdir(outDir, { recursive: true })
 const tmp = join(outDir, `${matchId}.json.tmp`)
 const out = join(outDir, `${matchId}.json`)
+
+// The /blob endpoint discards full-game coordinates. The same parser inside
+// its existing container can preserve them before aggregation in one pass.
+const run = (command, args) => new Promise((resolve, reject) => {
+  const child = spawn(command, args, { stdio: 'inherit' })
+  child.once('error', reject)
+  child.once('exit', code => code === 0 ? resolve() : reject(new Error(`${command} exited ${code}`)))
+})
+if (process.env.REPLAY_SPATIAL_CONTAINER) {
+  const container = process.env.REPLAY_SPATIAL_CONTAINER
+  const remote = `/tmp/spatial-${matchId}.json`
+  await run('docker', ['exec', container, 'java', '-Xmx4g', '-cp', '/tmp/spatial:/usr/src/parser/target/stats-0.1.0.jar', 'opendota.SpatialReplay', replayUrl, remote])
+  await run('docker', ['cp', `${container}:${remote}`, tmp])
+  const parsed = JSON.parse(await readFile(tmp, 'utf8'))
+  if (parsed.movement?.version !== 1) throw new Error('Spatial parser did not supply trajectories')
+  await rename(tmp, out)
+  console.log(`Spatial replay saved: ${out}`)
+  process.exit(0)
+}
 
 console.log(`Parser fetching Valve replay ${matchId} (cluster ${cluster})...`)
 const parserUrl = new URL('/blob', base)

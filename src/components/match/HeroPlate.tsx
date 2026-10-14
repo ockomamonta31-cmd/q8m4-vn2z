@@ -125,7 +125,7 @@ export default function HeroPlate({ match, board, timeline, heroMap }: {
           </dl>
 
           {leadHero && lead && (
-            <p className="mh-note">Лучший вклад — {leadHero.name}, {signed(lead.score.value)}</p>
+            <p className="mh-note">{lead.score.source === 'replay' ? 'Лучший баланс эпизодов' : 'Лучший стат. импакт'} — {leadHero.name}, {signed(lead.score.value)}</p>
           )}
         </div>
 

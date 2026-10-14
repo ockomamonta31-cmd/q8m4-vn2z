@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { inferReplayPositions } from './infer-replay-positions.mjs'
 import { buildMatchTimeline } from './build-timeline.mjs'
+import { buildMapPlays } from './map-plays.mjs'
 
 const [id] = process.argv.slice(2)
 if (!/^\d+$/.test(id ?? '')) {
@@ -30,6 +31,7 @@ const [match, replay, items, heroes] = await Promise.all([
 const itemIds = new Map(items.flatMap((x) => [[x.shortName, x.id], [x.shortName.replaceAll('_', ''), x.id]]))
 if (!Array.isArray(replay.players) || replay.players.length !== 10) throw new Error(`Replay does not contain the expected 10 player records`)
 const detectedPositions = inferReplayPositions(match.players, replay.players)
+const mapPlays = buildMapPlays(replay, match, heroes)
 let purchases = 0, unmapped = 0
 const phasesFor = (parsed) => {
   const bounds = [[0, 600, 'Начало · 0–10 мин'], [600, 1500, 'Середина · 10–25 мин'], [1500, match.durationSeconds, 'Конец · 25+ мин']]
@@ -63,7 +65,7 @@ const replayPlayers = match.players.map((p) => {
     p.purchaseEvents.push({ time: Number(e.time) || 0, itemId }); purchases++
   }
   const role = detectedPositions.get(slot)
-  return { playerSlot: slot, positionVersion: 2, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, ...(role ?? {}) }
+  return { playerSlot: slot, positionVersion: 2, purchaseEvents: p.purchaseEvents, abilityUpgrades: p.abilityUpgrades, impactPhases, mapPlays: mapPlays?.[slot], ...(role ?? {}) }
 })
 const path = join(data, 'matches', `${id}.json`)
 await writeFile(path, JSON.stringify(match))

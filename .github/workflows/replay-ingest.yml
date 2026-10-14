@@ -35,6 +35,7 @@ jobs:
       REPLAY_SCAN_LIMIT: 40
       REPLAY_MATCH_ID: ${{ inputs.match_id }}
       DOTA_PARSER_URL: http://127.0.0.1:5600
+      REPLAY_SPATIAL_CONTAINER: replay-parser
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -51,4 +52,8 @@ jobs:
           done
           docker logs replay-parser
           exit 1
+      - name: Preserve hero trajectories and combat events
+        run: |
+          docker cp server/gc/SpatialReplay.java replay-parser:/tmp/SpatialReplay.java
+          docker exec replay-parser javac -proc:none -cp /usr/src/parser/target/stats-0.1.0.jar -d /tmp/spatial /tmp/SpatialReplay.java
       - run: npm run replay:github

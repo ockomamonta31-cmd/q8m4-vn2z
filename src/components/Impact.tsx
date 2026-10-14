@@ -17,8 +17,8 @@ export function ImpactMeter({ score, max = 100 }: { score: ImpactScore | null; m
   const width = Math.min(50, (Math.abs(score.value) / max) * 50)
   return (
     <span className="imp">
-      <span className={`imp-v ${positive ? 'pos' : 'neg'}`} title={score.note}>{signed(score.value)}</span>
-      <span className="imp-t" role="img" aria-label={`Импакт ${signed(score.value)} из ${max}`}>
+      <span className={`imp-v ${positive ? 'pos' : 'neg'}`} title={score.note}>{signed(score.value)}<small className="dim t12" style={{ display: 'block' }}>{score.source === 'replay' ? 'эпизоды' : 'стат.'}</small></span>
+      <span className="imp-t" role="img" aria-label={`${score.source === 'replay' ? 'Баланс эпизодов' : 'Статистический импакт'} ${signed(score.value)} из ${max}`}>
         <i className={positive ? 'pos' : 'neg'} style={{ width: `${width}%` }} />
       </span>
     </span>

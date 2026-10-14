@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url'
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { inferReplayPositions } from './gc/infer-replay-positions.mjs'
 import { impactPhases } from './gc/impact-phases.mjs'
+import { buildMapPlays } from './gc/map-plays.mjs'
 import { buildMatchTimeline } from './gc/build-timeline.mjs'
 import { createRankResolver, rankFields } from './player-ranks.mjs'
 
@@ -653,6 +654,8 @@ const handlers = {
       stratzDraft(id),
     ])
     const positions = replayPositions(match)
+    const spatialReplay = readJson(join(DATA, 'replays', `${id}.json`), null)
+    const mapPlays = buildMapPlays(spatialReplay, match, CONSTANTS.heroes)
     const slotByPlayer = new Map()
     for (const radiant of [true, false]) {
       match.players.filter((p) => p.isRadiant === radiant).forEach((p, i) => slotByPlayer.set(p, (radiant ? 0 : 128) + i))
@@ -668,6 +671,7 @@ const handlers = {
             ...(parsed ?? {}),
             ...(!parsed?.position && stratz ? stratz : {}),
             impactPhases: replayPhaseStats(match, p),
+            mapPlays: mapPlays?.[slotByPlayer.get(p)],
             name: profiles.get(p.steamAccountId)?.name ?? p.name ?? null,
           }
         }),

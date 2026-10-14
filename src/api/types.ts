@@ -118,6 +118,34 @@ export interface MatchDraft {
   picks: { heroId: number; radiant: boolean; order: number }[]
 }
 
+export interface MapPlay {
+  t: number
+  end: number
+  kind: 'fight' | 'rotation' | 'objective' | 'pressure'
+  verdict: -1 | 0 | 1
+  teamGold: number
+  moved: number | null
+  facts: { kills?: number; deaths?: number; damage?: number; victims?: number[]; allies?: number; enemies?: number; target?: string; destroyed?: boolean; creeps?: number }
+  route: [number, number, number, number][]
+  heroes: { slot: number; heroId: number; x: number; y: number; alive: boolean }[]
+}
+export interface MapPlays {
+  version: number
+  heroId: number
+  sampleSeconds: number
+  coverage: number
+  /** Descriptive balance of recorded trades, not a trained causal impact. */
+  score: number | null
+  good: number
+  bad: number
+  neutral: number
+  teamGoldAt15: number
+  networthAt15: number | null
+  teamNetworthAt15: number
+  enemyNetworthAt15: number
+  episodes: MapPlay[]
+}
+
 export interface MatchPlayer {
   steamAccountId: number
   name: string | null
@@ -157,6 +185,7 @@ export interface MatchPlayer {
   purchaseEvents?: { time: number; itemId: number }[] | null
   /** Replay-derived phase totals; do not feed these into the impact model. */
   impactPhases?: { label: string; kills: number; deaths: number; gold: number; networth: number; lastHits: number; experience: number; heroDamage: number; towerDamage: number }[]
+  mapPlays?: MapPlays | null
   /** позиция 1–5 (0 — неизвестно) */
   position: number
   /** replay — своё движение по карте; stratz — их разбор реплея; stats — оценка по экономике */
