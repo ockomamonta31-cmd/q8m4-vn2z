@@ -74,7 +74,7 @@ export default function Edik({ match, timeline, rating, heroMap, meSlot, initial
       <p><b>Измерено:</b> {assessment.coverage.join('; ')}.</p><p><b>Чего пока не хватает:</b> {assessment.missing.join('; ')}.</p>
     </details>}
     <section className="edik-ai" aria-label="Разбор ИИ-тренера">
-      <div><h3>Приоритеты от тренера</h3><p>Llama 3.3 70B объясняет факты реплея и даёт упражнения. Бесплатный дневной лимит; готовый разбор сохраняется.</p></div>
+      <div><h3>Приоритеты от тренера</h3><p>ИИ объясняет факты реплея и даёт упражнения. Бесплатный дневной лимит; готовый разбор сохраняется.</p></div>
       <button type="button" disabled={aiBusy || !p.evidence} onClick={loadCoach}>{aiBusy?'Тренер разбирает игру…':ai?'Обновить сохранённый разбор':'Получить разбор тренера'}</button>
       {aiError&&<p role="status">{aiError}</p>}
       {ai&&<><p>{ai.summary}</p>{ai.priorities.map((priority,i)=><article className="edik-note" key={i}>
@@ -98,9 +98,9 @@ export default function Edik({ match, timeline, rating, heroMap, meSlot, initial
           <p className="edik-advice"><b>{note.status === 'good' ? 'Что удалось' : 'Что проверить'}</b>{note.advice}</p>
           {'referenceIds' in note && (note as TrainingFact).referenceIds?.length ? <p className="edik-references">Сравнить реплеи: {(note as TrainingFact).referenceIds!.map(id=><a key={id} href={`https://www.opendota.com/matches/${id}`} target="_blank" rel="noreferrer">{id}</a>)}</p> : null}
         </div>
-        {note.play && <div className="edik-route"><Route play={note.play} heroId={p.heroId} /><p>Жёлтый — твой маршрут; зелёный — Radiant, красный — Dire. Истинные позиции без тумана войны.</p></div>}
+        {note.play && <div className="edik-route"><Route play={note.play} heroId={p.heroId} /><p>Жёлтый — маршрут героя в этом эпизоде; зелёный — Radiant, красный — Dire. Истинные позиции без тумана войны.</p></div>}
       </article>)}
     </div>
-    <details className="analysis-method"><summary>На чём основаны объяснения Эдика</summary><p>Ниже — измерения и правила разбора, сверху по кнопке — объяснения Llama 3.3 70B с обязательными ссылками на исходные факты. Примеры сильных игроков содержат реальные матчи, экономику и покупки; для части примеров также разобраны маршруты. Медаль учитывается в оценке, а сильные примеры помогают учиться. Видимость и готовность способностей не восстановлены полностью: предполагаемые причины нужно проверять в эпизоде.</p></details>
+    <details className="analysis-method"><summary>На чём основаны объяснения Эдика</summary><p>Ниже — измерения и правила разбора, сверху по кнопке — объяснения ИИ с обязательными ссылками на исходные факты. Примеры сильных игроков содержат реальные матчи, экономику и покупки; для части примеров также разобраны маршруты. Медаль учитывается в оценке, а сильные примеры помогают учиться. Видимость и готовность способностей не восстановлены полностью: предполагаемые причины нужно проверять в эпизоде.</p></details>
   </section>
 }

@@ -37,3 +37,20 @@ assert(referenceGames.some(r=>r.heroId===34&&r.mapPlays?.coverage>=.9),'actual T
 assert(referenceGames.every(r=>r.evidence.curve.length&&r.matchId>0))
 writeFileSync('.verification/assessment-v5.json',JSON.stringify(report,null,2))
 console.log('PASS assessment: five roles, additive factors, no victory/episode shortcut, missingness, measured lane events, identical history contract and actual strong-player trajectories')
+
+// An actual model adapter must not publish fabricated lane deaths, even when
+// the invented number appears as part of a timestamp in its cited evidence.
+const bundled=buildSync({entryPoints:['cloudflare/coach.ts'],bundle:true,platform:'node',format:'esm',write:false})
+const {coachResponse}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'))
+const full={...match,players:match.players.map(p=>{const side=match.players.filter(q=>q.isRadiant===p.isRadiant),slot=(p.isRadiant?0:128)+side.indexOf(p);return {...p,...roles.get(slot),seasonRank:45,evidence:playerEvidence(replay,slot,p.heroId,heroes),mapPlays:plays[slot]}})}
+const bad={summary:'Разбор линии',priorities:[{factIds:['F1'],title:'Смерти на линии',explanation:'На линии ты допустил 5 смертей. Это потеряло время получения опыта. Перед следующим разменом нужно проверить расстояние до партнёра и возможность отойти, а после смерти спокойно вернуться к безопасной волне.',nextGame:'Выбери первую смерть на линии и проверь момент, в который ещё мог вернуться к партнёру.'}]}
+const fakeDB={prepare(sql){return {bind(){return this},async first(){return sql.startsWith('INSERT')?{value:300}:null},async run(){}}}}
+const rejected=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:bad})}},full,129)).json()
+assert.equal(rejected.model,'Разбор по подтверждённым событиям')
+assert(rejected.priorities.some(p=>p.facts.some(f=>f.fact.includes('5:23, 8:29, 9:59'))))
+const valid={...bad,priorities:[{...bad.priorities[0],explanation:bad.priorities[0].explanation.replace('5 смертей','3 смерти')}]}
+const accepted=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:valid})}},full,129)).json()
+assert.equal(accepted.model,'GLM 4.7 Flash')
+const summaryRejected=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:{...valid,summary:'На линии было 5 смертей.'}})}},full,129)).json()
+assert.equal(summaryRejected.model,'Разбор по подтверждённым событиям','uncited summary must not bypass fact checks')
+console.log('PASS coach grounding: object response format, cited facts, fabricated death count rejected, truthful fallback and valid response accepted')
