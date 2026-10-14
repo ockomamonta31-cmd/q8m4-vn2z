@@ -26,7 +26,54 @@ export function deathDetail(p:MatchPlayer,d:NonNullable<PlayerEvidence['deathWin
 }
 
 
-export type TrainingFact = CoachNote & { id: string; section: 'lane' | 'farm' | 'fight' | 'support' | 'map'; referenceIds?: number[]; decisionRisk?:boolean }
+export type TrainingFact = CoachNote & { id: string; section: 'lane' | 'farm' | 'fight' | 'support' | 'map'; referenceIds?: number[]; decisionRisk?:boolean; detail?:string }
+
+/** Rank concrete decision patterns; one supported issue is enough. */
+export function keyMistakes(p:MatchPlayer,opponents:MatchPlayer[]=[]):TrainingFact[] {
+  const e=p.evidence
+  if(!e)return []
+  const candidates:{note:TrainingFact;weight:number;deaths:number[]}[]=[]
+  const deaths=e.deaths?.filter(d=>d.t>=0)??[]
+  const deadTime=(t:number)=>deaths.find(d=>d.t===t)?.secondsDead??0
+  for(const d of e.deathWindows??[]) {
+    if(!isolatedGank(d))continue
+    const c=d.decision!,mid=c.attackers.find(a=>opponents.some(o=>o.heroId===a.heroId&&o.lane==='mid'))
+    const shaman=d.enemySpells.includes('shadow_shaman_voodoo')&&d.enemySpells.includes('shadow_shaman_shackles')
+    candidates.push({weight:100+Math.min(deadTime(d.t),120)+c.attackers.length*10,deaths:[d.t],note:{
+      id:`gank-${d.t}`,section:d.t<600?'lane':'fight',status:'review',t:d.t,decisionRisk:true,title:'Одиночная позиция под ганк',
+      fact:`Погиб против ${c.attackers.map(a=>heroName(a.heroId)).join(', ')}. До нападения живых союзников рядом не было.${shaman?' Shaman удержал Hex → Shackles.':''}`,
+      advice:`Перед выходом к волне проверь, где ${mid?heroName(mid.heroId):'вражеский мидер'}. Если мидер пропал, помощи рядом нет и враг может удержать тебя контролем, не выходи один: дождись волны ближе к своей башне или смени место фарма.`,
+      detail:deathDetail(p,d,opponents).fact}})
+  }
+  for(let i=0;i<deaths.length;i++) {
+    const d=deaths[i],previous=deaths[i-1]
+    if(!previous||!d.dieback&&(d.t>=600||d.t-previous.t>120))continue
+    candidates.push({weight:d.dieback?250:90+Math.min(deadTime(previous.t)+deadTime(d.t),120),deaths:[previous.t,d.t],note:{
+      id:`repeat-${d.t}`,section:d.t<600?'lane':'fight',status:'review',t:d.t,title:d.dieback?'Потерял жизнь после байбека':'Две смерти подряд на линии',
+      fact:`Смерти на ${fmtDuration(previous.t)} и ${fmtDuration(d.t)}.${d.dieback?' Между ними был байбек.':''}`,
+      advice:d.dieback?'Перед байбеком проверь, успеваешь ли защитить объект и есть ли способ дойти до команды. Возвращайся под конкретную цель и помощь, чтобы не потерять вторую жизнь.'
+        :'После первой смерти проверь, что изменилось: союзники, уровни врагов и путь отхода. Если помощь не появилась, вернись за опытом в безопасное место вместо повторного выхода.',
+      detail:'Близкие смерти подтверждают потерю темпа. Сам журнал смертей не доказывает, что оба решения были одинаковыми: сравни подходы в этих эпизодах.'}})
+  }
+  // Small CS windows are review candidates, not proof that a creep was available.
+  const minute=p.position<=3?e.laneMinutes?.filter(m=>m.t>=60&&m.aliveSeconds>=50&&m.attacks>=5&&m.lh<=2).sort((a,b)=>a.lh-b.lh||b.attacks-a.attacks)[0]:null
+  if(minute)candidates.push({weight:40,deaths:[],note:{id:`cs-${minute.t}`,section:'lane',status:'review',t:minute.t,title:'Размены при потере добиваний — проверить',
+    fact:`За ${fmtDuration(minute.t)}–${fmtDuration(minute.end)}: ${minute.lh} добиваний и ${minute.attacks} попаданий по героям; живым был ${minute.aliveSeconds} с.`,
+    advice:'Проверь, пропускал ли доступных крипов ради атак по герою. Если да, сначала забирай добивание, затем бей врага, когда он занят своей атакой по крипу.',
+    detail:`В эту минуту получил ${minute.xp} опыта, нанёс ${minute.damage} и получил ${minute.taken} урона. HP и доступность каждого крипа не записаны; этот эпизод требует проверки.`}})
+  const emptyCast=e.spellWindows?.find(w=>w.attacks===0)
+  if(emptyCast)candidates.push({weight:20,deaths:[],note:{id:`cast-${emptyCast.t}`,section:emptyCast.t<600?'lane':'fight',status:'review',t:emptyCast.t,title:'Strafe без атак — проверить',
+    fact:`После Strafe на ${fmtDuration(emptyCast.t)} за ${emptyCast.seconds} с обычных попаданий не записано.`,
+    advice:'Проверь, была ли цель в доступной дальности. Если ускорение нужно для атак, нажимай его после выбора доступной цели, чтобы не тратить время на подход.',
+    detail:'Отсутствие атак не доказывает ошибку: способность могла применяться для другой задачи, а враг мог прервать атаку.'}})
+  const selected:TrainingFact[]=[],usedDeaths=new Set<number>()
+  for(const candidate of candidates.sort((a,b)=>b.weight-a.weight||(a.note.t??0)-(b.note.t??0))) {
+    if(candidate.deaths.some(t=>usedDeaths.has(t)))continue
+    selected.push(candidate.note);candidate.deaths.forEach(t=>usedDeaths.add(t))
+    if(selected.length===3)break
+  }
+  return selected
+}
 export function rolePlan(p: Pick<MatchPlayer,'heroId'|'position'>): string {
   const tags = meta.find(h=>h.id === p.heroId)?.roles ?? []
   if (p.heroId === 2 && p.position === 3) return 'Axe: до Blink обеспечь фарм и уровень; после покупки ищи выход с союзниками под Call. Один Blink не делает любую драку выгодной.'

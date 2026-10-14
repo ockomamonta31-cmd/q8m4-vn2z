@@ -412,7 +412,7 @@ export default {
     const coach=p.match(/^\/api\/matches\/(\d+)\/coach\/(0|1|2|3|4|128|129|130|131|132)$/)
     if(coach) {
       if(request.method!=='GET') return json({error:'Method not allowed'},405)
-      const id=Number(coach[1]),x=await rankedMatch(env,await match(env,id)), replay=await replayData(env,id)
+      const id=Number(coach[1]),[x,replay]=await Promise.all([match(env,id),replayData(env,id)])
       const order={r:0,d:0}
       const players=x.players.map((p:any)=>{const slot=p.isRadiant?order.r++:128+order.d++,parsed=replay?.[String(slot)];return {...p,position:parsed?.position??p.position,lane:parsed?.lane,evidence:parsed?.evidence,mapPlays:parsed?.mapPlays,impactPhases:parsed?.impactPhases}})
       return coachResponse(env,{...x,players},Number(coach[2]))

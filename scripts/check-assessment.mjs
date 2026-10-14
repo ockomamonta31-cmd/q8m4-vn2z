@@ -67,37 +67,18 @@ try {
 writeFileSync('.verification/assessment-v5.json',JSON.stringify(report,null,2))
 console.log('PASS assessment: five roles, additive factors, no victory/episode shortcut, missingness, measured lane events, identical history contract and actual strong-player trajectories')
 
-// An actual model adapter must not publish fabricated lane deaths, even when
-// the invented number appears as part of a timestamp in its cited evidence.
+// Primary coaching is deterministic, bounded and available without model calls.
 const bundled=buildSync({entryPoints:['cloudflare/coach.ts'],bundle:true,platform:'node',format:'esm',write:false})
 const {coachResponse}=await import('data:text/javascript;base64,'+Buffer.from(bundled.outputFiles[0].text).toString('base64'))
 const full={...match,players:match.players.map(p=>{const side=match.players.filter(q=>q.isRadiant===p.isRadiant),slot=(p.isRadiant?0:128)+side.indexOf(p);return {...p,...roles.get(slot),seasonRank:45,evidence:playerEvidence(replay,slot,p.heroId,heroes),mapPlays:plays[slot]}})}
-const bad={summary:'Разбор линии',priorities:[{factIds:['F1'],title:'Смерти на линии',explanation:'На линии ты допустил 5 смертей. Это потеряло время получения опыта. Перед следующим разменом нужно проверить расстояние до партнёра и возможность отойти, а после смерти спокойно вернуться к безопасной волне.',nextGame:'Выбери первую смерть на линии и проверь момент, в который ещё мог вернуться к партнёру.'}]}
-const fakeDB={prepare(sql){return {bind(){return this},async first(){return sql.startsWith('INSERT')?{value:300}:null},async run(){}}}}
-bad.priorities=[1,2,3,4].map(i=>({...bad.priorities[0],factIds:['F1','F'+i],title:'Разбор эпизода '+i}))
-const rejected=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:bad})}},full,129)).json()
-assert.equal(rejected.model,'Разбор по подтверждённым событиям')
-assert(rejected.priorities.some(p=>p.facts.some(f=>f.t===509&&f.fact.includes('733'))),'fallback explains a specific measured lane death')
-assert(rejected.priorities.some(p=>p.facts.some(f=>f.t===120&&f.fact.includes('12 обычных'))),'fallback includes the concrete CS/trading window')
-const valid={...bad,priorities:[1,2,3,4].map(i=>({...bad.priorities[0],factIds:['F1','F'+i],title:'Разбор эпизода '+i,explanation:bad.priorities[0].explanation.replace('5 смертей','3 смерти')}))}
-const accepted=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:valid})}},full,129)).json()
-assert.equal(accepted.model,'GLM 4.7 Flash')
-const summaryRejected=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:{...valid,summary:'На линии было 5 смертей.'}})}},full,129)).json()
-assert.equal(summaryRejected.model,'Разбор по подтверждённым событиям','uncited summary must not bypass fact checks')
-const onePriority=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:{...valid,priorities:[valid.priorities[0]]}})}},full,129)).json()
-assert.equal(onePriority.model,'Разбор по подтверждённым событиям','incomplete generic answer must not replace concrete event coaching')
-const generic=await (await coachResponse({DB:fakeDB,AI:{run:async()=>({response:{...valid,priorities:valid.priorities.map(p=>({...p,nextGame:'В следующей игре старайся получать больше опыта и урона на линии.'}))}})}},full,129)).json()
-assert.equal(generic.model,'Разбор по подтверждённым событиям','generic exercise rejected')
-console.log('PASS coach grounding: object response format, cited facts, fabricated death count rejected, truthful fallback and valid response accepted')
+const immediateEnv={DB:{prepare(){throw Error('Coach must not wait for DB budget or cache')}},AI:{run(){throw Error('Coach must not wait for model generation')}}}
 for(const slot of [0,1,2,3,4,128,129,130,131,132]) {
-  let sent=false
-  const response=await coachResponse({DB:fakeDB,AI:{run:async(_,input)=>{
-    const context=JSON.parse(input.messages[1].content)
-    assert.equal(context.hero,heroes.find(h=>h.id===full.players[(slot<128?slot:slot-123)].heroId).displayName)
-    assert(context.lane.every(r=>r.hero&&r.heroId>0&&r.specs),'lane spells belong to the actual heroes')
-    assert(new TextEncoder().encode(input.messages.map(m=>m.content).join('')).length<=28000)
-    sent=true;throw Error('Deliberate generation failure')
-  }}},full,slot)
-  assert(sent,'all player contexts fit the free model budget');assert.equal(response.status,200)
+  const response=await coachResponse(immediateEnv,full,slot),review=await response.json()
+  assert.equal(response.status,200);assert.equal(review.version,10);assert(review.priorities.length<=3)
+  assert(review.priorities.every(p=>p.facts.length===1&&p.explanation.length<400))
+  assert(!review.priorities.some(p=>/после Orchid|Восстановление|Подключения к дракам/.test(p.title)),'routine context must not fill important-error slots')
+  if(slot===129)assert(review.priorities.some(p=>p.facts.some(f=>f.t===120&&f.fact.includes('12 попаданий'))),'concrete low-CS/trading window still included')
 }
-console.log('PASS coach contexts: named heroes, correct lane spell kits, bounded UTF-8 context for every role')
+assert.equal((await coachResponse(immediateEnv,full,99)).status,404)
+assert.equal((await coachResponse(immediateEnv,{...full,players:full.players.map(p=>({...p,evidence:null}))},129)).status,409)
+console.log('PASS concise coach: bounded concrete issues, no routine context, no model latency or budget dependency, correct player lookup and missing replay')

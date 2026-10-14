@@ -38,13 +38,21 @@ const noHealth=structuredClone(replay);delete noHealth.movement.heroState
 assert.equal(playerEvidence(noHealth,129,12,heroes).deathWindows[0].decision.health,null)
 for(const changes of [{t:33},{nearbyAllies:5},{health:NaN},{attackers:[{heroId:145,firstContact:41}]}])assert(!validEvidence({...e,deathWindows:[{...d,decision:{...d.decision,...changes}}]}),'invalid decision evidence rejected')
 const match={id:42,durationSeconds:100,players:slots.map(s=>s===129?player:{heroId:ids[s],isRadiant:s<128,position:s===0?2:4,lane:s===0?'mid':undefined})}
-const DB={prepare(sql){return {bind(){return this},async first(){return sql.startsWith('INSERT')?{value:300}:null},async run(){}}}}
-const fallback=await(await coach.coachResponse({DB,AI:{run:async()=>{throw Error('Deliberate failure')}}},match,129)).json()
-assert(fallback.priorities[0].facts[0].decisionRisk);assert.match(fallback.priorities[0].explanation,/Hex → Shackles/)
-const facts=training.trainingFacts(player,100,opponents)
-const response=await(await coach.coachResponse({DB,AI:{run:async()=>({response:{summary:'Нужно проверить условия выхода к волне. Для следующего решения выбери безопасный маршрут.',priorities:Array.from({length:4},(_,i)=>({factIds:[facts[i%facts.length].id],title:'Решение на линии',explanation:'Перед подходом к волне проверь условия получения опыта и положение команды. Сопоставь это решение с доступным отходом, чтобы сохранить возможность безопасно продолжать фарм.',nextGame:'Останови реплей перед подходом к волне и проверь расстояние до команды.'}))}})}},match,129)).json()
-assert.equal(response.model,'GLM 4.7 Flash');assert(response.priorities[0].facts[0].decisionRisk,'accepted model output cannot bury the verified gank')
+const instantEnv={DB:{prepare(){throw Error('No coach cache/budget access')}},AI:{run(){throw Error('No model generation')}}}
+const response=await(await coach.coachResponse(instantEnv,match,129)).json()
+assert.equal(response.version,10);assert.equal(response.priorities.length,1,'one supported mistake must not be padded with routine advice')
+assert(response.priorities[0].facts[0].decisionRisk);assert.match(response.priorities[0].facts[0].fact,/Hex → Shackles/)
 assert.match(response.priorities[0].explanation,/не выходи один/)
+assert(response.priorities[0].explanation.length<400)
+assert(!response.priorities[0].facts[0].fact.includes('не было видно'),'unobserved visibility remains in supporting detail')
+assert.equal(training.keyMistakes({...player,evidence:{...e,deathWindows:[available]}},opponents).length,0,'nearby ally cannot become a solo mistake')
+assert.equal(training.keyMistakes({...player,evidence:{...e,deathWindows:[unknown]}},opponents).length,0,'missing availability cannot become a solo mistake')
+const repeated={...player,evidence:{...e,deaths:[{t:40,secondsDead:27},{t:100,secondsDead:30}],deathWindows:[d]}}
+const repeatedNotes=training.keyMistakes(repeated,opponents)
+assert.equal(repeatedNotes.length,1,'the same death cannot fill two priority slots')
+const many={...player,evidence:{...e,deathWindows:Array.from({length:5},(_,i)=>({...d,t:40+i*300,from:20+i*300,decision:{...d.decision,t:26+i*300,attackStart:32+i*300,attackers:d.decision.attackers.map(a=>({...a,firstContact:a.firstContact+i*300}))}}))}}
+assert.equal(training.keyMistakes(many,opponents).length,3,'at most three distinct important episodes')
+assert.equal(new Set(training.keyMistakes(many,opponents).map(n=>n.id)).size,3)
 const actual='server/data/replays/9044688469.json'
 if(existsSync(actual)){
   const r=JSON.parse(readFileSync(actual)),m=JSON.parse(readFileSync('server/data/matches/9044688469.json'))
@@ -57,7 +65,10 @@ if(existsSync(actual)){
   assert.match(note.fact,/вражеский мидер Kez/)
   writeFileSync('.verification/decision-9044688469.json',JSON.stringify({death,note},null,2))
   const full={...m,players:m.players.map(p=>{const s=(p.isRadiant?0:128)+m.players.filter(q=>q.isRadiant===p.isRadiant).indexOf(p);return {...p,evidence:playerEvidence(r,s,p.heroId,heroes)}})}
-  for(const slot of slots){let sent=false;const result=await coach.coachResponse({DB,AI:{run:async(_,input)=>{sent=true;assert(new TextEncoder().encode(input.messages.map(m=>m.content).join('')).length<=28000);throw Error('Deliberate context check')}}},full,slot);assert(sent,`actual slot ${slot} fits model context`);assert.equal(result.status,200)}
+  const important=training.keyMistakes(full.players.find(p=>p.heroId===12),full.players.filter(p=>p.isRadiant))
+  assert.equal(important.length,1);assert.equal(important[0].t,524,'PL gets the isolated lane gank, not the fight with nearby allies or routine purchases')
+  writeFileSync('.verification/key-mistakes-9044688469.json',JSON.stringify(important,null,2))
+  for(const slot of slots){const result=await coach.coachResponse(instantEnv,full,slot);assert.equal(result.status,200);assert((await result.json()).priorities.length<=3)}
   console.log(`PASS actual PL 8:44: decision 8:30, nearest ally ${death.decision.nearestAlly.distance}, real damage ${death.taken}`)
 }
 console.log('PASS decision coaching: pre-contact isolation, chain control, missing-mid condition, illusion filtering, missingness, future leakage, validation and prominent grounded advice')

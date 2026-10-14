@@ -117,6 +117,14 @@ reserved for dot separators and the best-in-category marker.
 
 ## Components
 
+**Edik.** The default view shows at most three distinct, important decision
+episodes, immediately from replay evidence. Each row has a time, a short
+consequence and one concrete correction. Supporting facts live in native
+`details`; the full lane, fight and map measurements are collapsed beneath
+«Все эпизоды и измерения». Routine purchases and role plans do not fill error
+slots. An isolated gank is prioritized over small trading windows; unknown
+visibility is never stated as observed. No model generation blocks this view.
+
 **Hero (match).** 560px desktop / 420px mobile, full width, no radius. The
 winning camp's highest-impact hero is Valve's 1440px render, anchored bottom
 right, dissolving into `--bg` through two scrims. Outcome is Forum 120px in
