@@ -1,5 +1,6 @@
 // Actual trajectories + combat events. No reward for distance travelled or
 // automatic bonus for losing: movement needs a recorded outcome.
+import map741 from '../data/constants/map_741.json' with {type:'json'}
 export const MAP_PLAYS_VERSION = 1
 const distance = (a, b) => Math.hypot(a[1] - b[1], a[2] - b[2]) * 128
 const nearest = (track, t) => {
@@ -20,6 +21,12 @@ export function buildMapPlays(replay, match, heroes) {
     if (players.length !== 5 || players.some((p, i) => m.heroes[(side ? 0 : 128) + i] !== p.heroId)) return null
   }
   const combat = m.combat ?? []
+  const structures=Array.isArray(m.structures)?m.structures.filter(s=>s.kind!=='CDOTA_BaseNPC_Watch_Tower').map(s=>{
+    const landmark=map741.structures.filter(l=>l.team===s.team&&l.kind===s.kind&&Math.hypot(l.x-s.x,l.y-s.y)<4).sort((a,b)=>Math.hypot(a.x-s.x,a.y-s.y)-Math.hypot(b.x-s.x,b.y-s.y))[0]
+    const key=s.name||landmark?.key
+    const fall=key?(replay.objectives??[]).find(o=>o.type==='building_kill'&&o.key===key):null
+    return {key,kind:s.kind,team:s.team,x:s.x,y:s.y,destroyedAt:fall?.time??null}
+  }):undefined
   const names = new Map(heroes.map(h => ['npc_dota_hero_' + h.shortName, h.id]))
   const slotByName = new Map([...names].map(([name, id]) => [name, slots.find(s => m.heroes[s] === id)]))
   const track = (s) => m.tracks[s]
@@ -113,7 +120,7 @@ export function buildMapPlays(replay, match, heroes) {
       score: coverage >= .9 && first[0] <= 5 && last[0] >= match.durationSeconds - 10 && good + bad >= 3 && episodes.length <= 80 ? Math.round(100 * (good - bad) / (good + bad)) : null,
       good, bad, neutral: episodes.length - good - bad, teamGoldAt15: advantage(900, slot),
       networthAt15: p15?.[4] ?? null, teamNetworthAt15: team15, enemyNetworthAt15: enemy15,
-      episodes: episodes.slice(0, 80) }
+      episodes: episodes.slice(0, 80),structures }
   }
   return result
 }
@@ -128,6 +135,7 @@ export function validMapPlays(value) {
       value.score !== Math.round(100 * (value.good - value.bad) / (value.good + value.bad)))) return false
   if (value.score !== null && (value.good !== value.episodes.filter(e => e?.verdict === 1).length ||
       value.bad !== value.episodes.filter(e => e?.verdict === -1).length || value.neutral !== value.episodes.filter(e => e?.verdict === 0).length)) return false
+  if(value.structures!=null&&(!Array.isArray(value.structures)||value.structures.length>100||value.structures.some(s=>!s||typeof s.kind!=='string'||s.kind.length>100||s.key!=null&&(typeof s.key!=='string'||s.key.length>160)||![2,3].includes(s.team)||![s.x,s.y].every(Number.isFinite)||s.destroyedAt!=null&&(!Number.isFinite(s.destroyedAt)||s.destroyedAt<0))))return false
   return value.episodes.every(e => e && Number.isFinite(e.t) && e.t >= 0 && Number.isFinite(e.end) && e.end >= e.t &&
     ['fight', 'rotation', 'objective', 'pressure'].includes(e.kind) && [-1, 0, 1].includes(e.verdict) &&
     Number.isFinite(e.teamGold) && (e.moved === null || Number.isFinite(e.moved) && e.moved >= 0) &&

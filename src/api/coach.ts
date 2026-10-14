@@ -2,7 +2,7 @@ import type { LaneCall } from './draftStrength'
 import type { MapPlay, MatchPlayer } from './types'
 import type { MatchTimeline, RankedTeamfight } from './timeline'
 import { fmtDuration } from './formats'
-import { trainingFacts } from './training'
+import { trainingFacts,deathDetail } from './training'
 
 export interface CoachNote {
   title: string
@@ -80,6 +80,7 @@ export function reviewFight(player: MatchPlayer, fight: RankedTeamfight, timelin
     fact: `${line.kills} убийств, ${line.deaths} смертей, ${line.damage.toLocaleString('ru-RU')} урона, ${line.healing.toLocaleString('ru-RU')} лечения; изменение золота ${line.gold >= 0 ? '+' : ''}${line.gold}.`,
     advice: line.deaths === 0 && line.damage === 0 && line.kills === 0 && line.healing === 0 ? 'Участие уроном или лечением не зафиксировано. Проверь, был ли ты на другой цели; это ещё не означает, что следовало прийти.' : 'Оцени порядок действий, а не только объём урона: успел ли ты реализовать свою задачу до смерти или отхода?' })
   const deaths = timeline.kills.filter(k => k.t >= fight.t && k.t <= fight.end && k.victimHeroId === player.heroId)
+  notes.push(...(player.evidence?.deathWindows??[]).filter(d=>d.t>=fight.t&&d.t<=fight.end).slice(0,3).map(d=>deathDetail(player,d)))
   const measured = player.evidence?.fights?.find(f=>Math.abs(f.t-fight.t)<5)
   if(measured) notes.push({title:'Способности и предметы в этом бою',status:'info',t:fight.t,
     fact:`Способности: ${Object.entries(measured.abilities??{}).map(([k,v])=>`${k} ×${v}`).join(', ')||'не записаны'}. Предметы: ${Object.entries(measured.items??{}).map(([k,v])=>`${k} ×${v}`).join(', ')||'не записаны'}.`,

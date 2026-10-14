@@ -68,13 +68,17 @@ function baselineFor(level: ImpactLevel, p: ImpactInput, rank: number, minutes: 
   return base.map((v, j) => Math.max(0, v + adjustment[j]))
 }
 
-interface ImpactContext { level: ImpactLevel; base: number[]; actual: number[]; win: WinModel }
-function impactContext(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactContext | null {
+interface ImpactContext { level: ImpactLevel; base: number[]; actual: number[]; win: WinModel; unknown: Set<string> }
+function impactContext(p: ImpactInput, durationSec: number, seasonRank: number | null, baselineChanges: Record<string,number> = {}): ImpactContext | null {
   if (!IMPACT_MODEL_READY || !Number.isFinite(durationSec) || durationSec <= 0) return null
   const level = p.stats || p.evidence ? model.rich : model.base
   const minutes = Math.max(durationSec / 60, 1)
   const rank = p.seasonRank > 0 ? p.seasonRank : seasonRank && seasonRank > 0 ? seasonRank : 0
   const base = baselineFor(level, p, rank, minutes)
+  for (const [feature,delta] of Object.entries(baselineChanges)) {
+    const i=level.features.indexOf(feature)
+    if(i>=0&&Number.isFinite(delta))base[i]=Math.max(0,base[i]+delta)
+  }
   const rates = (v: unknown) => num(v) / minutes
   const lobby = baselineFor(level, { ...p, heroId: 0, position: 0 }, rank, minutes)
   const typical = (f: string) => lobby[level.features.indexOf(f)] ?? 0
@@ -84,6 +88,7 @@ function impactContext(p: ImpactInput, durationSec: number, seasonRank: number |
   const teamKills = p.teamKills ?? kills + 4 * typical('kpm') * minutes
   const teamDamage = p.teamDamage ?? damage + 4 * typical('heroDmgPerMin') * minutes
   const s = p.stats
+  const unknown = new Set<string>()
   const values: Record<string, number> = {
     kpm: rates(kills), dpm: rates(p.deaths), apm: rates(assists),
     killParticipation: teamKills > 0 ? Math.min(1, (kills + assists) / teamKills) : 0,
@@ -119,10 +124,13 @@ function impactContext(p: ImpactInput, durationSec: number, seasonRank: number |
       dustsBoughtPerMin: e.purchases ? rates(e.purchases.filter(x=>x.key==='dust').length) : null,
     }
     for (const feature of level.features) if (!(feature in observed) && !(feature in values && model.base.features.includes(feature))) observed[feature] = null
-    for (const [key,v] of Object.entries(observed)) values[key] = v == null ? base[level.features.indexOf(key)] ?? 0 : v
+    for (const [key,v] of Object.entries(observed)) {
+      if(v==null)unknown.add(key)
+      values[key] = v == null ? base[level.features.indexOf(key)] ?? 0 : v
+    }
   }
   return { level, base, actual: level.features.map((f) => values[f] ?? base[level.features.indexOf(f)] ?? 0),
-    win: level.positionWins[String(p.position)] ?? level.win }
+    win: level.positionWins[String(p.position)] ?? level.win, unknown }
 }
 
 // The sigmoid changes the scale, not the sign of a feature's contribution.
@@ -145,7 +153,7 @@ export function personalImpact(p: ImpactInput, durationSec: number, seasonRank: 
 
 export interface ImpactBreakdown {
   score: number
-  factors: { label: string; section: string; contribution: number; actual: number; baseline: number; unit: 'rate' | 'share' | 'value' }[]
+  factors: { label: string; section: string; contribution: number; actual: number; baseline: number; weight?: number; observed?: boolean; unit: 'rate' | 'share' | 'value' }[]
 }
 const impactLabels: Record<string, [string, string]> = {
   kpm: ['Убийства', 'Бой'], dpm: ['Смерти', 'Бой'], apm: ['Ассисты', 'Бой'],
@@ -162,8 +170,41 @@ const impactLabels: Record<string, [string, string]> = {
   runesPerMin: ['Подобранные руны', 'Поддержка'], courierKillsPerMin: ['Убитые курьеры', 'Поддержка'],
   smokesBoughtPerMin: ['Купленные смоки', 'Поддержка'], dustsBoughtPerMin: ['Купленный Dust', 'Поддержка'],
 }
-export function personalImpactBreakdown(p: ImpactInput, durationSec: number, seasonRank: number | null): ImpactBreakdown | null {
-  const context = impactContext(p, durationSec, seasonRank)
+// Execution uses observed distributions, not coefficients trained to predict
+// the winning team. These role weights are explicit experimental priorities.
+const executionWeights:Record<number,Record<string,number>>={
+  1:{gpm:14,xpm:7,lhpm:9,networthPerMin:10,kpm:4,apm:4,killParticipation:9,dpm:8,heroDmgPerMin:6,towerDmgPerMin:8,dmgShare:6,avgGoldFed:4,dieBacksPerMin:6,diedWithHealPerMin:3,tpFailDeathsPerMin:2},
+  2:{gpm:10,xpm:8,lhpm:6,networthPerMin:6,kpm:6,apm:6,killParticipation:13,dpm:10,heroDmgPerMin:9,towerDmgPerMin:5,dmgShare:6,avgGoldFed:4,dieBacksPerMin:6,diedWithHealPerMin:3,tpFailDeathsPerMin:2},
+  3:{gpm:8,xpm:6,lhpm:5,networthPerMin:6,kpm:4,apm:7,killParticipation:10,dpm:9,heroDmgPerMin:8,towerDmgPerMin:7,dmgShare:7,heroHealPerMin:3,avgGoldFed:4,dieBacksPerMin:6,diedWithHealPerMin:3,tpFailDeathsPerMin:2,campStacksPerMin:2,runesPerMin:3},
+  4:{gpm:3,xpm:7,kpm:3,apm:9,killParticipation:15,dpm:8,heroDmgPerMin:7,towerDmgPerMin:3,heroHealPerMin:6,dmgShare:4,wardsObsPerMin:8,wardsSenPerMin:4,dewardsPerMin:6,campStacksPerMin:4,runesPerMin:3,avgGoldFed:3,dieBacksPerMin:4,diedWithHealPerMin:2,tpFailDeathsPerMin:1},
+  5:{gpm:3,xpm:7,kpm:2,apm:9,killParticipation:14,dpm:8,heroDmgPerMin:5,towerDmgPerMin:2,heroHealPerMin:8,dmgShare:2,wardsObsPerMin:12,wardsSenPerMin:7,dewardsPerMin:7,campStacksPerMin:4,runesPerMin:0,avgGoldFed:3,dieBacksPerMin:4,diedWithHealPerMin:2,tpFailDeathsPerMin:1},
+}
+export function executionBreakdown(p:ImpactInput,durationSec:number,rank:number|null,baselineChanges:Record<string,number>={}):ImpactBreakdown|null {
+  const context=impactContext(p,durationSec,rank,baselineChanges)
+  if(!context)return null
+  const weights=executionWeights[p.position]??executionWeights[2]
+  const total=context.level.features.reduce((n,key)=>n+(weights[key]??0),0)
+  const reverse=new Set(['dpm','avgGoldFed','dieBacksPerMin','diedWithHealPerMin','tpFailDeathsPerMin'])
+  const exact:number[]=[]
+  const factors=context.level.features.flatMap((key,i)=>{
+    const weight=weights[key]??0,meta=impactLabels[key]
+    if(!weight||!meta)return []
+    const spread=Math.max(context.win.std[i]??0,1e-6)
+    const contribution=100*weight/total*Math.tanh((context.actual[i]-context.base[i])/spread)*(reverse.has(key)?-1:1)
+    exact.push(contribution)
+    return [{label:meta[0],section:meta[1],contribution:Math.trunc(contribution),actual:context.actual[i],baseline:context.base[i],weight:100*weight/total,observed:!context.unknown.has(key),
+      unit:(key==='killParticipation'||key==='dmgShare'?'share':key==='avgGoldFed'?'value':'rate') as 'share'|'value'|'rate'}]
+  })
+  const score=Math.round(exact.reduce((n,v)=>n+v,0))
+  let remainder=score-factors.reduce((n,f)=>n+f.contribution,0)
+  for(const i of factors.map((_,i)=>i).sort((a,b)=>Math.sign(remainder)*((exact[b]-factors[b].contribution)-(exact[a]-factors[a].contribution)))) {
+    if(!remainder)break
+    const step=Math.sign(remainder);factors[i].contribution+=step;remainder-=step
+  }
+  return {score,factors}
+}
+export function personalImpactBreakdown(p: ImpactInput, durationSec: number, seasonRank: number | null, baselineChanges: Record<string,number> = {}): ImpactBreakdown | null {
+  const context = impactContext(p, durationSec, seasonRank, baselineChanges)
   if (!context) return null
   const { score, contributions } = attribution(context)
   const factors = context.level.features.flatMap((key, j) => {

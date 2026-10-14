@@ -97,6 +97,14 @@ export async function fetchMatch(id: number): Promise<MatchDetails> {
     return demoMatch(id)
   }
   const m = await ownApi<MatchDetails>(`/matches/${id}`)
+  // Every match consumer gets the same observed team totals as history rows.
+  // Otherwise portraits/build details silently estimate shares and disagree
+  // with the assessment in Edik and the scoreboard.
+  for(const p of m.players) {
+    const team=m.players.filter(q=>q.isRadiant===p.isRadiant)
+    p.teamKills=team.reduce((n,q)=>n+q.kills,0)
+    p.teamDamage=team.reduce((n,q)=>n+q.heroDamage,0)
+  }
   // Steam omits player IDs on private matches. OpenDota sometimes has the
   // replay-derived identity; use it only as a name/ID fallback, never match stats.
   if (m.players.some((p) => !p.steamAccountId)) {

@@ -2,6 +2,9 @@ import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { buildMapPlays, validMapPlays } from '../server/gc/map-plays.mjs'
 import { buildSync } from 'esbuild'
+import { createRequire } from 'node:module'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 const heroes = Array.from({ length: 10 }, (_, i) => ({ id: i + 1, shortName: 'hero' + (i + 1) }))
 const slots = [0, 1, 2, 3, 4, 128, 129, 130, 131, 132]
 const match = { durationSeconds: 1800, didRadiantWin: false, players: slots.map((s, i) => ({ isRadiant: s < 128, heroId: i + 1 })) }
@@ -52,6 +55,20 @@ if (existsSync(livePath)) {
   const actual = buildMapPlays(r, m, h)
   assert(Object.values(actual).every(validMapPlays))
   const clinkz = actual[129]
+  const towers=clinkz.structures.filter(s=>s.kind==='CDOTA_BaseNPC_Tower')
+  assert.equal(towers.length,22);assert.equal(new Set(towers.map(s=>s.key)).size,22,'nearby T4 towers keep distinct identities')
+  assert.equal(towers.find(s=>s.key==='npc_dota_badguys_tower1_bot').destroyedAt,711)
+  assert(!validMapPlays({...clinkz,structures:[{...towers[0],x:NaN}]}))
+  buildSync({entryPoints:['src/components/match/MapPlays.tsx'],bundle:true,platform:'node',format:'cjs',external:['react'],define:{'import.meta.env':'{}'},outfile:'.verification/map-route.cjs'})
+  const {mapPoint,Route}=createRequire(import.meta.url)('../.verification/map-route.cjs')
+  const radiant=mapPoint(69.75,73.796875),dire=mapPoint(185.875,181.5)
+  assert(radiant[0]<60&&radiant[1]>450&&dire[0]>450&&dire[1]<100,'fountains align to opposing terrain corners')
+  const episode=clinkz.episodes.find(e=>e.t===2335)
+  const html=renderToStaticMarkup(React.createElement(Route,{play:episode,heroId:56,structures:clinkz.structures}))
+  assert(html.includes('/assets/map/dota-741.webp'));assert.equal((html.match(/T[1-4], /g)??[]).length,22)
+  assert(html.includes('уничтожен в'),'destroyed buildings display the actual destruction time')
+  const reference=renderToStaticMarkup(React.createElement(Route,{play:episode,heroId:56}))
+  assert(!reference.includes('уничтожен в'),'foreign reference routes never borrow current match destruction state')
   assert(clinkz.episodes.some(e => e.t === 1064 && e.kind === 'rotation' && e.facts.kills === 1))
   assert(clinkz.episodes.some(e => e.t === 2335 && e.kind === 'objective' && e.facts.destroyed))
   assert.equal(clinkz.teamGoldAt15, -6571)

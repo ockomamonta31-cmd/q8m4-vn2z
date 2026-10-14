@@ -151,9 +151,13 @@ export interface MapPlays {
   teamNetworthAt15: number
   enemyNetworthAt15: number
   episodes: MapPlay[]
+  structures?: MapStructure[]
 }
+export interface MapStructure {key?:string;kind:string;team:number;x:number;y:number;destroyedAt?:number|null}
 
 export interface MatchPlayer {
+  teamKills?: number
+  teamDamage?: number
   steamAccountId: number
   name: string | null
   heroId: number
@@ -214,6 +218,10 @@ export interface PlayerEvidence {
   /** t, earned gold, networth, XP, LH, denies, hero damage, healing, tower damage, team gold lead */
   curve: (number | null)[][]
   lane: { damage: number | null; damageTaken: number | null; attacks: number | null; spellHits: number | null; activeMinutes: number | null }
+  microVersion?:1|null
+  laneMinutes?:{t:number;end:number;lh:number;xp:number;damage:number;taken:number;attacks:number;aliveSeconds:number}[]|null
+  deathWindows?:{t:number;from:number;damage:number;taken:number;attacks:number;ownSpells:string[];enemySpells:string[];items:string[];nearestAlly:{heroId:number;distance:number}|null;allyDamage:number;allySpells:string[];lhNextMinute:number|null;xpNextMinute:number|null}[]|null
+  spellWindows?:{t:number;key:string;seconds:number;attacks:number;damage:number}[]|null
   deaths: { t: number; goldFed: number | null; lostGold: number | null; secondsDead: number | null; killer: string; dieback: boolean }[] | null
   wards: { t: number; type: string; x: number | null; y: number | null }[] | null
   uses: { t: number; key: string; target: string }[] | null

@@ -197,7 +197,7 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
       const fights=timeline?.teamfights??[]
       const enriched=!timeline||fights.length===0||Array.isArray(fights[0]?.lines)
       const spatial=entries.length===10&&entries.every((x:any)=>x.mapPlays?.version===1)
-      const coached=entries.length===10&&entries.every((x:any)=>x.evidence?.version===1)
+      const coached=entries.length===10&&entries.every((x:any)=>x.evidence?.version===1&&x.evidence?.microVersion===1&&x.mapPlays?.structures?.length)
       if(positioned&&enriched&&spatial&&coached) done.add(id)
     }
   }

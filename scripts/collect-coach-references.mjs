@@ -53,6 +53,7 @@ for (const m of selected) {
       examples.set(raw.match_id + ':' + p.player_slot, { matchId: raw.match_id, slot: p.player_slot, heroId: p.hero_id, position, roleSource: trained?.position ? 'corpus' : 'lane-economy',
         rank: Number(trained.seasonRank) || Number(m.actualRank) || 0, cohort: raw.leagueid ? 'pro' : 'pub',
         start: raw.start_time, patch: raw.patch ?? null, duration: raw.duration, won: raw.radiant_win === (p.player_slot < 128),mapPlays:existing?.mapPlays??null,
+        outcome:{kills:p.kills,assists:p.assists,heroDamage:p.hero_damage,towerDamage:p.tower_damage},
         evidence: { ...evidence, curve:evidence.curve.filter((row,i)=>Number(row[0])%300===0||i===evidence.curve.length-1),
           purchases:evidence.purchases?.filter(x=>['blink','black_king_bar','desolator','orchid','battlefury','radiance','maelstrom','travel_boots','kaya','witch_blade','armlet'].includes(x.key))??null,
           uses: null, deaths: evidence.deaths?.slice(0,40), runes: null, fights: null } })

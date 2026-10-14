@@ -1,14 +1,17 @@
 import { useState } from 'react'
-import type { MapPlay, MapPlays } from '../../api/types'
+import type { MapPlay, MapPlays, MapStructure } from '../../api/types'
 import { fmtDuration } from '../../api/formats'
 import { signed } from '../../api/score'
+import { heroImageUrl } from '../../api/heroes'
+import heroes from '../../../server/data/constants/heroes.json'
+import map from '../../../server/data/constants/map_741.json'
 
 const kindName = { fight: 'Размен', rotation: 'Выход в бой', objective: 'Давление на объект', pressure: 'Продвижение линии' }
-const cell = (v: number) => Math.max(0, Math.min(256, (v - 64) * 2))
+export const mapPoint = (x: number, y: number) => [512 * (x * 128 - map.projection.xmin) / (map.projection.xmax - map.projection.xmin), 512 * (map.projection.ymax - y * 128) / (map.projection.ymax - map.projection.ymin)]
 const towerName = (key = '') => {
   const lane = key.endsWith('_top') ? 'верх' : key.endsWith('_bot') ? 'низ' : 'центр'
   const tier = key.match(/tower(\d)/)?.[1]
-  return tier ? `T${tier}, ${lane}` : /rax/.test(key) ? `казармы, ${lane}` : 'трон'
+  return tier ? `T${tier}, ${tier === '4' ? 'у трона' : lane}` : /rax/.test(key) ? `казармы, ${lane}` : 'трон'
 }
 function factsOf(e: MapPlay) {
   const f = e.facts
@@ -16,7 +19,8 @@ function factsOf(e: MapPlay) {
   if (e.kind === 'objective') return `${(f.damage ?? 0).toLocaleString('ru-RU')} урона по ${towerName(f.target)}. ${f.destroyed ? 'Объект уничтожен в течение 30 с.' : 'Объект остался цел.'}`
   return `Участие в ${f.kills} убийствах подтверждено уроном или добиванием и позицией; своих смертей ${f.deaths}. Рядом перед эпизодом: ${f.allies} союзных героев, включая игрока, и ${f.enemies} вражеских.`
 }
-export function Route({ play, heroId }: { play: MapPlay; heroId: number }) {
+export function Route({ play, heroId, structures }: { play: MapPlay; heroId: number; structures?: MapStructure[] }) {
+  const [expanded, setExpanded] = useState(false)
   const segments: string[] = []
   let line = ''
   play.route.forEach((p, i) => {
@@ -26,15 +30,38 @@ export function Route({ play, heroId }: { play: MapPlay; heroId: number }) {
       if (line) segments.push(line)
       line = ''
     }
-    if (p[3] === 0) line += `${cell(p[1])},${256 - cell(p[2])} `
+    if (p[3] === 0) line += `${mapPoint(p[1], p[2]).join(',')} `
   })
   if (line) segments.push(line)
-  return <svg viewBox="0 0 256 256" role="img" aria-label={`Маршрут за ${fmtDuration(play.route[0]?.[0] ?? play.t)}–${fmtDuration(play.route.at(-1)?.[0] ?? play.end)}. Схема координат, без рельефа и видимости.`} style={{ width: '100%', maxWidth: 280, background: 'var(--bg-deep)', border: '1px solid var(--line)' }}>
-    <path d="M32 224 L32 32 L224 32 M32 224 L224 224 L224 32 M32 224 L224 32" fill="none" stroke="var(--line)" strokeWidth="4" />
-    <text x="8" y="248" fill="var(--text-dim)" fontSize="11">Radiant</text><text x="216" y="16" fill="var(--text-dim)" fontSize="11">Dire</text>
-    {segments.map((points, i) => <polyline key={i} points={points} fill="none" stroke="var(--gold)" strokeWidth="2.5" />)}
-    {play.heroes.filter(h => h.alive).map(h => <circle key={h.slot} cx={cell(h.x)} cy={256 - cell(h.y)} r={h.heroId === heroId ? 6 : 4} fill={h.heroId === heroId ? 'var(--gold)' : h.slot < 128 ? 'var(--radiant)' : 'var(--dire)'}><title>Герой #{h.heroId}, {h.slot < 128 ? 'Radiant' : 'Dire'} в {fmtDuration(play.t)}</title></circle>)}
-  </svg>
+  const alive = play.route.filter(p => p[3] === 0)
+  return <figure className={`dota-map${expanded ? ' expanded' : ''}`}>
+    <div className="dota-map-heading"><span>{fmtDuration(play.route[0]?.[0] ?? play.t)}–{fmtDuration(play.route.at(-1)?.[0] ?? play.end)}</span><button type="button" className="btn btn-q" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>{expanded ? 'Свернуть карту' : 'Увеличить карту'}</button></div>
+    <svg viewBox="0 0 512 512" role="img" aria-label={`Карта Dota 2, маршрут и строения в ${fmtDuration(play.t)}. Истинные позиции из реплея без тумана войны.`}>
+      <image href={map.image} width="512" height="512" />
+      <rect width="512" height="512" fill="#06100a" opacity=".16" />
+      {(structures?.length ? structures : map.structures).map((s: MapStructure, i) => {
+        const [x,y] = mapPoint(s.x,s.y), tower = s.kind.endsWith('_Tower'), fort = s.kind.endsWith('_Fort'), fountain = s.kind.endsWith('_Fountain')
+        const destroyed = s.destroyedAt != null && s.destroyedAt <= play.t
+        const unknown = !structures?.length || !s.key || /tower4_/.test(s.key)
+        const color = destroyed ? '#bdc5bf' : s.team === 2 ? '#79e6a0' : '#ff8b83'
+        return <g key={i} transform={`translate(${x} ${y})`} opacity={destroyed ? .65 : 1}>
+          <title>{`${s.team === 2 ? 'Radiant' : 'Dire'} · ${tower ? towerName(s.key) : fort ? 'трон' : fountain ? 'фонтан' : 'казармы'} · ${destroyed ? `уничтожен в ${fmtDuration(s.destroyedAt!)}` : unknown ? 'состояние не подтверждено' : 'не уничтожен к началу эпизода'}`}</title>
+          {tower ? <><path d="M-7 8 V-6 L-3-10 H3 L7-6 V8Z" fill="#112219" stroke={color} strokeWidth="2" strokeDasharray={unknown ? '3 2' : undefined}/><text y="4" textAnchor="middle" fill={color} fontSize="11" fontWeight="700">{s.key?.match(/tower(\d)/)?.[1] ?? 'T'}</text></> : fort ? <path d="M0-10 L10 0 L0 10 L-10 0Z" fill="#112219" stroke={color} strokeWidth="3" strokeDasharray={unknown ? '3 2' : undefined} /> : <rect x="-4" y="-4" width="8" height="8" fill="#112219" stroke={color} strokeWidth="1.5" strokeDasharray={unknown ? '2 2' : undefined} />}
+          {destroyed && <path d="M-7-7 L7 7 M7-7 L-7 7" stroke="#fff" strokeWidth="2.5" />}
+        </g>
+      })}
+      {segments.map((points, i) => <g key={i}><polyline points={points} fill="none" stroke="#101909" strokeWidth="7" /><polyline points={points} fill="none" stroke="#ffde75" strokeWidth="3" /></g>)}
+      {alive.length > 1 && [alive[0],alive.at(-1)!].map((p,i) => {const [x,y]=mapPoint(p[1],p[2]);return <g key={i}><circle cx={x} cy={y} r="8" fill="#102018" stroke="#ffde75" strokeWidth="2"/><text x={x} y={y+4} textAnchor="middle" fill="#ffde75" fontSize="11">{i ? 'Б' : 'А'}</text></g>})}
+      {play.heroes.filter(h => h.alive).map(h => {
+        const [x,y]=mapPoint(h.x,h.y), hero=heroes.find(p=>p.id===h.heroId), selected=h.heroId===heroId
+        return <g key={h.slot} transform={`translate(${x} ${y})`}><title>{`${hero?.displayName ?? `Герой #${h.heroId}`} · ${h.slot < 128 ? 'Radiant' : 'Dire'} в ${fmtDuration(play.t)}`}</title>
+          <rect x="-12" y="-9" width="24" height="18" fill="#112219" stroke={selected ? '#ffde75' : h.slot < 128 ? '#79e6a0' : '#ff8b83'} strokeWidth={selected ? 3 : 2}/>
+          {hero && <image href={heroImageUrl(hero.shortName)} x="-11" y="-8" width="22" height="16" preserveAspectRatio="xMidYMid slice"/>}
+        </g>
+      })}
+    </svg>
+    <figcaption>Жёлтый маршрут: А → Б. Портреты — позиции в начале эпизода. Цифры — уровни башен; крест — уничтожена; пунктир — состояние неизвестно. Основа карты 7.41.</figcaption>
+  </figure>
 }
 
 export default function MapPlaysPanel({ plays }: { plays: MapPlays }) {
@@ -62,7 +89,7 @@ export default function MapPlaysPanel({ plays }: { plays: MapPlays }) {
       <p className="dim t12">Преимущество команды перед эпизодом: {signed(play.teamGold)} золота. {play.moved !== null && `Смещение за предыдущие 30 с: ${play.moved.toLocaleString('ru-RU')} ед. карты (включает телепорты).`}</p>
       <p className="dim t12">Жёлтый — маршрут игрока и его позиция в начале события. Зелёные — Radiant, красные — Dire. Показаны истинные позиции из реплея; видимость команд, кулдауны и намерения пока не учитываются.</p>
       </div>
-      <Route play={play} heroId={plays.heroId} />
+      <Route play={play} heroId={plays.heroId} structures={plays.structures} />
     </div> : <p className="dim">В этом промежутке нет подтверждённых эпизодов.</p>}
   </section>
 }

@@ -4,7 +4,21 @@ import type { CoachNote } from './coach'
 import { fmtDuration } from './formats'
 import meta from '../../server/data/constants/hero_meta.json'
 import items from '../../server/data/constants/items.json'
+import heroes from '../../server/data/constants/heroes.json'
+import kits from '../../server/data/constants/hero_kit.json'
 const itemName=(key:string)=>items.find(i=>i.shortName===key)?.displayName ?? key
+const heroName=(id:number)=>heroes.find(h=>h.id===id)?.displayName??`герой ${id}`
+const spellNames=new Map(Object.values(kits.kit).flatMap(k=>k.abilities.map(a=>[a.name,a.title] as [string,string])))
+const spellName=(key:string)=>spellNames.get(key)??({clinkz_strafe:'Strafe',clinkz_death_pact:'Death Pact',earthshaker_aftershock:'Aftershock'} as Record<string,string>)[key]??key.replace(/^[^_]+_/,'').replaceAll('_',' ')
+
+export function deathDetail(p:MatchPlayer,d:NonNullable<PlayerEvidence['deathWindows']>[number]):Omit<TrainingFact,'id'> {
+  const ally=d.nearestAlly,enemy=d.enemySpells.map(spellName).join(', '),used=[...d.ownSpells.map(spellName),...d.items.map(k=>itemName(k.replace(/^item_/,'')))].join(', ')
+  return {section:d.t<600?'lane':'fight',title:`${fmtDuration(d.t)} · что предшествовало твоей смерти`,t:d.t,status:'review',
+    fact:`За ${fmtDuration(d.from)}–${fmtDuration(d.t)}: нанёс героям ${d.damage} урона (${d.attacks} обычных попаданий), получил ${d.taken} урона. ${enemy?`В тебя попали: ${enemy}. `:''}${used?`Использовал: ${used}. `:''}${ally?`За 10 с до смерти ближайший живой союзник — ${heroName(ally.heroId)}, ${ally.distance} ед. В этом окне его урон героям: ${d.allyDamage}; контроль/способности по героям: ${d.allySpells.map(spellName).join(', ')||'не записаны'}. `:''}${d.lhNextMinute!=null?`От начала окна до минуты после смерти: ${d.lhNextMinute} добиваний, ${d.xpNextMinute} опыта.`:''}`,
+    advice:d.taken>d.damage*1.5
+      ? `Подтверждённая проблема этого эпизода — смерть после размена с перевесом входящего урона. ${ally&&ally.distance<900?`${heroName(ally.heroId)} был рядом; этих данных недостаточно, чтобы обвинить его в отсутствии помощи. `:''}В следующей игре сократи размен до одного-двух ударов и возвращайся к крипам, если ответный контроль не позволяет продолжить. На реплее найди последний момент до первого из перечисленных попаданий, когда ещё можно было увеличить дистанцию; если отход уже был перекрыт, разбери более ранний подход.`
+      : `Сам урон не объясняет смерть: ты мог выиграть размен до подключения второго противника. Сравни перечисленные попадания с моментом, когда начали подходить новые враги. Следующее исправление — заранее выбрать сторону отхода и закончить размен до их подключения; готовность способностей и видимость нужно проверить в реплее.`}
+}
 
 
 export type TrainingFact = CoachNote & { id: string; section: 'lane' | 'farm' | 'fight' | 'support' | 'map'; referenceIds?: number[] }
@@ -32,6 +46,21 @@ export function trainingFacts(p: MatchPlayer, duration: number, opponents: Match
   if (deaths?.length) notes.push({section:'lane',title:'Цена смертей на линии',status:'review',t:deaths[0].t,
     fact:`Смертей на линии: ${deaths.length}. Время: ${deaths.map(d=>fmtDuration(d.t)).join(', ')}. Подтверждённое время мёртвым: ${deaths.reduce((n,d)=>n+(d.secondsDead??0),0)} с; отданное золото: ${deaths.reduce((n,d)=>n+(d.goldFed??0),0)}. Возвращение на линию сюда не входит.`,
     advice:'Перед следующей попыткой размена проверь уровень врагов и расстояние до партнёра. После смерти приоритет — вернуться в опыт и восстановить ресурсы, а не повторять вход без изменившихся условий.'})
+  const farmTrade=e.laneMinutes?.filter(m=>m.t>=60&&m.aliveSeconds>=50&&m.attacks>=5&&m.lh<=2).sort((a,b)=>a.lh-b.lh||b.attacks-a.attacks)[0]
+  if(p.position<=3&&farmTrade)notes.push({section:'lane',title:`${fmtDuration(farmTrade.t)}–${fmtDuration(farmTrade.end)} · размены при слабом добивании`,status:'review',t:farmTrade.t,
+    fact:`За минуту: ${farmTrade.lh} добиваний, ${farmTrade.xp} опыта, ${farmTrade.attacks} обычных попаданий по героям, ${farmTrade.damage} нанесённого и ${farmTrade.taken} полученного урона. Живым был ${farmTrade.aliveSeconds} с.`,
+    advice:'Конкретная потеря здесь — мало добиваний в минуту, когда ты был жив и активно бил героев. Проверь, совпадали ли атаки по героям с возможностью добить крипа. Если да, сначала забирай добивание и только затем бей врага во время его атаки по своему крипу. Это кандидат на неправильный приоритет, а не доказанный механический промах: журнал не показывает HP и доступность каждого крипа.'})
+  notes.push(...(e.deathWindows??[]).filter(d=>d.t<600).sort((a,b)=>(b.taken-b.damage)-(a.taken-a.damage)).slice(0,3).map(d=>deathDetail(p,d)))
+  const repeated=(e.deathWindows??[]).find((d,i,all)=>d.t<600&&i>0&&d.t-all[i-1].t<=120)
+  if(repeated)notes.push({section:'lane',title:'После смерти быстро потерял ещё одну жизнь',t:repeated.t,status:'review',
+    fact:`Предыдущая смерть — ${fmtDuration((e.deathWindows??[]).find(d=>d.t<repeated.t&&d.t>=repeated.t-120)!.t)}; следующая — ${fmtDuration(repeated.t)}. Во втором эпизоде получил ${repeated.taken} урона за ${repeated.t-repeated.from} с.`,
+    advice:'Две близкие смерти — отдельная потеря темпа. Сравни вход после возрождения с первым: изменились ли уровни врагов, число героев и готовность партнёра? Если условия стали хуже, вернись за опытом под башню или на другую доступную волну; повторный риск нужен под конкретную помощь, а не ради отыгрыша предыдущей смерти.'})
+  for(const w of (e.spellWindows??[]).filter(w=>w.attacks===0).slice(0,2))notes.push({section:w.t<600?'lane':'fight',title:`${fmtDuration(w.t)} · Strafe без обычных атак в следующем окне`,t:w.t,status:'review',
+    fact:`Применение Strafe записано. За следующие ${w.seconds} с обычных попаданий — ${w.attacks}, урон от записанных действий — ${w.damage}.`,
+    advice:'Проверь, был ли враг или крип в доступной дальности перед нажатием. Если целью были обычные атаки, включай ускорение после выбора доступной цели, а не перед длинным подходом. Отсутствие попаданий само по себе не доказывает ошибку: способность могла использоваться для другой задачи или враг прервал атаку.'})
+  if(e.spellWindows?.length&&e.spellWindows.every(w=>w.attacks>0))notes.push({section:'fight',title:'Strafe: применения с подтверждёнными атаками',status:'good',
+    fact:`Записано ${e.spellWindows.length} применений Strafe; после каждого есть обычные попадания в течение ${e.spellWindows[0].seconds} с. Первое записанное применение — ${fmtDuration(e.spellWindows[0].t)}. Урон в этих окнах может включать героев, крипов и строения.`,
+    advice:'Пустых применений в этих окнах не видно. Это не доказывает оптимальную цель и длительность атаки: для этого сравни выбор цели, прерывания и возможность бить безопасно в конкретном бою. Ошибку нажатия по этому счётчику тебе приписывать нельзя.'})
   const refs = comparisons(p,p.seasonRank,true)
   const spatialRef=refs.find(r=>r.mapPlays?.coverage && r.mapPlays.coverage>=.9)
   const refPlay=spatialRef?.mapPlays?.episodes.find(e=>e.t>=600&&e.verdict>0&&(e.kind==='rotation'||e.kind==='objective'))
@@ -75,5 +104,6 @@ export function trainingFacts(p: MatchPlayer, duration: number, opponents: Match
   }
   if(e.deaths?.some(d=>d.dieback)) notes.push({section:'fight',title:'Смерть после байбека',status:'review',t:e.deaths.find(d=>d.dieback)?.t,
     fact:`Подтверждено ${e.deaths.filter(d=>d.dieback).length} повторных смертей после байбека.`,advice:'Перед возвратом назови объект, который спасёшь, и способ подключения. Если до команды не добраться вовремя, один байбек не исправит проигранный бой. Проверь это по эпизоду, а не только по цене смерти.'})
+  notes.push(...(e.deathWindows??[]).filter(d=>d.t>=600).slice(0,4).map(d=>deathDetail(p,d)))
   return notes.map((n,i)=>({...n,id:'F'+i}))
 }

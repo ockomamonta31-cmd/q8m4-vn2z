@@ -409,7 +409,7 @@
 .bld { min-width: 0; }
 .map-plays { grid-column: 1 / -1; }
 .map-plays .note-a { margin: var(--sp-12) 0; }
-.map-play-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 280px); align-items: start; gap: var(--sp-24); margin-top: var(--sp-16); }
+.map-play-detail { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 420px); align-items: start; gap: var(--sp-24); margin-top: var(--sp-16); }
 .map-play-detail p { margin-top: 0; }
 @media (max-width: 600px) {
   .map-play-detail { grid-template-columns: 1fr; }
@@ -729,7 +729,16 @@
 .edik-advice { font-size: 14px; line-height: 1.7; max-width: 75ch; color: var(--text-dim); margin-top: 18px; }
 .edik-advice b { color: var(--gold); display: block; font-weight: 600; margin-bottom: 6px; }
 .edik-note.good .edik-advice b { color: var(--radiant-t); }
-.edik-route { width: 210px; flex: none; }
+.edik-route { width: 320px; flex: none; }
+.dota-map { margin: 0; width: 100%; }
+.dota-map-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.dota-map svg { display: block; width: 100%; border: 1px solid var(--line); background: var(--bg-deep); }
+.dota-map figcaption { margin-top: 8px; font-size: 12px; line-height: 1.6; color: var(--text-dim); }
+.edik-note:has(.dota-map.expanded) { flex-wrap: wrap; }
+.edik-note:has(.dota-map.expanded) .edik-note-main { flex-basis: 100%; }
+.edik-route:has(.expanded) { width: min(100%, 640px); }
+.map-play-detail:has(.expanded) { grid-template-columns: 1fr; }
+.map-play-detail .expanded { max-width: 640px; }
 .edik-route p { font-size: 12px; color: var(--text-dim); line-height: 1.6; margin-top: 8px; }
 @media (max-width: 900px) {
   .fbtn { grid-template-columns: 20px 68px 56px minmax(0,1fr) 110px 16px; gap: 12px; }
@@ -763,7 +772,7 @@
   .edik-note { flex-direction: column; gap: 20px; }
   .edik-note header { flex-direction: column; gap: 8px; }
   .edik-note h3 { font-size: 24px; }
-  .edik-route { width: 100%; max-width: 280px; }
+  .edik-route { width: 100%; max-width: 420px; }
 }
 
 .edik-ai { padding: 28px 0; border-top: 1px solid var(--line); margin-top: 24px; }

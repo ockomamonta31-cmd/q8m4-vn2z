@@ -98,7 +98,7 @@ export default function Edik({ match, timeline, rating, heroMap, meSlot, initial
           <p className="edik-advice"><b>{note.status === 'good' ? 'Что удалось' : 'Что проверить'}</b>{note.advice}</p>
           {'referenceIds' in note && (note as TrainingFact).referenceIds?.length ? <p className="edik-references">Сравнить реплеи: {(note as TrainingFact).referenceIds!.map(id=><a key={id} href={`https://www.opendota.com/matches/${id}`} target="_blank" rel="noreferrer">{id}</a>)}</p> : null}
         </div>
-        {note.play && <div className="edik-route"><Route play={note.play} heroId={p.heroId} /><p>Жёлтый — маршрут героя в этом эпизоде; зелёный — Radiant, красный — Dire. Истинные позиции без тумана войны.</p></div>}
+        {note.play && <div className="edik-route"><Route play={note.play} heroId={p.heroId} structures={(note as TrainingFact).referenceIds?.length ? undefined : p.mapPlays?.structures} /><p>Зелёный — Radiant, красный — Dire. Истинные позиции без тумана войны. Для примера из другого матча показаны только ориентиры строений.</p></div>}
       </article>)}
     </div>
     <details className="analysis-method"><summary>На чём основаны объяснения Эдика</summary><p>Ниже — измерения и правила разбора, сверху по кнопке — объяснения ИИ с обязательными ссылками на исходные факты. Примеры сильных игроков содержат реальные матчи, экономику и покупки; для части примеров также разобраны маршруты. Медаль учитывается в оценке, а сильные примеры помогают учиться. Видимость и готовность способностей не восстановлены полностью: предполагаемые причины нужно проверять в эпизоде.</p></details>

@@ -1,5 +1,4 @@
 import heroes from '../server/data/constants/heroes.json'
-import kits from '../server/data/constants/hero_kit.json'
 import laneSpecs from '../server/data/constants/lane_specs.json'
 import { trainingFacts, rolePlan } from '../src/api/training'
 import { assessPlayer } from '../src/api/assessment'
@@ -14,17 +13,17 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
   const opponents=match.players.filter(p=>p.isRadiant!==player.isRadiant)
   const facts=trainingFacts(player,match.durationSeconds,opponents)
   const assessment=assessPlayer({...player,teamKills:side.reduce((n,p)=>n+p.kills,0),teamDamage:side.reduce((n,p)=>n+p.heroDamage,0)},match.durationSeconds,null)
-  const evidence = { matchId:match.id,hero:heroes.find(h=>h.id===player.heroId)?.name,position:player.position,
+  const evidence = { matchId:match.id,hero:heroes.find(h=>h.id===player.heroId)?.displayName,position:player.position,
     medal:player.seasonRank,rankScope:player.rankScope,plan:rolePlan(player),assessment,
     facts:facts.map(f=>({id:f.id,section:f.section,title:f.title,fact:f.fact,referenceIds:f.referenceIds??[]})),
-    lane:match.players.filter(p=>p.lane === player.lane && p.isRadiant === player.isRadiant || p.isRadiant !== player.isRadiant && (p.lane==='mid'&&player.lane==='mid'||p.lane==='safelane'&&player.lane==='offlane'||p.lane==='offlane'&&player.lane==='safelane')).map(p=>({hero:heroes.find(h=>h.id===p.heroId)?.name,ally:p.isRadiant===player.isRadiant,kit:(kits.kit as Record<string,unknown>)[p.heroId]})) }
+    lane:match.players.filter(p=>p.lane === player.lane && p.isRadiant === player.isRadiant || p.isRadiant !== player.isRadiant && (p.lane==='mid'&&player.lane==='mid'||p.lane==='safelane'&&player.lane==='offlane'||p.lane==='offlane'&&player.lane==='safelane')).map(p=>({heroId:p.heroId,hero:heroes.find(h=>h.id===p.heroId)?.displayName,ally:p.isRadiant===player.isRadiant})) }
   const context=JSON.stringify({...evidence,assessment:undefined,lane:evidence.lane.map((row:any)=>{
-    const specs=(laneSpecs.heroes as Record<string,any>)[heroes.find(h=>h.name===row.hero)?.id??0]
-    return {...row,kit:undefined,specs:specs?{attackRange:specs.attackRange,spells:specs.spells.slice(0,4).map((s:any)=>({...s,description:s.description.slice(0,220)}))}:null}
+    const specs=(laneSpecs.heroes as Record<string,any>)[row.heroId]
+    return {...row,specs:specs?{attackRange:specs.attackRange,spells:specs.spells.slice(0,4).map((s:any)=>({...s,description:s.description.slice(0,220)}))}:null}
   })})
   if(context.length>18000) return Response.json({error:'Слишком большой контекст разбора'}, {status:422})
   const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(context)))).map(v=>v.toString(16).padStart(2,'0')).join('')
-  const key=`coach:glm47:v6:${match.id}:${slot}:${hash}`
+  const key=`coach:glm47:v7:${match.id}:${slot}:${hash}`
   const cached=await env.DB.prepare('SELECT value FROM cache WHERE key=?').bind(key).first<{value:string}>()
   if(cached) return answer(JSON.parse(cached.value))
   if(!env.AI) return Response.json({error:'ИИ-тренер на сервере пока не подключён. Измеренный разбор доступен ниже.'},{status:503})
@@ -65,7 +64,7 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
       if(player.position===1 && /без инициац|недостаточн.{0,40}инициац|фокус.{0,20}инициац/i.test(p.explanation+' '+p.nextGame)) throw new Error('Inappropriate carry initiation claim')
       return {title:p.title,explanation:p.explanation,nextGame:p.nextGame,facts:p.factIds.map((id:string)=>facts.find(f=>f.id===id))}
     })
-    const result={model:'GLM 4.7 Flash',version:6,generatedAt:Date.now(),summary:parsed.summary,priorities}
+    const result={model:'GLM 4.7 Flash',version:7,generatedAt:Date.now(),summary:parsed.summary,priorities}
     await env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(key,JSON.stringify(result),Date.now()).run()
     return answer(result)
   } catch(error) {
@@ -73,12 +72,18 @@ export async function coachResponse(env: { DB: D1Database; AI?: Ai }, match: Mat
     // Never publish an unsupported accusation as coaching. Preserve a useful,
     // explicitly labelled event review when generation or grounding fails.
     const sections=player.position>=4?['lane','support','farm','fight']:['lane','farm','fight','map']
-    const chosen=sections.map(section=>facts.find(f=>f.section===section&&f.status==='review')??facts.find(f=>f.section===section)).filter(Boolean)
-    return answer({model:'Разбор по подтверждённым событиям',version:6,generatedAt:Date.now(),
+    const chosen=[facts.find(f=>f.title.includes('слабом добивании')),facts.find(f=>f.section==='lane'&&f.title.includes('предшествовало')),
+      ...sections.filter(s=>s!=='lane').map(section=>facts.find(f=>f.section===section&&f.title.includes('предшествовало'))??facts.find(f=>f.section===section&&f.status==='review')??facts.find(f=>f.section===section)),
+      facts.find(f=>f.title==='Восстановление после старта')].filter(Boolean)
+    if(!chosen.some(f=>f!.section==='lane'))chosen.unshift(facts.find(f=>f.section==='lane'&&f.status==='review')??facts.find(f=>f.section==='lane'))
+    const result={model:'Разбор по подтверждённым событиям',version:7,generatedAt:Date.now(),
       summary:'Объяснение ИИ не прошло проверку конкретности или фактов. Ниже — измеренные эпизоды и рекомендации правил разбора; их источник указан отдельно.',
-      priorities:chosen.map(f=>({title:f!.title,explanation:f!.advice,nextGame:f!.section==='lane'?'Выбери первую смерть на линии. Останови реплей за 15 секунд до неё и отметь расстояние до партнёра, уровень врагов и момент, когда ещё можно было отойти.'
+      priorities:chosen.filter(Boolean).map(f=>({title:f!.title,explanation:f!.advice,nextGame:f!.title.includes('слабом добивании')?'Пересмотри отмеченную минуту по каждому крипу. Запиши, какие добивания были доступны во время атак по герою. В следующей линии сначала забирай эти добивания и сравни результат.'
+        :f!.section==='lane'?'Останови отмеченный эпизод перед первым попаданием контроля. Найди последнюю возможность отойти и проверь, что мог сделать ты и что уже сделал партнёр.'
         :f!.section==='farm'?'Перед следующим выходом назови готовый предмет и цель. После игры сравни три минуты до и после выхода: добивания, заработанное золото и время мёртвым.'
         :f!.section==='support'?'Перед следующей командной целью обозначь, кто даёт обзор и обнаружение. В разборе проверь установку и применение, а не только покупки расходников.'
-        :'Разбери один выход: какая цель была доступна, успевали ли союзники и что ты получил после размена. Сравни условия с примером того же героя.',facts:[f]}))})
+        :'Разбери один выход: какая цель была доступна, успевали ли союзники и что ты получил после размена. Сравни условия с примером того же героя.',facts:[f]}))}
+    await env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(key,JSON.stringify(result),Date.now()).run()
+    return answer(result)
   }
 }

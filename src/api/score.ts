@@ -1,5 +1,5 @@
-// Shared model; the match page additionally supplies observed team totals
-// and event statistics when available. Histories use estimated team shares.
+// Shared assessment. Match and history rows supply observed team totals;
+// isolated rows use estimated shares only when those totals are unavailable.
 
 import type { ImpactInput } from './impact'
 import { globalModelInfo, predictImpGlobal, type ImpEstimator } from './performance'
