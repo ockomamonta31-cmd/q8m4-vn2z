@@ -21,6 +21,10 @@ const run=(file,...args)=>new Promise((resolve,reject)=>{
   child.once('error',reject)
   child.once('exit',code=>code===0?resolve():reject(new Error(`${file} exited ${code}`)))
 })
+const status=async(id,state)=>{
+  const res=await fetch(new URL(`/api/internal/replay/${id}/status`,base),{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({state}),signal:AbortSignal.timeout(30_000)})
+  if(!res.ok)throw new Error(`Replay status HTTP ${res.status}`)
+}
 
 const requestedId=process.env.REPLAY_MATCH_ID
 // Ручной dispatch умеет список: "123,456". Всё, что не чистые цифры, отбрасываем,
@@ -33,24 +37,29 @@ const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
 // том, чтобы разобрать то, что человек только что сыграл.
 const scan=Math.max(max,Number(process.env.REPLAY_SCAN_LIMIT)||40)
 const candidates=matchIds.slice(0,scan)
-let completed=0, noReplay=0
+let completed=0, noReplay=0, failures=0
 for(const id of candidates) {
   if(completed>=max) break
   try {
     const metaRes=await fetch(`https://api.opendota.com/api/matches/${id}`,{signal:AbortSignal.timeout(20_000)})
-    if(!metaRes.ok) continue
+    if(!metaRes.ok) throw new Error(`Replay metadata HTTP ${metaRes.status}`)
     const meta=await metaRes.json()
-    if(!/^\d+$/.test(String(meta.cluster??''))||!/^\d+$/.test(String(meta.replay_salt??''))) { noReplay++; continue }
+    if(!/^\d+$/.test(String(meta.cluster??''))||!/^\d+$/.test(String(meta.replay_salt??''))) { noReplay++; await status(id,'waiting');console.log(`WAIT ${id}: replay metadata not published`);continue }
     const match=await get(`/api/internal/replay/match/${id}`)
-    if(match.players?.length!==10) continue
+    if(match.players?.length!==10) throw new Error('Expected ten match players')
+    await status(id,'parsing')
     await mkdir(join(data,'matches'),{recursive:true})
     await writeFile(join(data,'matches',`${id}.json`),JSON.stringify(match))
     await run('parse-replay.mjs',String(id),String(meta.cluster),String(meta.replay_salt))
     await run('normalize-replay.mjs',String(id))
+    await status(id,'ready')
     completed++
     console.log(`READY ${id}`)
   } catch(error) {
+    failures++
     console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
+    await status(id,'retry').catch(error=>console.error(`STATUS ${id}: ${error.message}`))
   }
 }
-console.log(`INGEST ${completed}/${candidates.length}; реплей ещё не выложен=${noReplay}; всего в очереди=${matchIds.length}`)
+console.log(`INGEST ${completed}/${candidates.length}; реплей ещё не выложен=${noReplay}; ошибок=${failures}; всего в очереди=${matchIds.length}`)
+if(failures)process.exitCode=1

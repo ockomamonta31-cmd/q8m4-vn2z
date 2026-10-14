@@ -80,6 +80,16 @@ export async function fetchTimeline(id: number): Promise<MatchTimeline | null> {
   }
 }
 
+export interface ReplayStatus {
+  state: 'queued' | 'waiting' | 'parsing' | 'retry' | 'ready'
+  updatedAt?: number
+}
+export async function fetchReplayStatus(id: number, signal?: AbortSignal): Promise<ReplayStatus> {
+  const res=await fetch(`/api/matches/${id}/replay-status`,{signal})
+  if(!res.ok)throw new Error('Не удалось проверить разбор реплея')
+  return res.json() as Promise<ReplayStatus>
+}
+
 /** Пик преимущества по абсолютному значению — для подписи «самый большой отрыв». */
 export function peakAdvantage(timeline: MatchTimeline | null) {
   if (!timeline?.series.length) return null

@@ -179,7 +179,8 @@ function stratzRole(d:StratzDraft|null,team:'r'|'d',heroId:number) {
  */
 async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
   const histories=await env.DB.prepare("SELECT value FROM cache WHERE key GLOB 'history:*'").all<{value:string}>()
-  const ids=[...new Set(histories.results.flatMap(row=>{try{return (JSON.parse(row.value).rows??[]).map((x:any)=>Number(x.id)).filter((id:number)=>Number.isSafeInteger(id)&&id>0)}catch{return []}}))].sort((a,b)=>b-a)
+  const matches=await env.DB.prepare("SELECT key FROM cache WHERE key GLOB 'match:*'").all<{key:string}>()
+  const ids=[...new Set([...matches.results.map(row=>Number(row.key.slice(6))),...histories.results.flatMap(row=>{try{return (JSON.parse(row.value).rows??[]).map((x:any)=>Number(x.id))}catch{return []}})].filter((id:number)=>Number.isSafeInteger(id)&&id>0))].sort((a,b)=>b-a)
   const done=new Set<number>()
   // Батч по 40: на каждый матч нужно два ключа, а D1 отказывается биндить
   // слишком много параметров одним запросом ("too many SQL variables").
@@ -198,7 +199,7 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
       const enriched=!timeline||fights.length===0||Array.isArray(fights[0]?.lines)
       const spatial=entries.length===10&&entries.every((x:any)=>x.mapPlays?.version===1)
       const coached=entries.length===10&&entries.every((x:any)=>x.evidence?.version===1&&x.evidence?.microVersion===1&&x.mapPlays?.structures?.length)
-      if(positioned&&enriched&&spatial&&coached) done.add(id)
+      if(timeline&&positioned&&enriched&&spatial&&coached) done.add(id)
     }
   }
   return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))
@@ -353,32 +354,44 @@ export default {
       ]))
       return json({ok:true,records:records.length})
     }
+    const replayStatusUpdate=p.match(/^\/api\/internal\/replay\/(\d+)\/status$/)
+    if(replayStatusUpdate) {
+      if(!env.REPLAY_INGEST_TOKEN||request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}`)return json({error:'Unauthorized'},401)
+      if(request.method!=='POST')return json({error:'Method not allowed'},405)
+      const raw=await request.text();if(raw.length>2000)return json({error:'Payload too large'},413)
+      let data:any;try{data=JSON.parse(raw)}catch{return json({error:'Invalid JSON'},400)}
+      if(!['waiting','parsing','retry','ready'].includes(data?.state))return json({error:'Invalid replay state'},400)
+      await save(env,`replay-status:v1:${replayStatusUpdate[1]}`,{state:data.state,updatedAt:Date.now()})
+      return json({ok:true})
+    }
     const ingest=p.match(/^\/api\/internal\/replay\/(\d+)$/)
     if(ingest) {
       if(request.method!=='POST') return json({error:'Method not allowed'},405)
       if(!env.REPLAY_INGEST_TOKEN || request.headers.get('authorization')!==`Bearer ${env.REPLAY_INGEST_TOKEN}`) return json({error:'Unauthorized'},401)
       const id=Number(ingest[1]), raw=await request.text()
-      if(raw.length>1_000_000) return json({error:'Payload too large'},413)
+      // Keep each stored D1 row below its 2 MB limit, including UTF-8 text.
+      if(new TextEncoder().encode(raw).length>1_900_000) return json({error:'Payload too large'},413)
       let data:any; try { data=JSON.parse(raw) } catch { return json({error:'Invalid JSON'},400) }
-      if(!Array.isArray(data.players) || data.players.length>10) return json({error:'Expected player timeline array'},400)
+      if(!Array.isArray(data.players) || data.players.length!==10) return json({error:'Expected ten player timelines'},400)
       const bySlot:Record<string,{purchaseEvents:{time:number;itemId:number}[];abilityUpgrades:{ability:number;time:number;level:number}[];impactPhases?:any[];mapPlays?:any;evidence?:any;position?:number;positionSource?:'replay'|'stats';lane?:'safelane'|'mid'|'offlane';positionVersion?:number}>= {}
       for(const row of data.players) {
         const slot=Number(row.playerSlot)
-        if(!Number.isInteger(slot)||slot<0||slot>255) return json({error:'Invalid player slot'},400)
+        if(![0,1,2,3,4,128,129,130,131,132].includes(slot)||bySlot[String(slot)]) return json({error:'Invalid player slot'},400)
         const purchases=Array.isArray(row.purchaseEvents)?row.purchaseEvents:[], upgrades=Array.isArray(row.abilityUpgrades)?row.abilityUpgrades:[]
         const position=Number(row.position)
-        if(!validEvidence(row.evidence)) return json({error:'Invalid player evidence'},400)
+        if(!validEvidence(row.evidence)) return json({error:`Invalid player evidence (slot ${slot})`},400)
         if(!validMapPlays(row.mapPlays)) return json({error:'Invalid map plays'},400)
         const impactPhases=Array.isArray(row.impactPhases)?row.impactPhases.slice(0,3).filter((x:any)=>x&&typeof x.label==='string').map((x:any)=>Object.fromEntries(['label','kills','deaths','gold','networth','lastHits','experience','heroDamage','towerDamage'].map(k=>[k,k==='label'?x[k]:Math.max(0,Math.trunc(Number(x[k])||0))]))):undefined
         bySlot[String(slot)]={purchaseEvents:purchases.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.itemId)).slice(0,500),abilityUpgrades:upgrades.filter((e:any)=>Number.isFinite(e.time)&&Number.isInteger(e.ability)&&Number.isInteger(e.level)).slice(0,100),impactPhases,evidence:row.evidence??undefined,mapPlays:row.mapPlays??undefined,positionVersion:Math.max(0,Math.trunc(Number(row.positionVersion)||0)),...(Number.isInteger(position)&&position>=1&&position<=5?{position,positionSource:row.positionSource==='replay'?'replay':'stats',...(row.positionSource==='replay'&&(row.lane==='safelane'||row.lane==='mid'||row.lane==='offlane')?{lane:row.lane}:{})}:{})}
       }
-      await save(env,`replay-data:v1:${id}`,bySlot)
+      const writes=[env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(`replay-data:v1:${id}`,JSON.stringify(bySlot),Date.now())]
       // Global charts (advantage curve, event feed) ride along when the parser
       // run provides them; older payloads simply omit the key and the UI hides
       // those sections instead of rendering an empty chart.
       if (data.timeline && typeof data.timeline === 'object' && Array.isArray(data.timeline.series)) {
-        await save(env,`replay-timeline:v1:${id}`,data.timeline)
+        writes.push(env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(`replay-timeline:v1:${id}`,JSON.stringify(data.timeline),Date.now()))
       }
+      await env.DB.batch(writes)
       return json({ok:true,matchId:id,players:Object.keys(bySlot).length,timeline:Boolean(data.timeline)})
     }
     if(p==='/api/internal/replay/pending') {
@@ -418,6 +431,14 @@ export default {
     }
     m=p.match(/^\/api\/matches\/(\d+)\/timeline$/)
     if(m){const id=Number(m[1]),t=await cached<unknown>(env,`replay-timeline:v1:${id}`);if(!t)return json({error:'Реплей этого матча ещё не разобран'},404);return json(t)}
+    m=p.match(/^\/api\/matches\/(\d+)\/replay-status$/)
+    if(m){
+      const id=Number(m[1]),[replay,timeline,status]=await Promise.all([replayData(env,id),cached(env,`replay-timeline:v1:${id}`),cached<any>(env,`replay-status:v1:${id}`)])
+      const rows=Object.values(replay??{})
+      if(timeline&&rows.length===10&&rows.every((r:any)=>r.evidence?.microVersion===1&&r.mapPlays?.structures?.length))return json({state:'ready'})
+      if(status?.state==='parsing'&&Date.now()-status.updatedAt>15*60_000)return json({state:'retry',updatedAt:status.updatedAt})
+      return json(status?.state==='ready'?{state:'queued'}:status??{state:'queued'})
+    }
     m=p.match(/^\/api\/player\/(\d+)\/heroes$/)
     if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,{heroId:number;matchCount:number;winCount:number}>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id),a=agg.get(me.heroId)??{heroId:me.heroId,matchCount:0,winCount:0};a.matchCount++;if(me.isVictory)a.winCount++;agg.set(me.heroId,a)}return json([...agg.values()].sort((a,b)=>b.matchCount-a.matchCount).slice(0,Math.min(Number(url.searchParams.get('take'))||100,100)))}
     m=p.match(/^\/api\/player\/(\d+)\/peers$/)

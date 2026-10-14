@@ -81,8 +81,11 @@ export function validEvidence(e) {
   if (e.version !== 1 || !Array.isArray(e.curve) || e.curve.length > 240 || !e.lane) return false
   if (!e.curve.every(r => Array.isArray(r) && r.length === 10 && r.every(v => v === null || Number.isFinite(v)) && r[0] >= 0 && r[0] <= 14400)) return false
   for (const key of ['deaths', 'wards', 'uses', 'fights', 'purchases', 'runes']) {
-    if (e[key] !== null && (!Array.isArray(e[key]) || e[key].length > 4000)) return false
+    // Invoker's orb casts alone can exceed 4,000 in a normal match.
+    const limit = key === 'uses' ? 16000 : 4000
+    if (e[key] !== null && (!Array.isArray(e[key]) || e[key].length > limit)) return false
   }
+  if(e.uses?.some(r=>!r||!Number.isFinite(r.t)||r.t<0||r.t>14400||typeof r.key!=='string'||r.key.length>100||typeof r.target!=='string'||r.target.length>160))return false
   for(const key of ['laneMinutes','deathWindows','spellWindows'])if(e[key]!=null&&(!Array.isArray(e[key])||e[key].length>40))return false
   if(e.microVersion!=null&&e.microVersion!==1)return false
   const finite=v=>typeof v==='number'&&Number.isFinite(v)&&v>=0
@@ -90,5 +93,5 @@ export function validEvidence(e) {
   const names=xs=>Array.isArray(xs)&&xs.length<=8&&xs.every(x=>typeof x==='string'&&/^[a-z0-9_]{1,100}$/.test(x))
   if(e.deathWindows?.some(r=>!r||!['t','from','damage','taken','attacks','allyDamage'].every(k=>finite(r[k]))||r.from>r.t||r.t>14400||!['lhNextMinute','xpNextMinute'].every(k=>r[k]==null||finite(r[k]))||!['ownSpells','enemySpells','items','allySpells'].every(k=>names(r[k]))||r.nearestAlly!=null&&(!finite(r.nearestAlly.distance)||!Number.isInteger(r.nearestAlly.heroId)||r.nearestAlly.heroId<=0)))return false
   if(e.spellWindows?.some(r=>!r||!['t','seconds','attacks','damage'].every(k=>finite(r[k]))||!names([r.key])))return false
-  return JSON.stringify(e).length < 180000
+  return new TextEncoder().encode(JSON.stringify(e)).length < 1_000_000
 }

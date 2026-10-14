@@ -6,7 +6,7 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { fetchMatch, getItemMap } from '../api'
 import { ApiError, type HeroInfo, type ItemInfo, type MatchDetails, type MatchPlayer } from '../api/types'
 import { getHeroMap } from '../api/heroes'
-import { fetchTimeline, type MatchTimeline } from '../api/timeline'
+import { fetchTimeline, fetchReplayStatus, type ReplayStatus, type MatchTimeline } from '../api/timeline'
 import { resolveImpact } from '../api/score'
 import { buildBoard, buildInsights, playerLabel, slotOfPlayer } from './match-model'
 import { fetchAuth } from '../auth'
@@ -43,6 +43,10 @@ export default function MatchPage() {
   const [ready, setReady] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [meId, setMeId] = useState<number | null>(null)
+  const [replayStatus, setReplayStatus] = useState<ReplayStatus | null>(null)
+  const [replayCheck, setReplayCheck] = useState(0)
+  const [replayError, setReplayError] = useState(false)
+  const [checkingReplay, setCheckingReplay] = useState(false)
 
   // Вкладка живёт в URL: ссылка на «Графики» должна открывать «Графики».
   const tab: TabId = (TABS as string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as TabId) : 'overview'
@@ -61,6 +65,8 @@ export default function MatchPage() {
     setError(null)
     setMatch(null)
     setTimeline(null)
+    setReplayStatus(null)
+    setReplayError(false)
     Promise.all([getHeroMap(), getItemMap()]).then(([h, i]) => {
       if (!alive) return
       setHeroMap(h)
@@ -74,6 +80,30 @@ export default function MatchPage() {
     fetchTimeline(matchId).then((t) => alive && setTimeline(t))
     return () => { alive = false }
   }, [matchId, attempt])
+
+  const replayComplete = Boolean(timeline && match?.players.length === 10 && match.players.every(p=>p.evidence?.microVersion===1&&p.mapPlays?.structures?.length))
+  useEffect(() => {
+    if(loading||error||!match||replayComplete)return
+    let alive=true,timer:ReturnType<typeof setTimeout>
+    const controller=new AbortController()
+    const check=async()=>{
+      if(!alive)return
+      setCheckingReplay(true)
+      try {
+        const status=await fetchReplayStatus(matchId,controller.signal)
+        if(!alive)return
+        setReplayStatus(status);setReplayError(false)
+        if(status.state==='ready') {
+          const [fresh,parsed]=await Promise.all([fetchMatch(matchId),fetchTimeline(matchId)])
+          if(!alive)return
+          setMatch(fresh);setTimeline(parsed)
+        }
+      } catch {if(alive)setReplayError(true)}
+      finally {if(alive){setCheckingReplay(false);timer=setTimeout(check,30_000)}}
+    }
+    void check()
+    return ()=>{alive=false;controller.abort();clearTimeout(timer)}
+  },[matchId,attempt,replayCheck,loading,error,replayComplete])
 
   const board = useMemo(
     () => (match ? buildBoard(match, (p) => {
@@ -153,6 +183,10 @@ export default function MatchPage() {
       </div>
 
       <div className="mbody">
+      {!replayComplete && <Notice kind={replayStatus?.state==='retry'||replayError?'error':'info'} title={replayError?'Статус реплея временно недоступен':replayStatus?.state==='waiting'?'Ждём адрес реплея':replayStatus?.state==='parsing'?'Разбираем реплей':replayStatus?.state==='retry'?'Разбор реплея прервался':'Реплей в очереди на разбор'}>
+        <p>{replayError?'Не удалось связаться с сервером. Повторим проверку автоматически.':replayStatus?.state==='waiting'?'Источник пока не отдаёт адрес реплея. Когда он появится, разбор запустится автоматически.':replayStatus?.state==='parsing'?'Реплей найден. Загружаем события, маршруты и данные для Эдика.':replayStatus?.state==='retry'?'При загрузке или обработке произошла ошибка. Система повторит попытку в следующем фоновом запуске.':'Основная статистика уже доступна. События, графики и подробный разбор Эдика появятся после обработки реплея.'} Страница проверяет готовность каждые 30 секунд.</p>
+        <button type="button" className="btn btn-q" disabled={checkingReplay} onClick={()=>setReplayCheck(n=>n+1)}>{checkingReplay?'Проверяем…':'Проверить сейчас'}</button>
+      </Notice>}
       {tab === 'overview' && (
         <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
           <Insights items={insights} />

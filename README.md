@@ -39,3 +39,15 @@ node scripts/check-ranks.mjs
 The scheduled GitHub Actions workflow checks cached player histories, parses
 up to five ready replays per run, and uploads timelines to the Worker. Configure
 repository Actions secrets `REPLAY_INGEST_URL` and `REPLAY_INGEST_TOKEN`.
+
+The match page polls `/api/matches/:id/replay-status` every 30 seconds while
+replay details are incomplete, then refreshes both player evidence and the
+timeline. Status distinguishes queued work, missing replay metadata, active
+parsing and a failed attempt. Runner errors fail the Actions job; missing
+metadata alone is normal waiting. Directly cached matches also enter the queue.
+Replay uploads retain busy Invoker cast logs and accept up to 1.9 MB of UTF-8
+JSON, keeping stored rows under D1's 2 MB ceiling.
+
+```sh
+node scripts/check-replay-ingest.mjs
+```

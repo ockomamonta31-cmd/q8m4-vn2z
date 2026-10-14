@@ -697,6 +697,11 @@ const handlers = {
    * 404, если реплей этого матча ещё не разобран: интерфейс прячет секции,
    * а не показывает пустой график.
    */
+  async replayStatus(params) {
+    const id=Number(params.id)
+    const replay=readJson(join(DATA,'replays',`${id}.json`),null)
+    return {state:replay?.movement?.version===1?'ready':'queued'}
+  },
   async timeline(params) {
     const id = Number(params.id)
     if (!Number.isFinite(id) || id <= 0) throw new HttpError(400, 'Некорректный ID матча')
@@ -785,6 +790,8 @@ function matchRoute(method, path) {
   if (m) return { handler: handlers.match, params: { id: m[1] } }
   m = path.match(/^\/api\/matches\/(\d+)\/timeline$/)
   if (m) return { handler: handlers.timeline, params: { id: m[1] } }
+  m = path.match(/^\/api\/matches\/(\d+)\/replay-status$/)
+  if (m) return { handler: handlers.replayStatus, params: { id: m[1] } }
   if (path === '/api/constants/heroes') return { handler: async () => CONSTANTS.heroes, params: {} }
   if (path === '/api/constants/items') return { handler: async () => CONSTANTS.items, params: {} }
   return null
