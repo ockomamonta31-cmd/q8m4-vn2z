@@ -22,7 +22,7 @@ const sectionOf = (review, id) => review.sections.find(s => s.id === id)
 const blank = deepReview(hero(1), [])
 assert.equal(blank.sections.length, 0, 'без разобранного реплея разделов нет')
 assert.match(blank.lead, /не разобран/, 'честно сообщает, что реплей не разобран')
-assert.equal(blank.gaps.length, 4, 'ограничения данных перечислены всегда')
+assert.equal(blank.gaps.length, 5, 'ограничения данных перечислены всегда')
 
 const noEvidence = deepReview(hero(2, { evidence: { version: 1, curve: [], lane: {}, deaths: null } }), [])
 assert.equal(noEvidence.sections.length, 0)
@@ -100,4 +100,63 @@ const slow = { ...normed, goldPerMinute: 200 }
 assert.equal(byTitle(deepReview(slow, [], 1779), 'Золото в минуту').status, 'review', 'отставание по темпу отмечается')
 assert.equal(normed.goldPerMinute, 816, 'норма не меняет измеренные значения игрока')
 
+// Build check: the answer is judged against the enemy pick and this player's
+// deaths, not against how popular the item is on the hero.
+const controlWindow = t => ({
+  t, from: t - 20, damage: 200, taken: 800, attacks: 1, ownSpells: [], enemySpells: ['lion_impale', 'tidehunter_ravage'],
+  items: [], nearestAlly: null, allyDamage: 0, allySpells: [], lhNextMinute: 2, xpNextMinute: 200,
+})
+const enemies = [hero(26, { isRadiant: false }), hero(29, { isRadiant: false })]
+const gankEvidence = {
+  version: 1, curve: [], lane: {}, purchases: [], deathWindows: [controlWindow(720), controlWindow(1080)],
+  deaths: [{ t: 720, goldFed: 200, lostGold: 200, secondsDead: 20, killer: 'npc_dota_hero_lion', dieback: false }],
+}
+const ganked = hero(20, { position: 1, evidence: gankEvidence })
+const noAnswer = byTitle(deepReview(ganked, enemies), 'Ответа на')
+assert(noAnswer, 'угроза пика без ответа в сборке отмечается')
+assert.equal(noAnswer.status, 'review')
+assert.match(noAnswer.fact, /Black King Bar/, 'кору называют предметы-ответы')
+assert.match(noAnswer.fact, /Смерти после десятой минуты: 12:00, 18:00/, 'претензия опирается на измеренные смерти')
+assert.match(noAnswer.fact, /Earth Spike/, 'названы способности, которыми убивали')
+
+const pickInfo = byTitle(deepReview(ganked, enemies), 'Чем опасен пик врага')
+assert(pickInfo, 'пик врага описывается цифрами')
+assert.match(pickInfo.fact, /Lion/, 'угроза названа по героям врага')
+
+const timely = hero(21, { position: 1, evidence: { ...gankEvidence, purchases: [{ t: 300, key: 'black_king_bar' }] } })
+const answered = byTitle(deepReview(timely, enemies), 'Black King Bar под пик врага куплен вовремя')
+assert(answered && answered.status === 'good', 'ответ, купленный до смертей, отмечается как удача')
+assert.match(answered.fact, /5:00/, 'назван тайминг покупки')
+
+const late = hero(22, { position: 1, evidence: { ...gankEvidence, purchases: [{ t: 1200, key: 'black_king_bar' }] } })
+const lateItem = byTitle(deepReview(late, enemies), 'Black King Bar появился после первых смертей')
+assert(lateItem && lateItem.status === 'review', 'поздний ответ на пик отмечается')
+assert.equal(byTitle(deepReview(late, enemies), 'Black King Bar куплен и не применён'), undefined, 'предмет не называется дважды')
+
+const early = hero(23, { position: 1, evidence: { ...gankEvidence, deathWindows: [controlWindow(120)], deaths: [] } })
+assert(!byTitle(deepReview(early, enemies), 'Ответа на'), 'смерть до десятой минуты не превращается в претензию к сборке')
+
+const supportFive = hero(24, { position: 5, evidence: gankEvidence })
+const supportAnswer = byTitle(deepReview(supportFive, enemies), 'Ответа на')
+assert.match(supportAnswer.fact, /Glimmer Cape/, 'поддержке предлагаются свои предметы-ответы')
+assert(!/Black King Bar/.test(supportAnswer.fact), 'поддержке BKB не выдаётся за обязательный предмет')
+
+const shopper = hero(25, { position: 5, evidence: { ...gankEvidence, purchases: [{ t: 900, key: 'tpscroll' }, { t: 1000, key: 'blink' }] } })
+assert(!byTitle(deepReview(shopper, enemies), 'Town Portal Scroll'), 'расходник не считается непроведённым предметом')
+assert(byTitle(deepReview(shopper, enemies), 'Blink Dagger куплен и не применён'), 'купленный активный предмет без применения в драках отмечается')
+
+const usedInFight = hero(27, { position: 5, evidence: { ...gankEvidence, purchases: [{ t: 1000, key: 'blink' }], fights: [{ t: 1200, end: 1240, damage: 0, healing: 400, deaths: 0, kills: 0, gold: 0, firstCast: false, abilities: {}, items: { blink: 1 } }] } })
+assert(!byTitle(deepReview(usedInFight, enemies), 'Blink Dagger куплен и не применён'), 'предмет, применённый в драке, не выдаётся за неиспользованный')
+
+const boughtAnswer = hero(28, { position: 5, evidence: { ...gankEvidence, purchases: [{ t: 1000, key: 'glimmer_cape' }] } })
+assert(byTitle(deepReview(boughtAnswer, enemies), 'Glimmer Cape появился после первых смертей'), 'купленный ответ называется один раз, а не как неиспользованный предмет')
+
+const summary = deepReview(ganked, enemies, 1800)
+assert(summary.priorities.length > 0, 'главные ошибки отбираются из разделов')
+assert(summary.priorities.every(item => item.section), 'у каждого пункта указан раздел')
+assert.match(summary.verdict, /Поражение за 30 мин/, 'вывод называет итог и длительность')
+assert(summary.playbook.length >= 1 && summary.playbook.length <= 4, 'план на игру короткий')
+const perSection = {}
+for (const item of summary.priorities) perSection[item.section] = (perSection[item.section] ?? 0) + 1
+assert(Math.max(...Object.values(perSection)) <= 3, 'один раздел не заполняет вывод целиком')
 console.log('check-deep-review: ok')

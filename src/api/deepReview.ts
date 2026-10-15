@@ -3,6 +3,7 @@ import { sampleAt } from './assessment'
 import { deathDetail, heroName, itemById, itemName, rolePlan, spellName } from './training'
 import { fmtDuration } from './formats'
 import { NORM_LABELS, heroNorm, measuredValue, normsCohort, standing, standingRank } from './heroNorms'
+import { answerPurchases, answersFor, enemyThreats, heroList, purchasesOf, unusedActiveItems, type PurchaseLine, type Threat } from './buildReview'
 
 // On-demand breakdown: every fact below is measured in the parsed replay.
 // Where the replay cannot answer (vision, intent, creep availability) the note
@@ -14,6 +15,8 @@ export interface DeepItem {
   title: string
   fact: string
   advice: string
+  /** Насколько пункт важен для вывода: чем выше, тем раньше он в списке. */
+  weight?: number
 }
 
 export interface DeepSection {
@@ -23,8 +26,19 @@ export interface DeepSection {
   items: DeepItem[]
 }
 
+export interface DeepPriority extends DeepItem {
+  /** Название раздела, из которого пункт пришёл. */
+  section: string
+}
+
 export interface DeepReview {
   lead: string
+  /** Короткий вывод по игре. */
+  verdict: string
+  /** Главные поводы проверить, отобранные из разделов. */
+  priorities: DeepPriority[]
+  /** Как играть лучше: план на следующую игру. */
+  playbook: string[]
   sections: DeepSection[]
   gaps: string[]
 }
@@ -236,6 +250,130 @@ function supportSection(p: MatchPlayer): DeepSection | null {
   return { id: 'support', title: 'Поддержка', lead: `Позиция ${p.position}: обзор, стаки, обнаружение.`, items }
 }
 
+// Проверка сборки идёт от пика врага, а не от списка популярных предметов:
+// считаются угрозы состава и смерти самого игрока, а не то, что в среднем
+// покупают на этом герое.
+// Проверка сборки идёт от пика врага, а не от списка популярных предметов:
+// считаются угрозы состава и смерти самого игрока, а не то, что в среднем
+// покупают на этом герое. Смерти раньше десятой минуты в претензию не идут:
+// к этому времени предмет-ответ купить не успевают.
+const RELEVANT_FROM = 600
+
+const joinRu = (parts: string[]) =>
+  parts.length <= 1 ? parts.join('') : `${parts.slice(0, -1).join(', ')} и ${parts[parts.length - 1]}`
+
+const alsoKilled = (text: string) => text
+  .replace(/^Тебя убивали/, 'Также убивали')
+  .replace(/^В пике врага/, 'Также в пике врага')
+  .replace(/^Перед /, 'Также перед ')
+
+function buildSection(p: MatchPlayer, opponents: MatchPlayer[]): DeepSection | null {
+  const evidence = p.evidence
+  if (!evidence) return null
+  const threats = enemyThreats(opponents, evidence)
+  const purchased = purchasesOf(evidence)
+  if (!threats.length && !purchased.length) return null
+  const deaths = evidence.deaths?.length ?? 0
+  const items: DeepItem[] = []
+
+  const pickParts: string[] = []
+  for (const threat of threats) {
+    if (threat.id === 'physical') {
+      if (threat.attackDeaths.length) pickParts.push(`тяжёлые атаки: перед ${threat.attackDeaths.length === 1 ? 'смертью' : 'смертями'} по тебе проходило четыре и больше обычных атак`)
+      continue
+    }
+    if (threat.id === 'mobility') {
+      if (threat.heroes.length) pickParts.push(`мобильность: ${heroList(threat.heroes)} — уходят от контроля и догоняют`)
+      continue
+    }
+    if (!threat.heroes.length) continue
+    const strongest = [...threat.spells].sort((a, b) => threat.id === 'control' ? b.control - a.control : b.burst - a.burst)[0]
+    const detail = strongest
+      ? threat.id === 'control'
+        ? ` (${strongest.title} — ${Math.round(strongest.control * 10) / 10} с)`
+        : ` (${strongest.title} — от ${strongest.burst} урона)`
+      : ''
+    pickParts.push(`${threat.label}: ${plural(threat.heroes.length, ['герой', 'героя', 'героев'])} ${heroList(threat.heroes)}${detail}`)
+  }
+  if (pickParts.length) items.push({
+    id: 'build-pick', status: 'info', t: null, weight: 1, title: 'Чем опасен пик врага',
+    fact: `Ответ в сборке зависит от пика. ${pickParts.map(part => `${part[0].toUpperCase()}${part.slice(1)}`).join('; ')}. Секунды контроля и урон способностей взяты из игровых файлов Valve, урон — первого уровня способности.`,
+    advice: 'Предмет закрывает класс угрозы, а не конкретного героя: от контроля помогает BKB или Linken\'s, от магии — Pipe или Glimmer Cape, от физики — Ghost Scepter или Blade Mail. Это пик для сверки, а не список обязательных покупок.',
+  })
+
+  interface Candidate { threat: Threat; tally: string; hitFirst: number | null; measured: boolean; bought: PurchaseLine | null }
+  const candidates: Candidate[] = []
+  for (const threat of threats) {
+    const times = (threat.id === 'physical' ? threat.attackDeaths : threat.times).slice().sort((a, b) => a - b)
+    const relevant = times.filter(t => t >= RELEVANT_FROM)
+    const measured = times.length > 0
+    if (!relevant.length && (measured || threat.id === 'mobility' || threat.heroes.length < 2 || deaths < 3 || p.position > 3)) continue
+    const tally = threat.kills.length
+      ? `Тебя убивали: ${threat.kills.slice(0, 3).map(kill => `${kill.spell.title} ×${kill.count}`).join(', ')} — первая смерть ${clock(threat.kills[0].first)}.`
+      : threat.attackDeaths.length
+        ? `Перед ${threat.attackDeaths.length === 1 ? 'смертью' : 'смертями'} по тебе проходило четыре и больше обычных атак.`
+        : `В пике врага ${plural(threat.heroes.length, ['герой', 'героя', 'героев'])} ${heroList(threat.heroes)}.`
+    const window = relevant.length ? `Смерти после десятой минуты: ${relevant.slice(0, 3).map(clock).join(', ')}.` : ''
+    candidates.push({
+      threat, measured, hitFirst: relevant[0] ?? null, tally: `${tally} ${window}`.trim(),
+      bought: answerPurchases(evidence, answersFor(threat, p.position))[0] ?? null,
+    })
+  }
+
+  const withoutAnswer = candidates.filter(candidate => !candidate.bought)
+  if (withoutAnswer.length) {
+    const times = withoutAnswer.map(candidate => candidate.hitFirst).filter((t): t is number => t != null)
+    const answers = [...new Set(withoutAnswer.flatMap(candidate => answersFor(candidate.threat, p.position)))]
+    items.push({
+      id: `build-missing-${withoutAnswer.map(candidate => candidate.threat.id).join('-')}`, status: 'review',
+      weight: withoutAnswer.some(candidate => candidate.measured) ? 4 : 3, t: times.length ? Math.min(...times) : null,
+      title: `Ответа на ${joinRu(withoutAnswer.map(candidate => candidate.threat.label))} в сборке нет`,
+      fact: `${withoutAnswer.map((candidate, index) => index ? alsoKilled(candidate.tally) : candidate.tally).join(' ')} Подходящих предметов в покупках после гонга нет: ${answers.slice(0, 5).map(itemName).join(', ')}.`,
+      advice: 'Проверь, мог ли ты к этому моменту позволить такой предмет и не мешал ли он основной сборке. Если по золоту выбора не было, пункт ничего не говорит о решении; если был — это первый кандидат под такой пик.',
+    })
+  }
+
+  // Купленный ответ называется один раз, даже если закрывает несколько классов.
+  const byItem = new Map<string, Candidate[]>()
+  for (const candidate of candidates) {
+    if (!candidate.bought) continue
+    byItem.set(candidate.bought.key, [...(byItem.get(candidate.bought.key) ?? []), candidate])
+  }
+  for (const [key, group] of byItem) {
+    const boughtAt = group[0].bought!.t
+    const labels = joinRu(group.map(candidate => candidate.threat.label))
+    const kills = group.map((candidate, index) => index ? alsoKilled(candidate.tally) : candidate.tally).join(' ')
+    const late = group.some(candidate => candidate.hitFirst != null && boughtAt > candidate.hitFirst)
+    items.push({
+      id: `build-${late ? 'late' : 'answer'}-${key}`, status: late ? 'review' : 'good', weight: late ? 4 : 1, t: boughtAt,
+      title: late ? `${itemName(key)} появился после первых смертей` : `${itemName(key)} под пик врага куплен вовремя`,
+      fact: `${kills} ${itemName(key)} куплен на ${clock(boughtAt)}.`,
+      advice: late
+        ? `Проверь темп: можно ли было собрать этот предмет раньше и был ли он приоритетнее других покупок в этой игре. Предмет закрывает ${labels}, но появился позже, чем эта угроза начала убивать.`
+        : `Ответ на ${labels} в сборке есть. Дальше важен момент применения: предмет работает в бою, а не в инвентаре.`,
+    })
+  }
+
+  // Предмет, о котором уже сказано выше, второй раз не называется.
+  const reported = new Set(byItem.keys())
+  for (const unused of unusedActiveItems(evidence)) {
+    if (reported.has(unused.key) || items.length >= 6) continue
+    items.push({
+      id: `build-unused-${unused.key}-${unused.t}`, status: 'review', t: unused.t, weight: 3,
+      title: `${itemName(unused.key)} куплен и не применён`,
+      fact: `Покупка на ${clock(unused.t)}, применения в записях драк нет. Всего применений за матч: ${evidence.itemUses?.[unused.key] ?? 0}.`,
+      advice: 'Проверь по реплею, нажимался ли предмет в начале боя, а не после того, как исход решился. Активный предмет — часть механики героя.',
+    })
+  }
+
+  if (!items.length) return null
+  return {
+    id: 'build', title: 'Сборка под пик врага',
+    lead: 'Покупки после гонга против угроз состава врага и способностей, которыми тебя убивали в этом матче.',
+    items: items.slice(0, 7),
+  }
+}
+
 function economySection(p: MatchPlayer, opponents: MatchPlayer[]): DeepSection | null {
   const evidence = p.evidence
   if (!evidence?.curve?.length) return null
@@ -265,22 +403,65 @@ function economySection(p: MatchPlayer, opponents: MatchPlayer[]): DeepSection |
   return { id: 'economy', title: 'Экономика', lead: 'Кривая нетворта из разобранного реплея.', items }
 }
 
+const DEFAULT_WEIGHT = (id: string) =>
+  id.startsWith('build') ? 5 : id.startsWith('death') ? 4 : id.startsWith('lane') || id.startsWith('fight-failed') ? 3 : id.startsWith('norm') || id.startsWith('support') ? 2 : 1
+
+// Не более двух пунктов из одного раздела: три смерти подряд не должны
+// закрывать вывод, если в игре были и другие поводы проверить.
+function prioritiesOf(sections: DeepSection[], limit = 4): DeepPriority[] {
+  const review = sections
+    .flatMap(section => section.items.filter(item => item.status === 'review').map(item => ({ item, section: section.title })))
+    .sort((a, b) => (b.item.weight ?? DEFAULT_WEIGHT(b.item.id)) - (a.item.weight ?? DEFAULT_WEIGHT(a.item.id))
+      || (a.item.t ?? Number.MAX_SAFE_INTEGER) - (b.item.t ?? Number.MAX_SAFE_INTEGER)
+      || a.item.id.localeCompare(b.item.id))
+  const picked: DeepPriority[] = []
+  const perSection = new Map<string, number>()
+  const take = (entry: { item: DeepItem; section: string }, cap: number) => {
+    if (picked.length >= limit) return
+    const used = perSection.get(entry.section) ?? 0
+    if (used >= cap || picked.some(item => item.id === entry.item.id)) return
+    perSection.set(entry.section, used + 1)
+    picked.push({ ...entry.item, section: entry.section })
+  }
+  for (const entry of review) take(entry, 2)
+  for (const entry of review) take(entry, 3)
+  return picked
+}
+
+function playbookOf(p: MatchPlayer, priorities: DeepPriority[]) {
+  const lines = [rolePlan(p)]
+  // План — короткие действия: из совета берётся первая фраза, а не весь абзац.
+  for (const item of priorities) {
+    const action = item.advice.split(/(?<=\.)\s/)[0]
+    if (!lines.includes(action)) lines.push(action)
+  }
+  return lines.slice(0, 4)
+}
+
 export function deepReview(p: MatchPlayer, opponents: MatchPlayer[] = [], durationSeconds = 0): DeepReview {
   const evidence = p.evidence
   const duration = durationSeconds || Number(evidence?.curve?.at(-1)?.[0] ?? 0)
-  const sections = [normSection(p, duration), laneSection(p, opponents), deathsSection(p, opponents), abilitySection(p), fightSection(p), supportSection(p), economySection(p, opponents)]
+  const sections = [normSection(p, duration), laneSection(p, opponents), deathsSection(p, opponents), abilitySection(p), buildSection(p, opponents), fightSection(p), supportSection(p), economySection(p, opponents)]
     .filter((section): section is DeepSection => Boolean(section?.items.length))
   const deaths = evidence?.deaths?.length ?? 0
+  const priorities = prioritiesOf(sections)
+  const checkable = sections.flatMap(section => section.items).filter(item => item.status === 'review').length
   return {
     lead: evidence
       ? `Разобрано эпизодами: ${deathsWord(deaths)}, ${evidence.laneMinutes?.length ?? 0} минут линии, ${fightsWord(evidence.fights?.length ?? 0)}, ${usesWord(evidence.uses?.length ?? 0)} способностей и предметов.`
       : 'Реплей этого матча не разобран: подробный разбор появится после его загрузки.',
+    verdict: evidence
+      ? `${p.isVictory ? 'Победа' : 'Поражение'} за ${Math.max(1, Math.round(duration / 60))} мин, позиция ${p.position}. Разбор выделил ${plural(checkable, ['повод проверить', 'повода проверить', 'поводов проверить'])}${priorities[0] ? `; главный — «${priorities[0].title}»${priorities[0].t != null ? ` на ${clock(priorities[0].t)}` : ''}` : ''}.`
+      : 'Реплей этого матча не разобран: разбор появится после его загрузки.',
+    priorities,
+    playbook: evidence ? playbookOf(p, priorities) : [],
     sections,
     gaps: [
       'Туман войны не восстановлен: что игрок видел на миникарте в момент решения, из реплея не следует.',
       'Доступность конкретного крипа и HP врага в эту секунду в данных не записаны.',
       'Журнал применений не доказывает готовность способности: дальность, мана и кулдаун не отражены.',
       'Камера и намерения игрока не восстанавливаются, поэтому пункты называют проверяемый факт, а не доказанную ошибку.',
+      'Сборка проверяется по покупкам и смертям: доступность предмета по золоту, содержимое сташа и рассмотренные альтернативы реплей не показывает.',
     ],
   }
 }

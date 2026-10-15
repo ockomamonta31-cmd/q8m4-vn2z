@@ -190,7 +190,7 @@ export default function MatchPage() {
       {tab === 'overview' && (
         <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">
           <Insights items={insights} />
-          <div className="edik-entry"><div><h2>Разобрать свою игру с Эдиком</h2><p>Выбери игрока и эпизод: линия, конкретный файт или действия за весь матч.</p></div><button type="button" className="btn" onClick={() => setTab('edik')}>Открыть разбор</button></div>
+          <div className="edik-entry"><div><h2>Разобрать свою игру с Эдиком</h2><p>Выбери героя и нажми «Хочу разбор»: Эдик проверит смерти, линию, драки и сборку под пик врага, а затем даст вывод и план на следующую игру.</p></div><button type="button" className="btn" onClick={() => setTab('edik')}>Открыть разбор</button></div>
 
           <div className="sec">
             {timeline && <MomentumChart timeline={timeline} durationSeconds={match.durationSeconds} />}

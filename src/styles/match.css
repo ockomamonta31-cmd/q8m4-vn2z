@@ -775,25 +775,35 @@
   .edik-route { width: 100%; max-width: 420px; }
 }
 
-.edik-key-notes { margin-top: 0; }
 .edik-details > .edik-modes { margin: 20px 0 24px; }
 .edik-references { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; margin-top: 16px; }
 .edik-references a { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
 .edik .analysis-method { margin: 20px 0; }
 .edik .analysis-method p { overflow-wrap: anywhere; }
-.edik-deep-toggle { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 0; border-top: 1px solid var(--line); margin-top: 24px; }
-.edik-deep-toggle p { font-size: 14px; color: var(--text-dim); line-height: 1.7; max-width: 62ch; }
-.edik-deep-toggle .btn { flex: none; }
+.edik-controls > .btn { flex: none; }
+.edik-controls > .btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+.edik-start { border-top: 1px solid var(--line); padding: 24px 0 8px; }
+.edik-start h3 { font: 400 24px/1.25 var(--display); }
+.edik-start ul { margin: 16px 0 0; padding-left: 20px; display: grid; gap: 8px; font-size: 15px; line-height: 1.7; max-width: 75ch; }
+.edik-start p { margin-top: 16px; font-size: 14px; line-height: 1.7; color: var(--text-dim); max-width: 75ch; }
+.edik-summary { margin-top: 32px; }
+.edik-summary > .edik-notes { margin-top: 0; }
+.edik-verdict { border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 28px 0; margin: 32px 0; max-width: 82ch; }
+.edik-verdict h3 { font: 400 28px/1.2 var(--display); }
+.edik-verdict h3 + p { margin-top: 14px; font-size: 16px; line-height: 1.65; }
+.edik-verdict ol { margin-top: 16px; padding-left: 22px; display: grid; gap: 12px; font-size: 15px; line-height: 1.7; color: var(--text-dim); }
+.edik-verdict h3:not(:first-child) { margin-top: 28px; }
+.edik-gaps ul { margin-top: 12px; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.7; color: var(--text-dim); }
 .edik-deep-section { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--line); }
 .edik-deep-section > .edik-notes { margin-top: 0; }
 .edik-deep-head h3 { font: 400 32px/1.2 var(--display); }
 .edik-deep-head p { margin-top: 10px; font-size: 14px; color: var(--text-dim); line-height: 1.6; max-width: 75ch; }
-.edik-deep > .analysis-method ul { margin-top: 12px; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.7; color: var(--text-dim); }
+.edik-deep > summary { font-size: 16px; color: var(--text); cursor: pointer; padding: 20px 0; border-top: 1px solid var(--line); margin-top: 32px; }
 .edik button:focus-visible, .edik a:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
 
 @media (max-width: 767px) {
-  .edik-deep-toggle { flex-direction: column; align-items: stretch; }
-  .edik-deep-toggle .btn { width: 100%; justify-content: center; }
+  .edik-controls > .btn { width: 100%; justify-content: center; }
   .edik-deep-head h3 { font-size: 26px; }
   .edik-deep-section { margin-top: 28px; }
+  .edik-verdict h3 { font-size: 24px; }
 }
