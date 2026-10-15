@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
+import { replayJson } from './replay-http.mjs'
 
 const base=process.env.REPLAY_INGEST_URL
 const token=process.env.REPLAY_INGEST_TOKEN
@@ -11,19 +12,14 @@ if(!base||!token) throw new Error('REPLAY_INGEST_URL and REPLAY_INGEST_TOKEN are
 const root=dirname(dirname(fileURLToPath(import.meta.url)))
 const data=join(root,'data')
 const headers={authorization:`Bearer ${token}`}
-const get=async(path)=>{
-  const res=await fetch(new URL(path,base),{headers,signal:AbortSignal.timeout(30_000)})
-  if(!res.ok) throw new Error(`Worker HTTP ${res.status} (${path})`)
-  return res.json()
-}
+const get=path=>replayJson(new URL(path,base),{headers})
 const run=(file,...args)=>new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,[join(root,'gc',file),...args],{stdio:'inherit',env:process.env})
   child.once('error',reject)
   child.once('exit',code=>code===0?resolve():reject(new Error(`${file} exited ${code}`)))
 })
 const status=async(id,state)=>{
-  const res=await fetch(new URL(`/api/internal/replay/${id}/status`,base),{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({state}),signal:AbortSignal.timeout(30_000)})
-  if(!res.ok)throw new Error(`Replay status HTTP ${res.status}`)
+  await replayJson(new URL(`/api/internal/replay/${id}/status`,base),{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({state})})
 }
 
 const requestedId=process.env.REPLAY_MATCH_ID
@@ -41,10 +37,8 @@ let completed=0, noReplay=0, failures=0
 for(const id of candidates) {
   if(completed>=max) break
   try {
-    const metaRes=await fetch(`https://api.opendota.com/api/matches/${id}`,{signal:AbortSignal.timeout(20_000)})
-    if(metaRes.status===404){noReplay++;await status(id,'waiting');console.log(`WAIT ${id}: match not indexed by replay metadata provider`);continue}
-    if(!metaRes.ok) throw new Error(`Replay metadata HTTP ${metaRes.status}`)
-    const meta=await metaRes.json()
+    const meta=await replayJson(`https://api.opendota.com/api/matches/${id}`,{}, {timeoutMs:20_000,allow404:true})
+    if(meta===null){noReplay++;await status(id,'waiting');console.log(`WAIT ${id}: match not indexed by replay metadata provider`);continue}
     if(!/^\d+$/.test(String(meta.cluster??''))||!/^\d+$/.test(String(meta.replay_salt??''))) { noReplay++; await status(id,'waiting');console.log(`WAIT ${id}: replay metadata not published`);continue }
     const match=await get(`/api/internal/replay/match/${id}`)
     if(match.players?.length!==10) throw new Error('Expected ten match players')

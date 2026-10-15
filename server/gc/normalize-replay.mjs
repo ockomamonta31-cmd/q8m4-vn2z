@@ -11,6 +11,7 @@ import { inferReplayPositions } from './infer-replay-positions.mjs'
 import { buildMatchTimeline } from './build-timeline.mjs'
 import { buildMapPlays } from './map-plays.mjs'
 import { playerEvidence } from './player-evidence.mjs'
+import { replayJson } from './replay-http.mjs'
 
 const [id] = process.argv.slice(2)
 if (!/^\d+$/.test(id ?? '')) {
@@ -63,8 +64,7 @@ const ingestToken = process.env.REPLAY_INGEST_TOKEN
 if (ingestUrl && ingestToken) {
   const endpoint = new URL(`/api/internal/replay/${id}`, ingestUrl)
   const body = { players: replayPlayers, timeline: buildMatchTimeline(replay, match, heroes) }
-  const res = await fetch(endpoint, { method: 'POST', headers: { authorization: `Bearer ${ingestToken}`, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30_000) })
-  if (!res.ok) throw new Error(`Worker ingest HTTP ${res.status}: ${(await res.text()).slice(0, 300)}`)
-  console.log(`Uploaded to Worker: ${await res.text()}`)
+  const result = await replayJson(endpoint, { method: 'POST', headers: { authorization: `Bearer ${ingestToken}`, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  console.log(`Uploaded to Worker: ${JSON.stringify(result)}`)
 }
 console.log(JSON.stringify({ matchId: Number(id), purchases, unmappedItems: unmapped, positionsDetected: [...detectedPositions.values()].filter((x) => x.positionSource === 'replay').length }))
