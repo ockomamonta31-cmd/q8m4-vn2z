@@ -99,7 +99,12 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
             // A provider that answered without metadata is not broken.
             if (!error) continue
             errors.push(`${provider.name}: ${error.message}`)
-            if (!failed.has(provider.name) && !controller.signal.aborted) {
+            // Our own timeout is exactly the failure worth remembering. The
+            // clock aborts this controller before the catch runs, so keying the
+            // cache on the signal kept it empty and made every candidate in the
+            // batch pay the full timeout again. The abort in `finally` below
+            // runs after this loop, so it is not what is seen here.
+            if (!failed.has(provider.name)) {
               log(`Replay metadata ${provider.name}: ${error.message}`)
               failed.set(provider.name, error)
             }

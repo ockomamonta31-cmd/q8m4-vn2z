@@ -42,10 +42,14 @@ export function createReplayGc({ env = process.env, Steam = SteamUser,
   connectMs = 20_000, requestMs = 8_000, attempts = 3, retryMs = 1_000,
   sessions = 4, budgetMs = 120_000, onRefreshToken = () => {} } = {}) {
   const configured = Boolean(env.STEAM_REFRESH_TOKEN || (env.STEAM_ACCOUNT && env.STEAM_PASSWORD))
-  const startedAt = Date.now()
+  // The budget bounds the asking, not the batch. Measured from process start it
+  // was already gone by the time the coordinator pass ran — the OpenDota pass
+  // ahead of it alone outlasts it — so every question answered "budget spent"
+  // without Steam ever being contacted.
+  let startedAt
   let state, opened = 0, fatal, closed = false
 
-  const spent = () => Date.now() - startedAt > budgetMs
+  const spent = () => startedAt != null && Date.now() - startedAt > budgetMs
 
   function endSession(error) {
     const current = state
@@ -147,6 +151,7 @@ export function createReplayGc({ env = process.env, Steam = SteamUser,
       if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) throw new Error('Invalid match ID')
       if (closed) throw new Error('Valve GC session is closed')
       if (fatal) throw fatal
+      startedAt ??= Date.now()
       if (spent()) throw (fatal = new Error('Valve GC time budget for this run is spent'))
       let last
       for (let attempt = 1; attempt <= attempts; attempt++) {
