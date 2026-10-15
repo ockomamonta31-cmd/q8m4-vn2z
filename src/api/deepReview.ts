@@ -2,6 +2,7 @@ import type { MatchPlayer } from './types'
 import { sampleAt } from './assessment'
 import { deathDetail, heroName, itemById, itemName, rolePlan, spellName } from './training'
 import { fmtDuration } from './formats'
+import { NORM_LABELS, heroNorm, measuredValue, normsCohort, standing, standingRank } from './heroNorms'
 
 // On-demand breakdown: every fact below is measured in the parsed replay.
 // Where the replay cannot answer (vision, intent, creep availability) the note
@@ -42,6 +43,44 @@ const lastHits = (n: number) => plural(n, ['добивание', 'добиван
 const deathsWord = (n: number) => plural(n, ['смерть', 'смерти', 'смертей'])
 const usesWord = (n: number) => plural(n, ['применение', 'применения', 'применений'])
 const fightsWord = (n: number) => plural(n, ['крупная драка', 'крупные драки', 'крупных драк'])
+
+const DECIMAL_METRICS = new Set(['lhPerMin', 'heroDmgPerMin', 'towerDmgPerMin', 'deathsPer10'])
+const formatMetric = (metric: string, value: number) => DECIMAL_METRICS.has(metric) ? value.toFixed(1) : Math.round(value).toLocaleString('ru-RU')
+
+// The one comparison that does not depend on this match alone: how the same
+// hero is played by stronger players in our own pool of parsed games.
+function normSection(p: MatchPlayer, durationSeconds: number): DeepSection | null {
+  const norm = heroNorm(p.heroId, p.position)
+  if (!norm) return null
+  const wanted = p.position >= 4
+    ? ['gpm', 'xpm', 'heroDmgPerMin', 'deathsPer10']
+    : ['gpm', 'lhPerMin', 'xpm', 'heroDmgPerMin', 'deathsPer10']
+  const items: DeepItem[] = []
+  for (const metric of wanted) {
+    const percentiles = norm.metrics[metric]
+    const value = measuredValue(p, metric, durationSeconds)
+    const info = NORM_LABELS[metric]
+    if (!percentiles || value == null || !info) continue
+    const digits = DECIMAL_METRICS.has(metric) ? 1 : 0
+    const rank = standingRank(percentiles, value, digits)
+    const better = info.lowerIsBetter ? rank <= 1 : rank >= 4
+    const worse = info.lowerIsBetter ? rank >= 4 : rank <= 1
+    items.push({
+      id: `norm-${metric}`, status: better ? 'good' : worse ? 'review' : 'info', t: null,
+      title: `${info.name[0].toUpperCase()}${info.name.slice(1)}: ${formatMetric(metric, value)} против медианы ${formatMetric(metric, percentiles[2])}`,
+      fact: `У тебя ${formatMetric(metric, value)}. По выборке ${plural(norm.n, ['игра', 'игры', 'игр'])} Ancient и выше на этом герое: 10-й перцентиль — ${formatMetric(metric, percentiles[0])}, 25-й — ${formatMetric(metric, percentiles[1])}, медиана — ${formatMetric(metric, percentiles[2])}, 75-й — ${formatMetric(metric, percentiles[3])}, 90-й — ${formatMetric(metric, percentiles[4])}. Твоё место: ${standing(percentiles, value, digits)}.`,
+      advice: info.advice,
+    })
+  }
+  if (!items.length) return null
+  return {
+    id: 'norm', title: 'Как на этом герое играют сильные',
+    lead: norm.scope === 'position'
+      ? `Позиция ${p.position}: ${norm.n} игр Ancient и выше на этом герое из нашей базы разобранных матчей (${normsCohort.players} игр всего).`
+      : `Позиции объединены: ${norm.n} игр Ancient и выше на этом герое из нашей базы разобранных матчей (${normsCohort.players} игр всего). Для позиции ${p.position} отдельной выборки не набралось.`,
+    items,
+  }
+}
 
 function laneSection(p: MatchPlayer, opponents: MatchPlayer[]): DeepSection | null {
   const minutes = (p.evidence?.laneMinutes ?? []).filter(m => m.t < 600)
@@ -226,9 +265,10 @@ function economySection(p: MatchPlayer, opponents: MatchPlayer[]): DeepSection |
   return { id: 'economy', title: 'Экономика', lead: 'Кривая нетворта из разобранного реплея.', items }
 }
 
-export function deepReview(p: MatchPlayer, opponents: MatchPlayer[] = []): DeepReview {
+export function deepReview(p: MatchPlayer, opponents: MatchPlayer[] = [], durationSeconds = 0): DeepReview {
   const evidence = p.evidence
-  const sections = [laneSection(p, opponents), deathsSection(p, opponents), abilitySection(p), fightSection(p), supportSection(p), economySection(p, opponents)]
+  const duration = durationSeconds || Number(evidence?.curve?.at(-1)?.[0] ?? 0)
+  const sections = [normSection(p, duration), laneSection(p, opponents), deathsSection(p, opponents), abilitySection(p), fightSection(p), supportSection(p), economySection(p, opponents)]
     .filter((section): section is DeepSection => Boolean(section?.items.length))
   const deaths = evidence?.deaths?.length ?? 0
   return {

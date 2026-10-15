@@ -28,7 +28,7 @@ export default function Edik({ match, timeline, rating, heroMap, meSlot, initial
   const lane = rating?.lanes.find(l => [...l.radiant, ...l.dire].some(q => q.heroId === p.heroId)) ?? null
   const opponents = match.players.filter(q => q.isRadiant !== p.isRadiant)
   const mistakes = keyMistakes(p, opponents)
-  const review = deep ? deepReview(p, opponents) : null
+  const review = deep ? deepReview(p, opponents, match.durationSeconds) : null
   const notes = !showDetails ? [] : mode === 'lane' ? reviewLane(p, lane, timeline) : mode === 'match' ? reviewMatch(p, match.durationSeconds, opponents)
     : fight && timeline ? reviewFight(p, fight, timeline, slot) : []
   const team = match.players.filter(q => q.isRadiant === p.isRadiant)

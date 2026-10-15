@@ -6,6 +6,12 @@ const moduleOf = async path => {
   return import('data:text/javascript;base64,' + Buffer.from(outputFiles[0].text).toString('base64'))
 }
 const { deepReview } = await moduleOf('src/api/deepReview.ts')
+const { standing, standingRank } = await moduleOf('src/api/heroNorms.ts')
+
+assert.equal(standing([1.1, 1.4, 2, 2.6, 3.3], 2.0000000001, 1), 'ровно на медиане', 'совпадение на отображаемой точности не выдаётся за превышение')
+// Rank 3 means "at or above the median": equality must not be promoted to a
+// strength, and must land in the same bucket it is described by.
+assert.equal(standingRank([1.1, 1.4, 2, 2.6, 3.3], 2.0000000001, 1), 3)
 
 // Parsed replays index the lane by minute start: 0, 60, ... 540.
 const minutes = (lh, extra = {}) => [...lh].map((value, i) => ({ t: i * 60, end: (i + 1) * 60, lh: value, xp: 300, damage: 100, taken: 200, attacks: 2, aliveSeconds: 60, ...extra }))
@@ -78,5 +84,20 @@ const timings = byTitle(deepReview(buyer, []), 'Тайминги предмет�
 assert(timings, 'покупки после начала игры показываются')
 assert(!/-\d/.test(timings.fact.replace(/—/g, '')), 'стартовые предметы до гонга не выдаются за тайминг')
 assert.match(timings.fact, /2:30/)
+
+// Hero norms compare this match with how stronger players play the same hero.
+const normed = { ...hero(44, { position: 1 }), goldPerMinute: 816, experiencePerMinute: 959, numLastHits: 306, heroDamage: 28100, towerDamage: 5000, deaths: 3 }
+const normReview = deepReview(normed, [], 1779)
+const normSection = sectionOf(normReview, 'norm')
+assert(normSection, 'норма по герою попадает в разбор')
+assert.match(normSection.lead, /Ancient и выше/)
+const gpmItem = byTitle(normReview, 'Золото в минуту')
+assert.equal(gpmItem.status, 'good', 'темп выше 90-го перцентиля отмечается как сильная сторона')
+assert.match(gpmItem.fact, /выше 90-го перцентиля/)
+assert(!/неизвестно/.test(gpmItem.fact), 'выборка и перцентили названы явно')
+assert.equal(sectionOf(deepReview({ ...normed, heroId: 999 }, [], 1779), 'norm'), undefined, 'без нормы по герою раздел не появляется')
+const slow = { ...normed, goldPerMinute: 200 }
+assert.equal(byTitle(deepReview(slow, [], 1779), 'Золото в минуту').status, 'review', 'отставание по темпу отмечается')
+assert.equal(normed.goldPerMinute, 816, 'норма не меняет измеренные значения игрока')
 
 console.log('check-deep-review: ok')
