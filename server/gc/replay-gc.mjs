@@ -39,8 +39,8 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
  *   matches here and to let OpenDota publish addresses for everything else.
  */
 export function createReplayGc({ env = process.env, Steam = SteamUser,
-  connectMs = 20_000, requestMs = 8_000, attempts = 3, retryMs = 1_000,
-  sessions = 4, budgetMs = 120_000, onRefreshToken = () => {} } = {}) {
+  connectMs = 20_000, requestMs = 8_000, asks = 3, attempts = 3, retryMs = 1_000,
+  sessions = 4, budgetMs = 180_000, onRefreshToken = () => {} } = {}) {
   const configured = Boolean(env.STEAM_REFRESH_TOKEN || (env.STEAM_ACCOUNT && env.STEAM_PASSWORD))
   // The budget bounds the asking, not the batch. Measured from process start it
   // was already gone by the time the coordinator pass ran — the OpenDota pass
@@ -131,16 +131,27 @@ export function createReplayGc({ env = process.env, Steam = SteamUser,
     const current = state
     if (!current?.ready) return Promise.reject(new Error('Valve GC session is not ready'))
     return new Promise((resolve, reject) => {
-      const job = { id: Number(id), resolve, reject, error: undefined, timer: undefined }
-      job.timer = setTimeout(() => {
-        if (current.pending !== job) return
-        current.pending = undefined
-        job.error = new Error('Valve GC match request timed out')
-        job.reject(job.error)
-      }, requestMs)
+      const job = { id: Number(id), resolve, reject, error: undefined, timer: undefined, sent: 0 }
+      const send = () => {
+        job.sent++
+        try { current.steam.sendToGC(570, 7095, {}, gcRequest.encode({ matchId: job.id }).finish()) }
+        catch { clearTimeout(job.timer); current.pending = undefined; job.reject(new Error('Valve GC match request could not be sent')) }
+      }
+      // Silence is the normal answer: a request is either answered in about two
+      // seconds or dropped. A fresh session costs a whole Steam login, so the
+      // same one is asked again before it is torn down.
+      const wait = () => {
+        job.timer = setTimeout(() => {
+          if (current.pending !== job) return
+          if (job.sent < asks) { wait(); send(); return }
+          current.pending = undefined
+          job.error = new Error(`Valve GC match request timed out after ${job.sent} asks`)
+          job.reject(job.error)
+        }, requestMs)
+        send()
+      }
       current.pending = job
-      try { current.steam.sendToGC(570, 7095, {}, gcRequest.encode({ matchId: job.id }).finish()) }
-      catch { clearTimeout(job.timer); current.pending = undefined; job.reject(new Error('Valve GC match request could not be sent')) }
+      wait()
     })
   }
 
