@@ -35,11 +35,24 @@ export function replayAgeAction(ageMs, retentionMs) {
   return age > Number(retentionMs) ? 'expired' : 'ask'
 }
 
+/**
+ * A provider that answered "too many requests" is not a provider that is down:
+ * the same call succeeds again a minute later. The difference decides whether a
+ * batch loses the source for the rest of the run or waits it out.
+ */
+export function isThrottled(error) {
+  return error?.throttled === true
+}
+
 export function createReplayMetadataResolver({ env = process.env, fetcher = fetch,
   gc = createReplayGc({ env }), timeoutMs = 8_000, log = console.warn } = {}) {
+  // How long to keep away from a provider that asked us to slow down. Its own
+  // `retry-after` wins when it sends one.
+  const throttleMs = Math.max(1, Number(env.REPLAY_THROTTLE_SECONDS) || 30) * 1000
   // An unavailable provider gets one attempt per batch, rather than stalling
   // every queued match. The next scheduled batch tries it again.
   const failed = new Map()
+  const throttled = waitMs => Object.assign(new Error('HTTP 429'), { throttled: true, waitMs })
   // OpenDota reports what is left of the caller's quota in headers. The runner
   // shares its address with every other project on GitHub's pool, so without
   // this number a batch that spent the day's limit looks exactly like a provider
@@ -50,8 +63,28 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
     const left = response.headers?.get?.('x-rate-limit-remaining-day')
     if (left != null) { const value = Number(left); if (Number.isFinite(value)) remainingDay = value }
     if (allow404 && response.status === 404) { await response.body?.cancel(); return null }
-    if (!response.ok) { await response.body?.cancel(); throw new Error(`HTTP ${response.status}`) }
+    if (!response.ok) {
+      await response.body?.cancel()
+      if (response.status === 429 || response.status === 503) {
+        const retry = Number(response.headers?.get?.('retry-after'))
+        throw throttled(Number.isFinite(retry) && retry > 0 ? retry * 1000 : throttleMs)
+      }
+      throw new Error(`HTTP ${response.status}`)
+    }
     return response.json()
+  }
+  /**
+   * Remember a failure so the rest of the batch does not pay for it again. An
+   * outage lasts the whole run; a throttle expires, because the provider that
+   * turned us away a moment ago is the one that can still answer.
+   */
+  const park = (name, error) => failed.set(name, {
+    error,
+    until: isThrottled(error) ? Date.now() + (error.waitMs ?? throttleMs) : Infinity,
+  })
+  const parked = name => {
+    const entry = failed.get(name)
+    return entry && entry.until > Date.now() ? entry.error : null
   }
   const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0
   return {
@@ -62,6 +95,10 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
      */
     async request(id) {
       if (!validId(id)) throw new Error('Invalid match ID')
+      // Asking the coordinator is the same provider, so a provider that just
+      // asked us to slow down does not get this call either.
+      const wait = parked('OpenDota')
+      if (wait) throw wait
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
       try {
@@ -96,8 +133,10 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
       try {
         for (const provider of providers) {
           try {
-            if (failed.has(provider.name)) throw failed.get(provider.name)
+            const wait = parked(provider.name)
+            if (wait) throw wait
             const value = await provider.read()
+            failed.delete(provider.name)
             answered = true
             if (!value) continue
             address = value.address
@@ -105,15 +144,15 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
           } catch (error) {
             // A provider that answered without metadata is not broken.
             if (!error) continue
-            errors.push(`${provider.name}: ${error.message}`)
+            errors.push({ provider: provider.name, error })
             // Our own timeout is exactly the failure worth remembering. The
             // clock aborts this controller before the catch runs, so keying the
             // cache on the signal kept it empty and made every candidate in the
             // batch pay the full timeout again. The abort in `finally` below
             // runs after this loop, so it is not what is seen here.
-            if (!failed.has(provider.name)) {
+            if (!failed.has(provider.name) || !parked(provider.name)) {
               log(`Replay metadata ${provider.name}: ${error.message}`)
-              failed.set(provider.name, error)
+              park(provider.name, error)
             }
           }
         }
@@ -127,9 +166,18 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
           if (value && value.replayState !== 1 && value.replayState !== 2) {
             address = replayMetadata(id, Number(value.matchId), value.cluster, value.replaySalt, 'Valve GC')
           }
-        } catch (error) { errors.push(`Valve GC: ${error.message}`); log(`Replay metadata Valve GC: ${error.message}`) }
+        } catch (error) {
+          errors.push({ provider: 'Valve GC', error })
+          log(`Replay metadata Valve GC: ${error.message}`)
+        }
       }
-      if (!answered && errors.length) throw new Error(`Replay metadata sources unavailable: ${errors.join('; ')}`)
+      if (!answered && errors.length) {
+        const error = new Error(`Replay metadata sources unavailable: ${errors.map(entry => `${entry.provider}: ${entry.error.message}`).join('; ')}`)
+        // Only a batch where every source merely asked us to slow down is a
+        // throttle. Anything else is a real failure and stays one.
+        error.throttled = errors.every(entry => isThrottled(entry.error))
+        throw error
+      }
       return { address, endedAt, source: address?.source ?? null }
     },
     // The caller decides whether asking Valve is worth a request at all.

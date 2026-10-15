@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { replayJson } from './replay-http.mjs'
-import { createReplayMetadataResolver, replayAgeAction } from './replay-metadata.mjs'
+import { createReplayMetadataResolver, isThrottled, replayAgeAction } from './replay-metadata.mjs'
 
 const base=process.env.REPLAY_INGEST_URL
 const token=process.env.REPLAY_INGEST_TOKEN
@@ -58,10 +58,20 @@ const requestWaitMs=Math.max(0,Number(process.env.REPLAY_REQUEST_WAIT_SECONDS)||
 const requestPollMs=Math.max(1,Number(process.env.REPLAY_REQUEST_POLL_SECONDS)||20)*1000
 
 const resolved=new Map(), ended=new Map(), paused=[]
-let completed=0,noReplay=0,failures=0,expired=0,asked=0,gcUsed=0
+let completed=0,noReplay=0,failures=0,throttled=0,expired=0,asked=0,gcUsed=0
 const ageMs=id=>{const at=ended.get(id);return at==null?null:Date.now()-at*1000}
 const metadata=createReplayMetadataResolver()
 const note=async(id,state)=>{ await status(id,state).catch(error=>console.error(`STATUS ${id}: ${error.message}`)) }
+// A provider that asked us to slow down has not failed, and a batch that only
+// ran into that has nothing to apologise for: the matches stay queued and the
+// next run picks them up. Counting it as a failure painted every other run red
+// and hid the runs that really did break.
+const report=async(id,error)=>{
+  const message=error instanceof Error?error.message:'unknown error'
+  if(isThrottled(error)) { throttled++; console.error(`THROTTLE ${id}: ${message}`) }
+  else { failures++; console.error(`RETRY ${id}: ${message}`) }
+  await note(id,'retry')
+}
 
 async function ingest(id,meta) {
   console.log(`REPLAY ${id}: metadata from ${meta.source}`)
@@ -126,9 +136,7 @@ try {
       console.log(`WAIT ${id}: no replay address from available sources`)
       await note(id,'waiting')
     } catch(error) {
-      failures++
-      console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
-      await note(id,'retry')
+      await report(id,error)
     }
   }
   // Второй проход: свежие матчи, которым OpenDota уже ищет реплей. Ждём их
@@ -144,10 +152,12 @@ try {
     let published=false
     for(const id of waitingFor) {
       if(resolved.has(id)) continue
-      const answer=await metadata.lookup(id,{allowGc:false}).catch(error=>{
-        failures++
-        providerAlive=false
-        console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
+      const answer=await metadata.lookup(id,{allowGc:false}).catch(async error=>{
+        // A provider asking us to slow down is still a provider we are waiting
+        // on, unlike one that fell over: ending the wait early would throw away
+        // the very window in which it can still publish this address.
+        if(!isThrottled(error)) providerAlive=false
+        await report(id,error)
         return null
       })
       if(!answer) continue
@@ -179,12 +189,11 @@ try {
     if(age!=null&&age>gcMaxAgeMs) continue
     gcUsed++
     const meta=await metadata.lookup(id,{allowGc:true}).then(answer=>answer.address).catch(error=>{
-      failures++
-      console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
+      report(id,error)
       return null
     })
     if(meta) await parse(id,meta)
   }
 } finally { metadata.close() }
-console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; всего в очереди=${matchIds.length}; квота OpenDota=${metadata.remainingQuota()??'неизвестна'}`)
+console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; приторможено=${throttled}; всего в очереди=${matchIds.length}; квота OpenDota=${metadata.remainingQuota()??'неизвестна'}`)
 if(failures)process.exitCode=1
