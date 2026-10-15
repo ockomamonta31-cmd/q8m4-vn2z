@@ -122,15 +122,25 @@ try {
   // сыграл только что и разбора которых он ждёт сейчас.
   const waitingFor=paused.slice(0,Math.max(0,max-resolved.size))
   const deadline=Date.now()+requestWaitMs
-  while(waitingFor.length&&resolved.size<max&&Date.now()<deadline) {
+  // A provider that fell over between the passes cannot publish anything during
+  // this wait either, and the coordinator pass is still ahead of us: waiting out
+  // the whole window would only cost the matches it could still parse.
+  let providerAlive=true
+  while(waitingFor.length&&resolved.size<max&&providerAlive&&Date.now()<deadline) {
     let published=false
     for(const id of waitingFor) {
       if(resolved.has(id)) continue
-      const answer=await metadata.lookup(id,{allowGc:false})
+      const answer=await metadata.lookup(id,{allowGc:false}).catch(error=>{
+        failures++
+        providerAlive=false
+        console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
+        return null
+      })
+      if(!answer) continue
       if(answer.endedAt) ended.set(id,answer.endedAt)
       if(answer.address) { resolved.set(id,answer.address); published=true; console.log(`PUBLISHED ${id}: OpenDota released the replay address`) }
     }
-    if(!published&&Date.now()<deadline) await delay(requestPollMs)
+    if(!published&&providerAlive&&Date.now()<deadline) await delay(requestPollMs)
   }
   for(const id of paused) {
     if(resolved.has(id)) continue
