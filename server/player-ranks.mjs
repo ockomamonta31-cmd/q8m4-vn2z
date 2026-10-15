@@ -6,6 +6,19 @@ export function validRank(value) {
   return medal >= 1 && medal <= 7 ? stars >= 1 && stars <= 5 : medal === 8 && stars <= 5
 }
 
+export function rankCacheNeedsRefresh(key, value, time = Date.now()) {
+  if (!value || !Number.isFinite(value.fetchedAt)) return true
+  if (value.retryAt > time) return false
+  if (String(key).startsWith('match-')) {
+    const complete = value.players?.length === 10 && value.players.every(p =>
+      Number.isInteger(p.account_id) && p.account_id > 0 && p.account_id < 0xffffffff)
+    // Early match responses can hide IDs which become available after parsing.
+    return time - value.fetchedAt >= (complete ? 24 * 3600_000 : 10 * 60_000)
+  }
+  return time - (value.tier ? value.fetchedAt : value.checkedAt ?? value.fetchedAt) >=
+    (value.tier ? 24 * 3600_000 : 3600_000)
+}
+
 export function createRankResolver({ read, write, fetcher = fetch, now = Date.now }) {
   const pending = new Map()
   let cooldownUntil = 0
@@ -60,7 +73,7 @@ export function createRankResolver({ read, write, fetcher = fetch, now = Date.no
   resolve.forMatch = async (match) => {
     const key = 'match-' + match.id
     let snapshot = await read(key)
-    if (!snapshot || now() - snapshot.fetchedAt > 24 * 3600_000) {
+    if (rankCacheNeedsRefresh(key, snapshot, now())) {
       try {
         const response = await fetcher('https://api.opendota.com/api/matches/' + match.id, { signal: AbortSignal.timeout(4000) })
         if (response.status === 429) cooldownUntil = now() + 60_000
@@ -74,7 +87,7 @@ export function createRankResolver({ read, write, fetcher = fetch, now = Date.no
         await write(key, snapshot)
       } catch (error) {
         console.warn('Match rank lookup failed:', error instanceof Error ? error.message : 'unknown error')
-        snapshot = { fetchedAt: now() - 23 * 3600_000, players: [] }
+        snapshot = { fetchedAt: snapshot?.fetchedAt ?? 0, players: snapshot?.players ?? [], retryAt: now() + 60_000 }
         await write(key, snapshot)
       }
     }

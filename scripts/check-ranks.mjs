@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { createRankResolver, rankFields, validRank } from '../server/player-ranks.mjs'
+import { createRankResolver, rankCacheNeedsRefresh, rankFields, validRank } from '../server/player-ranks.mjs'
 let time = 100 * 86400_000, calls = 0, mode = 'ok'
 const cache = new Map()
 const read = async id => cache.get(id) ?? null
@@ -51,6 +51,25 @@ assert(enriched.players.every(p => p.seasonRank === 45 && p.steamAccountId > 0 &
 assert(raw.players.every(p => p.seasonRank === 0), 'do not mutate immutable match cache')
 await matchResolver.forMatch(raw)
 assert.equal(matchCalls, 1)
+const partial = { fetchedAt: time, players: matchCache.get('match-12345').players.map(p => ({ ...p })) }
+partial.players[0].account_id = null
+assert(!rankCacheNeedsRefresh('match-12345', partial, time + 9 * 60_000), 'do not repeatedly fetch a fresh partial snapshot')
+assert(rankCacheNeedsRefresh('match-12345', partial, time + 10 * 60_000), 'partial identities retry after ten minutes')
+matchCache.set('match-12345', { ...partial, fetchedAt: time - 10 * 60_000 })
+assert((await matchResolver.forMatch(raw)).players.every(p => p.steamAccountId > 0))
+assert.equal(matchCalls, 2, 'refresh partial identities without waiting a day')
+assert(!rankCacheNeedsRefresh('match-12345', matchCache.get('match-12345'), time + 23 * 3600_000), 'complete identities keep the daily cache')
+const outageCache = new Map([['match-12345', { ...partial, fetchedAt: time - 10 * 60_000 }]])
+let outageCalls = 0
+const outageResolver = createRankResolver({
+  read: async id => outageCache.get(id), write: async (id, value) => outageCache.set(id, value), now: () => time,
+  fetcher: async () => { outageCalls++; throw new Error('offline') },
+})
+assert.equal((await outageResolver.forMatch(raw)).players.filter(p => p.steamAccountId > 0).length, 9, 'outage retains previously recovered identities')
+const outageBefore = outageCalls
+await outageResolver.forMatch(raw)
+assert.equal(outageCalls, outageBefore, 'failed snapshot refresh waits before retrying')
+assert(outageCache.get('match-12345').retryAt > time)
 console.log('PASS ranks: IDs, batch enrichment, cache, expiry, outages, 429, provenance and historical precedence')
 
 // Exercise the real Worker handlers, including the authenticated ingest boundary.
@@ -70,6 +89,7 @@ const DB = {
       },
       async all() {
         if (sql.includes('WHERE key IN')) return { results: [...db].filter(([key]) => args.includes(key)).map(([key, value]) => ({ key, ...value })) }
+        if (sql.includes("'match:*'")) return { results: [...db.keys()].filter(key => key.startsWith('match:')).map(key => ({ key })) }
         const prefix = sql.includes("'history:*'") ? 'history:' : 'rank-pending:v1:'
         return { results: [...db].filter(([key]) => key.startsWith(prefix)).map(([, value]) => value).slice(0, 10) }
       },
@@ -108,8 +128,15 @@ try {
   const history = await (await request('/api/player/1/matches')).json()
   assert.equal(history[0].player.seasonRank, 45)
   assert.equal(history[0].player.rankScope, 'current')
+  const snapshotKey = 'rank:v1:match-12345'
+  const completeSnapshot = db.get(snapshotKey)
+  put(snapshotKey, { ...payload.records[1].value, fetchedAt: Date.now() - 11 * 60_000,
+    players: payload.records[1].value.players.map((p, i) => i ? p : { ...p, account_id: null }) })
+  await request('/api/matches/12345')
+  assert(db.has('rank-pending:v1:match-12345'), 'Worker queues incomplete identities for the external runner')
+  db.set(snapshotKey, completeSnapshot)
   const evidence={version:1,curve:[[0,0,600,0,0,0,0,0,0,0]],lane:{damage:null,damageTaken:null,attacks:null,spellHits:null,activeMinutes:null},deaths:[],wards:[],uses:[],fights:[],purchases:[],runes:[],dewards:0,stacks:0,stuns:0,itemUses:{}}
-  assert.equal((await request('/api/internal/replay/12345',{method:'POST',headers,body:JSON.stringify({players:[{playerSlot:0,position:1,positionSource:'replay',positionVersion:2,evidence}]})})).status,200)
+  assert.equal((await request('/api/internal/replay/12345',{method:'POST',headers,body:JSON.stringify({players:raw.players.map((p,i)=>({playerSlot:i<5?i:128+i-5,position:1,positionSource:'replay',positionVersion:2,evidence}))})})).status,200)
   const enrichedMatch=await (await request('/api/matches/12345')).json()
   const enrichedHistory=await (await request('/api/player/1/matches')).json()
   assert.deepEqual(enrichedHistory[0].player.evidence,enrichedMatch.players[0].evidence,'Worker history must preserve replay evidence')

@@ -28,7 +28,8 @@ const resolver = createRankResolver({
       const wait = 1250 - (Date.now() - last)
       if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait))
       last = Date.now()
-      return fetch(url, options)
+      // Start the timeout after throttling, rather than spending it in the queue.
+      return fetch(url, { ...options, signal: AbortSignal.timeout(20_000) })
     })
     chain = result.catch(() => {})
     return result
@@ -42,7 +43,7 @@ for (const { key } of pending.slice(0, 10)) {
   } else if (/^\d+$/.test(key)) await resolver([Number(key)])
 }
 // Do not ingest outage placeholders or empty snapshots as successful refreshes.
-const records = [...cache].filter(([key, value]) => key.startsWith('match-') ? value.players?.length === 10 : !value.retryAt)
+const records = [...cache].filter(([key, value]) => !value.retryAt && (!key.startsWith('match-') || value.players?.length === 10))
   .map(([key, value]) => ({ key, value }))
 if (records.length) console.log('RANK INGEST', await api('/api/internal/ranks', { method: 'POST', body: JSON.stringify({ records }) }))
 console.log('Rank requests processed:', pending.length, 'records:', records.length)

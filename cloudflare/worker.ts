@@ -2,7 +2,7 @@
 import { laneOutcome } from '../server/gc/lane-outcome.mjs'
 import heroes from '../server/data/constants/heroes.json'
 import items from '../server/data/constants/items.json'
-import { createRankResolver, rankFields, validRank } from '../server/player-ranks.mjs'
+import { createRankResolver, rankCacheNeedsRefresh, rankFields, validRank } from '../server/player-ranks.mjs'
 import { validMapPlays } from '../server/gc/map-plays.mjs'
 import { validEvidence } from '../server/gc/player-evidence.mjs'
 import { coachResponse } from './coach'
@@ -31,7 +31,7 @@ function rankResolver(env: Env) {
     resolver = createRankResolver({
       read: async (id: number | string) => {
         const value = await cachedPrevious<any>(env, 'rank:v1:' + id)
-        const missing = !value || Date.now() - value.fetchedAt > 24 * 3600_000 || (value.tier === 0 && Date.now() - value.checkedAt > 3600_000) || (String(id).startsWith('match-') && !value.players?.length)
+        const missing = rankCacheNeedsRefresh(id, value)
         if (missing && !await cachedPrevious(env, 'rank-pending:v1:' + id)) {
           await save(env, 'rank-pending:v1:' + id, { key: String(id) })
         }
