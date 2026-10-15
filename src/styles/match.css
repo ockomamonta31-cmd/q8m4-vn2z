@@ -781,4 +781,19 @@
 .edik-references a { color: var(--gold); text-decoration: underline; text-underline-offset: 3px; }
 .edik .analysis-method { margin: 20px 0; }
 .edik .analysis-method p { overflow-wrap: anywhere; }
+.edik-deep-toggle { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 0; border-top: 1px solid var(--line); margin-top: 24px; }
+.edik-deep-toggle p { font-size: 14px; color: var(--text-dim); line-height: 1.7; max-width: 62ch; }
+.edik-deep-toggle .btn { flex: none; }
+.edik-deep-section { margin-top: 40px; padding-top: 24px; border-top: 1px solid var(--line); }
+.edik-deep-section > .edik-notes { margin-top: 0; }
+.edik-deep-head h3 { font: 400 32px/1.2 var(--display); }
+.edik-deep-head p { margin-top: 10px; font-size: 14px; color: var(--text-dim); line-height: 1.6; max-width: 75ch; }
+.edik-deep > .analysis-method ul { margin-top: 12px; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.7; color: var(--text-dim); }
 .edik button:focus-visible, .edik a:focus-visible { outline: 2px solid var(--gold); outline-offset: 4px; }
+
+@media (max-width: 767px) {
+  .edik-deep-toggle { flex-direction: column; align-items: stretch; }
+  .edik-deep-toggle .btn { width: 100%; justify-content: center; }
+  .edik-deep-head h3 { font-size: 26px; }
+  .edik-deep-section { margin-top: 28px; }
+}

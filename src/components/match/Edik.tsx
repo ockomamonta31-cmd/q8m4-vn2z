@@ -8,6 +8,7 @@ import { fmtDuration } from '../../api/formats'
 import { Route } from './MapPlays'
 import { assessPlayer } from '../../api/assessment'
 import { keyMistakes, type TrainingFact } from '../../api/training'
+import { deepReview } from '../../api/deepReview'
 
 export default function Edik({ match, timeline, rating, heroMap, meSlot, initialFight }: {
   match: MatchDetails; timeline: MatchTimeline | null; rating: DraftRating | null; heroMap: Map<number, HeroInfo>; meSlot: number | null; initialFight: number | null
@@ -17,6 +18,7 @@ export default function Edik({ match, timeline, rating, heroMap, meSlot, initial
   const [mode, setMode] = useState<'lane' | 'fight' | 'match'>(initialFight !== null ? 'fight' : 'lane')
   const [fightId, setFightId] = useState<number | null>(initialFight)
   const [showDetails, setShowDetails] = useState(initialFight !== null)
+  const [deep, setDeep] = useState(false)
   const fights = rankTeamfights(timeline), key = keyTeamfight(timeline)
   const fight = fights.find(f => f.index === fightId) ?? key ?? fights[0]
   const member = roster.find(m => m.slot === selected) ?? roster[0]
@@ -26,6 +28,7 @@ export default function Edik({ match, timeline, rating, heroMap, meSlot, initial
   const lane = rating?.lanes.find(l => [...l.radiant, ...l.dire].some(q => q.heroId === p.heroId)) ?? null
   const opponents = match.players.filter(q => q.isRadiant !== p.isRadiant)
   const mistakes = keyMistakes(p, opponents)
+  const review = deep ? deepReview(p, opponents) : null
   const notes = !showDetails ? [] : mode === 'lane' ? reviewLane(p, lane, timeline) : mode === 'match' ? reviewMatch(p, match.durationSeconds, opponents)
     : fight && timeline ? reviewFight(p, fight, timeline, slot) : []
   const team = match.players.filter(q => q.isRadiant === p.isRadiant)
@@ -58,6 +61,27 @@ export default function Edik({ match, timeline, rating, heroMap, meSlot, initial
       </article>)}
       {!mistakes.length && <p className="edik-empty">{p.evidence ? 'Явных ошибок с достаточным контекстом не выделено. Эпизоды и измерения можно посмотреть ниже.' : 'Для разбора нужен реплей. Ошибки появятся после его загрузки.'}</p>}
     </div>
+    {p.evidence && <div className="edik-deep-toggle">
+      <p>Выше — до трёх эпизодов, выбранных автоматически. Подробный разбор идёт по всем смертям, поминутной линии, дракам, применениям способностей и экономике этого игрока.</p>
+      <button type="button" className="btn" aria-expanded={deep} onClick={() => setDeep(!deep)}>{deep ? 'Свернуть разбор' : 'Разобрать мою игру подробно'}</button>
+    </div>}
+    {review && <div className="edik-deep">
+      <p className="edik-context">{review.lead}</p>
+      {review.sections.map(section => <section key={section.id} className="edik-deep-section">
+        <header className="edik-deep-head"><h3>{section.title}</h3><p>{section.lead}</p></header>
+        <div className="edik-notes">
+          {section.items.map(item => <article key={`${slot}-${item.id}`} className={`edik-note ${item.status}`}>
+            <div className="edik-note-main">
+              <header><h3>{item.title}</h3>{item.t != null && <span>{fmtDuration(item.t)}</span>}</header>
+              <p className="edik-fact">{item.fact}</p>
+              <p className="edik-advice"><b>{item.status === 'good' ? 'Что удалось' : 'Что проверить'}</b>{item.advice}</p>
+            </div>
+          </article>)}
+        </div>
+      </section>)}
+      <details className="analysis-method"><summary>Что реплей не показывает</summary>
+        <ul>{review.gaps.map(gap => <li key={gap}>{gap}</li>)}</ul></details>
+    </div>}
     <details className="analysis-method edik-details" open={showDetails} onToggle={e => setShowDetails(e.currentTarget.open)}>
       <summary>Все эпизоды и измерения</summary>
       {showDetails && <>

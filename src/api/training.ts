@@ -10,6 +10,8 @@ const itemName=(key:string)=>items.find(i=>i.shortName===key)?.displayName ?? ke
 const heroName=(id:number)=>heroes.find(h=>h.id===id)?.displayName??`герой ${id}`
 const spellNames=new Map(Object.values(kits.kit).flatMap(k=>k.abilities.map(a=>[a.name,a.title] as [string,string])))
 const spellName=(key:string)=>spellNames.get(key)??({clinkz_strafe:'Strafe',clinkz_death_pact:'Death Pact',earthshaker_aftershock:'Aftershock'} as Record<string,string>)[key]??key.replace(/^[^_]+_/,'').replaceAll('_',' ')
+export { itemName, heroName, spellName }
+export const itemById=(id:number)=>items.find(i=>i.id===id)?.displayName??`предмет ${id}`
 
 export const isolatedGank=(d:NonNullable<PlayerEvidence['deathWindows']>[number])=>d.decision?.nearbyAllies===0&&d.decision.attackers.length>=2
 export const decisionExercise='Останови реплей перед началом нападения. Проверь миникарту: где мидер, кто рядом и чем враг удержит тебя. Запиши, какую волну можно было безопасно дождаться вместо выхода.'
