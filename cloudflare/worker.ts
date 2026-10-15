@@ -31,6 +31,18 @@ function singleFlight<T>(env: Env, key: string, load: () => Promise<T>): Promise
   if (!pending.has(key)) pending.set(key, load().finally(() => pending!.delete(key)))
   return pending.get(key)!
 }
+// Valve выкладывает матч в историю почти сразу после конца игры, поэтому её
+// перечитывают раз в минуту, а не раз в пять: открытие профиля отдаётся из кэша
+// мгновенно, а идущий следом тихий запрос (?fresh=1) ждёт обновление не дольше
+// HISTORY_WAIT_MS и приносит матч без ручной перезагрузки страницы.
+const HISTORY_TTL_MS = 60_000
+const HISTORY_WAIT_MS = 3_000
+async function briefly<T>(work: Promise<T>, ms: number): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([work, new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), ms) })])
+  } finally { clearTimeout(timer) }
+}
 const rankResolvers = new WeakMap<Env, ReturnType<typeof createRankResolver>>()
 function rankResolver(env: Env) {
   let resolver = rankResolvers.get(env)
@@ -62,9 +74,9 @@ async function steam(env: Env, endpoint: string, params: Record<string, string |
   if (!res.ok) throw new Response(JSON.stringify({error:`Steam API HTTP ${res.status}`}), {status:res.status === 401 ? 401 : 502})
   return res.json<any>()
 }
-async function history(env: Env, account: number, ctx?: ExecutionContext) {
+async function history(env: Env, account: number, ctx?: ExecutionContext, fresh = false) {
   const key=`history:${account}`
-  const hit = await cached<{rows:{id:number;seq:number}[];total:number}>(env,key,300_000)
+  const hit = fresh ? null : await cached<{rows:{id:number;seq:number}[];total:number}>(env,key,HISTORY_TTL_MS)
   if (hit) return hit
   const previous=await cachedPrevious<{rows:{id:number;seq:number}[];total:number}>(env,key)
   const refresh = singleFlight(env, key, async () => {
@@ -93,7 +105,11 @@ async function history(env: Env, account: number, ctx?: ExecutionContext) {
   })
   if(previous && ctx) {
     ctx.waitUntil(refresh.catch(e=>console.warn('History refresh failed:',e instanceof Error?e.message:'unknown')))
-    return previous
+    // Открытие профиля отдаётся сразу из кэша, а тихий повторный запрос
+    // (?fresh=1) дожидается разбора: иначе только что сыгранный матч виден лишь
+    // после ручной перезагрузки страницы.
+    if(!fresh) return previous
+    return await briefly(refresh.catch(()=>null), HISTORY_WAIT_MS) ?? previous
   }
   try { return await refresh } catch(e) { if(previous) return previous; throw e }
 }
@@ -464,7 +480,7 @@ export default {
     let m=p.match(/^\/api\/profile\/(\d+)$/)
     if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h,rs]=await Promise.all([profiles(env,[id],ctx),history(env,id,ctx),ranks(env,[id])]); const info=ps.get(id), rank=rs.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:rank?.tier??null,rankSource:rank?.source??null,rankScope:rank?.scope??null,rankFetchedAt:rank?.fetchedAt??null,rankIsCore:null}) }
     m=p.match(/^\/api\/player\/(\d+)\/matches$/)
-    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id,ctx),list=await getMatches(env,id,h.rows,skip,take),rank=(await ranks(env,[id])).get(id);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),replay=await replayData(env,x.id),role=replay?.[String(slot)],order={r:0,d:0},laners=x.players.map((p:any)=>({...p,...replay?.[String(p.isRadiant?order.r++:128+order.d++)]}));return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,laneOutcome:laneOutcome(laners,laners.find((p:any)=>p.steamAccountId===id),x.durationSeconds),position:role?.position??0,positionSource:role?.positionSource,lane:role?.lane,evidence:role?.evidence,mapPlays:role?.mapPlays,impactPhases:role?.impactPhases,purchaseEvents:role?.purchaseEvents,teamKills:team.reduce((n:number,p:any)=>n+p.kills,0),teamDamage:team.reduce((n:number,p:any)=>n+p.heroDamage,0),...rankFields(me,rank),isVictory:me.isVictory,imp:null}}}))) }
+    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id,ctx,url.searchParams.get('fresh')==='1'),list=await getMatches(env,id,h.rows,skip,take),rank=(await ranks(env,[id])).get(id);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),replay=await replayData(env,x.id),role=replay?.[String(slot)],order={r:0,d:0},laners=x.players.map((p:any)=>({...p,...replay?.[String(p.isRadiant?order.r++:128+order.d++)]}));return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,laneOutcome:laneOutcome(laners,laners.find((p:any)=>p.steamAccountId===id),x.durationSeconds),position:role?.position??0,positionSource:role?.positionSource,lane:role?.lane,evidence:role?.evidence,mapPlays:role?.mapPlays,impactPhases:role?.impactPhases,purchaseEvents:role?.purchaseEvents,teamKills:team.reduce((n:number,p:any)=>n+p.kills,0),teamDamage:team.reduce((n:number,p:any)=>n+p.heroDamage,0),...rankFields(me,rank),isVictory:me.isVictory,imp:null}}}))) }
     m=p.match(/^\/api\/matches\/(\d+)$/)
     if(m) {
       const id=Number(m[1]),x=await rankedMatch(env,await match(env,id))

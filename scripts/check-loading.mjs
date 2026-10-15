@@ -91,6 +91,24 @@ try {
   assert.equal(get('profile:1').name, 'Updated')
   assert.equal(get('history:1').rows[0].id, 43)
 
+  // Быстрый Valve: тихий повторный запрос (?fresh=1) приносит только что
+  // сыгранный матч, так что ручная перезагрузка страницы не нужна.
+  put('history:1', { rows: [{ id: 42, seq: 1 }], total: 1 }, 0)
+  put('match:43', { ...raw, id: 43 })
+  globalThis.fetch = async url => {
+    assert(String(url).includes('GetMatchHistory'), 'the profile only asks Valve for its history')
+    return Response.json({ result: { total_results: 2, matches: [{ match_id: 43, match_seq_num: 2 }, { match_id: 42, match_seq_num: 1 }] } })
+  }
+  const recheck = await (await request('/api/player/1/matches?take=1&fresh=1', { waitUntil: () => {} })).json()
+  assert.deepEqual(recheck.map(m => m.id), [43], 'the quiet recheck brings a just-played match')
+
+  // Молчащий Valve не держит страницу: отдаём кэш, обновление остаётся фоном.
+  put('history:7', { rows: [{ id: 99, seq: 1 }], total: 1 }, 0)
+  put('match:99', { ...raw, id: 99, players: raw.players.map((p, i) => ({ ...p, steamAccountId: i === 9 ? 7 : p.steamAccountId })) })
+  globalThis.fetch = async () => new Promise(() => {})
+  const stale = await (await request('/api/player/7/matches?take=1&fresh=1', { waitUntil: () => {} })).json()
+  assert.deepEqual(stale.map(m => m.id), [99], 'a silent Valve falls back to the cached list')
+
   // History keeps order while reading several cached matches at once.
   const rows = Array.from({ length: 10 }, (_, i) => ({ id: 100 - i, seq: i + 1 }))
   put('history:1', { rows, total: 10 })

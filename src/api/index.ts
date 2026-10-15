@@ -59,9 +59,9 @@ export async function fetchProfile(id: number): Promise<Profile> {
 
 // --- Список матчей ---
 
-export async function fetchMatches(id: number, take: number, skip: number): Promise<PlayerMatch[]> {
+export async function fetchMatches(id: number, take: number, skip: number, fresh = false): Promise<PlayerMatch[]> {
   if (DEMO_MODE) return demoMatches(id, take, skip)
-  return ownApi<PlayerMatch[]>(`/player/${id}/matches?take=${take}&skip=${skip}`)
+  return ownApi<PlayerMatch[]>(`/player/${id}/matches?take=${take}&skip=${skip}${fresh ? '&fresh=1' : ''}`)
 }
 
 /** Постраничная загрузка для вкладки «Активность». */

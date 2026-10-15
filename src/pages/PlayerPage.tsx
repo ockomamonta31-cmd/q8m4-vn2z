@@ -65,6 +65,7 @@ export default function PlayerPage() {
         .catch((e) => alive && setPeersError(e instanceof Error ? e.message : 'Друзья не загрузились'))
     }
 
+    let recheck: ReturnType<typeof setTimeout> | undefined
     async function load() {
       const [prof, ms] = await Promise.allSettled([fetchProfile(playerId), fetchMatches(playerId, PAGE_SIZE, 0)])
       if (!alive) return          // Фатальные ошибки (нет ключа / недоступен свой API) — показываем панель настройки
@@ -85,10 +86,19 @@ export default function PlayerPage() {
 
       setLoading(false)
       loadAggregates()
+      // Valve отдаёт только что сыгранный матч с задержкой, а список матчей
+      // живёт в кэше минуту. Один тихий повторный запрос — новый матч
+      // появляется сам, без перезагрузки страницы.
+      recheck = setTimeout(() => {
+        fetchMatches(playerId, PAGE_SIZE, 0, true)
+          .then((value) => { if (alive) setMatches((prev) => (prev.length > PAGE_SIZE ? prev : value)) })
+          .catch(() => {})
+      }, 2000)
     }
     load()
     return () => {
       alive = false
+      clearTimeout(recheck)
     }
   }, [playerId, attempt])
 
