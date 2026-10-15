@@ -191,20 +191,27 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
   for(let i=0;i<ids.length;i+=40) {
     const batch=ids.slice(i,i+40)
     const keys=batch.flatMap(id=>[`replay-data:v1:${id}`,`replay-timeline:v1:${id}`])
-    const found=await env.DB.prepare(`SELECT key,value FROM cache WHERE key IN (${keys.map(()=>'?').join(',')})`).bind(...keys).all<{key:string;value:string}>()
+    // Return only queue flags. Transferring every replay's combat/paths here
+    // exceeded the Worker's memory/CPU limit even for a five-match request.
+    const found=await env.DB.prepare(`SELECT key, CASE WHEN key GLOB 'replay-data:*' THEN
+      (SELECT json_object('complete',count(*)=10 AND min(
+        coalesce(json_extract(j.value,'$.position') BETWEEN 1 AND 5,0)
+        AND coalesce(json_extract(j.value,'$.positionVersion')>=2,0)
+        AND coalesce(json_extract(j.value,'$.mapPlays.version')=1,0)
+        AND coalesce(json_extract(j.value,'$.evidence.version')=1,0)
+        AND coalesce(json_extract(j.value,'$.evidence.microVersion')=1,0)
+        AND coalesce(json_array_length(j.value,'$.mapPlays.structures')>0,0)),
+        'decision',count(*)=10 AND min(coalesce(json_extract(j.value,'$.evidence.decisionVersion')=1,0)))
+        FROM json_each(cache.value) j)
+      ELSE json_object('enriched',coalesce(json_array_length(value,'$.teamfights'),0)=0
+        OR json_type(value,'$.teamfights[0].lines')='array') END AS value
+      FROM cache WHERE key IN (${keys.map(()=>'?').join(',')})`).bind(...keys).all<{key:string;value:string}>()
     const store=new Map<string,any>()
     for(const row of found.results) { try { store.set(row.key,JSON.parse(row.value)) } catch {} }
     for(const id of batch) {
-      const slots=store.get(`replay-data:v1:${id}`)
-      const entries=slots?Object.values(slots):[]
-      const positioned=entries.length===10&&entries.every((x:any)=>x.position>=1&&x.position<=5&&x.positionVersion>=2)
+      const replay=store.get(`replay-data:v1:${id}`)
       const timeline=store.get(`replay-timeline:v1:${id}`)
-      const fights=timeline?.teamfights??[]
-      const enriched=!timeline||fights.length===0||Array.isArray(fights[0]?.lines)
-      const spatial=entries.length===10&&entries.every((x:any)=>x.mapPlays?.version===1)
-      const coached=entries.length===10&&entries.every((x:any)=>x.evidence?.version===1&&x.evidence?.microVersion===1&&x.mapPlays?.structures?.length)
-      const decision=!recent.has(id)||entries.every((x:any)=>x.evidence?.decisionVersion===1)
-      if(timeline&&positioned&&enriched&&spatial&&coached&&decision) done.add(id)
+      if(timeline?.enriched&&replay?.complete&&(!recent.has(id)||replay.decision)) done.add(id)
     }
   }
   return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))

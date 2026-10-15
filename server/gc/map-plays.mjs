@@ -31,7 +31,14 @@ export function buildMapPlays(replay, match, heroes) {
   const slotByName = new Map([...names].map(([name, id]) => [name, slots.find(s => m.heroes[s] === id)]))
   const track = (s) => m.tracks[s]
   const at = (s, t) => nearest(track(s), t)
-  const deaths = combat.filter(e => e[1] === 'DEATH' && realHero(e) && slotByName.has(e[3]))
+  // Meepo's clones all die at the same time; only one player death occurred.
+  // Prefer the enemy's credited kill over the clones' self-death records.
+  const deathsByHero = new Map()
+  for (const e of combat.filter(e => e[1] === 'DEATH' && realHero(e) && slotByName.has(e[3]))) {
+    const key = `${e[0]}:${e[3]}`, previous = deathsByHero.get(key)
+    if (!previous || previous[2] === previous[3]) deathsByHero.set(key, e)
+  }
+  const deaths = [...deathsByHero.values()]
   // The whole curve is context, never assigned to a player as their own gold.
   const advantage = (t, slot) => {
     const i = Math.min(Math.max(0, Math.floor(t / 60)), (replay.radiant_gold_adv?.length ?? 1) - 1)
@@ -82,7 +89,7 @@ export function buildMapPlays(replay, match, heroes) {
       const before = at(slot, Math.max(0, t - 30)), now = at(slot, t)
       const rotation = before?.[3] === 0 && now?.[3] === 0 && distance(before, now) > 1800
       add(t, end, rotation ? 'rotation' : 'fight', kills.length > lost.length ? 1 : kills.length < lost.length ? -1 : 0,
-        { kills: kills.length, deaths: lost.length, damage: Math.round(damage), victims: kills, allies, enemies })
+        { kills: kills.length, deaths: lost.length, damage: Math.round(damage), victims: [...new Set(kills)], allies, enemies })
     }
     // Building pressure only becomes a successful objective when that exact
     // building falls; pushing damage by itself stays an observed neutral play.

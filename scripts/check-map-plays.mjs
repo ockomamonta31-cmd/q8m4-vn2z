@@ -24,6 +24,17 @@ let p = score(replay)
 assert.equal(p.good, 2); assert.equal(p.bad, 1); assert.equal(p.score, 33)
 assert(p.episodes.some(e => e.kind === 'objective' && e.verdict === 0), 'hitting a tower is not destroying it')
 assert(validMapPlays(p))
+const clones = structuredClone(replay)
+clones.movement.combat = []
+for (const t of [600, 630, 660]) {
+  clones.movement.combat.push(event(t - 5, 'DAMAGE', 1, 6))
+  for (let i = 0; i < 3; i++) clones.movement.combat.push(event(t, 'DEATH', 6, 6))
+  clones.movement.combat.push(event(t, 'DEATH', 1, 6))
+}
+const cloneMaps = buildMapPlays(clones, match, heroes)
+assert.equal(cloneMaps[0].episodes.reduce((n,e) => n + e.facts.kills, 0), 3, 'one Meepo kill per timestamp, including buyback/repeated deaths')
+assert.equal(cloneMaps[128].episodes.reduce((n,e) => n + e.facts.deaths, 0), 3, 'clones do not multiply player deaths')
+assert(Object.values(cloneMaps).every(validMapPlays), 'Meepo clone deaths must survive ingest validation')
 assert(!validMapPlays({ ...p, score: 100 }), 'ingest rejects fabricated score')
 assert.equal(score({ ...replay, radiant_gold_adv: Array(31).fill(10000) }).score, p.score, 'losing state grants no automatic bonus')
 assert.equal(buildMapPlays(replay, { ...match, didRadiantWin: true }, heroes)[0].score, p.score, 'final outcome grants no bonus')

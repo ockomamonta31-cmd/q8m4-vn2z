@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { DatabaseSync } from 'node:sqlite'
 import { buildSync } from 'esbuild'
 import { playerEvidence, validEvidence } from '../server/gc/player-evidence.mjs'
 import { buildMapPlays } from '../server/gc/map-plays.mjs'
@@ -15,7 +16,16 @@ assert(!validEvidence({...evidence,uses:[{t:NaN,key:'invoker_exort',target:'dota
 assert(!validEvidence({...evidence,uses:Array(16001).fill(evidence.uses[0])}))
 const bundle=buildSync({entryPoints:['cloudflare/worker.ts'],bundle:true,platform:'node',format:'esm',write:false})
 const {default:worker}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'))
-const rows=new Map(),env={REPLAY_INGEST_TOKEN:'test',DB:{prepare(sql){return {args:[],bind(...args){this.args=args;return this},async first(){return rows.get(this.args[0])??null},async all(){return {results:[...rows].filter(([key])=>sql.includes("'history:*'")?key.startsWith('history:'):sql.includes("'match:*'")?key.startsWith('match:'):this.args.includes(key)).map(([key,r])=>({key,...r}))}},async run(){rows.set(this.args[0],{value:this.args[1],updated_at:this.args[2]});return {success:true}}}},async batch(statements){return Promise.all(statements.map(s=>s.run()))}}}
+let queueSQL
+const rows=new Map(),env={REPLAY_INGEST_TOKEN:'test',DB:{prepare(sql){if(sql.includes('json_each(cache.value)'))queueSQL=sql;return {args:[],bind(...args){this.args=args;return this},async first(){return rows.get(this.args[0])??null},async all(){return {results:[...rows].filter(([key])=>sql.includes("'history:*'")?key.startsWith('history:'):sql.includes("'match:*'")?key.startsWith('match:'):this.args.includes(key)).map(([key,r])=>{
+    if(!sql.includes("json_each(cache.value)"))return {key,...r}
+    const data=JSON.parse(r.value),entries=Object.values(data)
+    const flags=key.startsWith('replay-data:')?{
+      complete:entries.length===10&&entries.every(p=>p.position>=1&&p.position<=5&&p.positionVersion>=2&&p.mapPlays?.version===1&&p.evidence?.version===1&&p.evidence?.microVersion===1&&p.mapPlays?.structures?.length),
+      decision:entries.length===10&&entries.every(p=>p.evidence?.decisionVersion===1),
+    }:{enriched:!data.teamfights?.length||Array.isArray(data.teamfights[0]?.lines)}
+    return {key,value:JSON.stringify(flags)}
+  })}},async run(){rows.set(this.args[0],{value:this.args[1],updated_at:this.args[2]});return {success:true}}}},async batch(statements){return Promise.all(statements.map(s=>s.run()))}}}
 const request=(path,body,auth=true)=>worker.fetch(new Request('https://test'+path,{method:body?'POST':'GET',headers:{...(auth?{authorization:'Bearer test'}:{}),'content-type':'application/json'},...(body?{body:JSON.stringify(body)}:{})}),env)
 const slots=[0,1,2,3,4,128,129,130,131,132]
 const mapPlays={version:1,heroId:74,sampleSeconds:2,coverage:1,score:null,good:0,bad:0,neutral:0,episodes:[],structures:[{kind:'tower',team:2,x:80,y:80}]}
@@ -40,6 +50,17 @@ assert.equal((await (await request('/api/matches/43/replay-status')).json()).sta
 rows.set('match:42',{value:'{}',updated_at:Date.now()});rows.set('match:43',{value:'{}',updated_at:Date.now()})
 const pending=await (await request('/api/internal/replay/pending')).json()
 assert.deepEqual(pending.matchIds,[43],'directly opened matches enter the queue and complete matches leave it')
+// Execute the production SQL, not just the mock projection: megabyte replay
+// rows must never be returned to the Worker while checking readiness.
+const db = new DatabaseSync(':memory:')
+db.exec('CREATE TABLE cache(key TEXT PRIMARY KEY,value TEXT)')
+for(const [key,row] of rows) db.prepare('INSERT INTO cache VALUES(?,?)').run(key,row.value)
+const flags=db.prepare(queueSQL).all('replay-data:v1:43','replay-timeline:v1:43','replay-data:v1:42','replay-timeline:v1:42')
+assert.equal(JSON.parse(flags.find(r=>r.key==='replay-data:v1:42').value).complete,1)
+assert.equal(JSON.parse(flags.find(r=>r.key==='replay-data:v1:42').value).decision,1)
+assert.equal(JSON.parse(flags.find(r=>r.key==='replay-timeline:v1:42').value).enriched,1)
+assert(JSON.stringify(flags).length<500,'queue transfers compact flags rather than full replay JSON')
+db.close()
 const legacy=JSON.parse(original);Object.values(legacy).forEach(p=>delete p.evidence.decisionVersion)
 rows.get('replay-data:v1:42').value=JSON.stringify(legacy)
 assert.deepEqual((await (await request('/api/internal/replay/pending')).json()).matchIds,[43,42],'recent legacy evidence is regenerated')
@@ -56,7 +77,7 @@ for(const code of [200,404,502]) {
 }
 // Also exercise actual local replays when available; synthetic checks above
 // run in a clean checkout without requiring downloaded match artifacts.
-for(const id of [9044601272,9043718539,9042974863]) {
+for(const id of [9044601272,9043718539,9042974863,9033240359]) {
   const path=`server/data/replays/${id}.json`
   if(!existsSync(path))continue
   const replay=JSON.parse(readFileSync(path)),match=JSON.parse(readFileSync(`server/data/matches/${id}.json`)),maps=buildMapPlays(replay,match,heroes)
