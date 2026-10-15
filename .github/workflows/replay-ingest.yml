@@ -28,6 +28,8 @@ jobs:
     env:
       REPLAY_INGEST_URL: ${{ secrets.REPLAY_INGEST_URL }}
       REPLAY_INGEST_TOKEN: ${{ secrets.REPLAY_INGEST_TOKEN }}
+      STRATZ_API_TOKEN: ${{ secrets.STRATZ_API_TOKEN }}
+      STEAM_REFRESH_TOKEN: ${{ secrets.STEAM_REFRESH_TOKEN }}
       # Из repository_dispatch берём только числовой лимит и проходим его через
       # env: payload GitHub считает данными, которыми теоретически может
       # управлять чужой код. Список матчей раннер читает сам из своего API.

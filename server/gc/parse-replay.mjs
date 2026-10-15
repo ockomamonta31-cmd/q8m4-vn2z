@@ -7,22 +7,27 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { readFile } from 'node:fs/promises'
+import { createReplayMetadataResolver, replayMetadata } from './replay-metadata.mjs'
 
 const [matchId, suppliedCluster, suppliedSalt] = process.argv.slice(2)
-const integer = (x) => /^\d+$/.test(x ?? '') && Number.isSafeInteger(Number(x))
+const integer = (x) => /^\d+$/.test(x ?? '') && Number.isSafeInteger(Number(x)) && Number(x) > 0
 if (!integer(matchId) || Boolean(suppliedCluster) !== Boolean(suppliedSalt) || (suppliedCluster && ![suppliedCluster,suppliedSalt].every(integer))) {
   console.error('Usage: node server/gc/parse-replay.mjs MATCH_ID [CLUSTER REPLAY_SALT]')
   process.exit(2)
 }
 let cluster = suppliedCluster, salt = suppliedSalt
 if (!cluster) {
-  const res = await fetch(`https://api.opendota.com/api/matches/${matchId}`, { signal: AbortSignal.timeout(20_000) })
-  if (!res.ok) throw new Error(`Replay metadata HTTP ${res.status}`)
-  const metadata = await res.json()
-  cluster = String(metadata.cluster ?? '')
-  salt = String(metadata.replay_salt ?? '')
-  if (!integer(cluster) || !integer(salt)) throw new Error(`Replay cluster/salt not published for match ${matchId} yet`)
+  // Local auto-ingest shares the same source selection as the GitHub runner.
+  try { process.loadEnvFile() } catch (error) { if (error.code !== 'ENOENT') throw error }
+  const resolver = createReplayMetadataResolver()
+  try {
+    const metadata = await resolver.lookup(matchId)
+    if (!metadata) throw new Error(`Replay cluster/salt unavailable for match ${matchId}`)
+    cluster = String(metadata.cluster); salt = String(metadata.replay_salt)
+    console.log(`Replay metadata from ${metadata.source}`)
+  } finally { resolver.close() }
 }
+replayMetadata(matchId, matchId, cluster, salt, 'parser arguments')
 const parser = process.env.DOTA_PARSER_URL || 'http://127.0.0.1:5600'
 const base = new URL(parser)
 if (!['http:', 'https:'].includes(base.protocol)) throw new Error('DOTA_PARSER_URL must be HTTP(S)')

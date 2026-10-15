@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { replayJson } from './replay-http.mjs'
+import { createReplayMetadataResolver } from './replay-metadata.mjs'
 
 const base=process.env.REPLAY_INGEST_URL
 const token=process.env.REPLAY_INGEST_TOKEN
@@ -34,12 +35,14 @@ const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
 const scan=Math.max(max,Number(process.env.REPLAY_SCAN_LIMIT)||40)
 const candidates=matchIds.slice(0,scan)
 let completed=0, noReplay=0, failures=0
+const metadata=createReplayMetadataResolver()
+try {
 for(const id of candidates) {
   if(completed>=max) break
   try {
-    const meta=await replayJson(`https://api.opendota.com/api/matches/${id}`,{}, {timeoutMs:20_000,allow404:true})
-    if(meta===null){noReplay++;await status(id,'waiting');console.log(`WAIT ${id}: match not indexed by replay metadata provider`);continue}
-    if(!/^\d+$/.test(String(meta.cluster??''))||!/^\d+$/.test(String(meta.replay_salt??''))) { noReplay++; await status(id,'waiting');console.log(`WAIT ${id}: replay metadata not published`);continue }
+    const meta=await metadata.lookup(id)
+    if(!meta){noReplay++;await status(id,'waiting');console.log(`WAIT ${id}: no replay address from available sources`);continue}
+    console.log(`REPLAY ${id}: metadata from ${meta.source}`)
     const match=await get(`/api/internal/replay/match/${id}`)
     if(match.players?.length!==10) throw new Error('Expected ten match players')
     await status(id,'parsing')
@@ -56,5 +59,6 @@ for(const id of candidates) {
     await status(id,'retry').catch(error=>console.error(`STATUS ${id}: ${error.message}`))
   }
 }
-console.log(`INGEST ${completed}/${candidates.length}; реплей ещё не выложен=${noReplay}; ошибок=${failures}; всего в очереди=${matchIds.length}`)
+} finally { metadata.close() }
+console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; ошибок=${failures}; всего в очереди=${matchIds.length}`)
 if(failures)process.exitCode=1
