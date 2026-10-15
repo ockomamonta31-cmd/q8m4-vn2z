@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 process.on('unhandledRejection', error => { console.log('UNHANDLED:', error && error.message); console.log((error && error.stack || '').split('\n').slice(0,6).join('\n')) })
-import { createReplayMetadataResolver, replayEndedAt } from '../server/gc/replay-metadata.mjs'
+import { createReplayMetadataResolver, replayAgeAction, replayEndedAt } from '../server/gc/replay-metadata.mjs'
 import { createReplayGc, gcRequest, gcResponse } from '../server/gc/replay-gc.mjs'
 
 const json = (payload, status = 200) => ({
@@ -87,6 +87,20 @@ function fakeSteam(script) {
 assert.equal(replayEndedAt(1000, 1800), 2800, 'a match is aged by its end, not its start')
 assert.equal(replayEndedAt(1000, null), 1000)
 assert.equal(replayEndedAt(null, 1800), null)
+
+// The batch used to ask about three hours of history, so a queue of day-old
+// matches was neither old enough to drop nor young enough to request: every run
+// scanned the same forty addressless rows. Anything inside Valve's retention
+// window is worth a request, an older match is not, and an undated match is
+// treated as fresh because that is what an unseen match usually is.
+const hour = 3_600_000, day = 24 * hour, retention = 21 * day
+assert.equal(replayAgeAction(null, retention), 'ask', 'an undated match is asked about')
+assert.equal(replayAgeAction(60_000, retention), 'ask')
+assert.equal(replayAgeAction(24 * hour, retention), 'ask', 'a day-old match is still requestable')
+assert.equal(replayAgeAction(5 * day, retention), 'ask', 'so is the five-day-old match OpenDota answered for')
+assert.equal(replayAgeAction(20 * day, retention), 'ask')
+assert.equal(replayAgeAction(21 * day + 1, retention), 'expired')
+assert.equal(replayAgeAction(149 * day, retention), 'expired', 'the five-month backlog leaves the queue')
 
 const calls = []
 const fetcher = async (url, options = {}) => {

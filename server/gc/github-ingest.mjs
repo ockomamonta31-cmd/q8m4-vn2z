@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 import { replayJson } from './replay-http.mjs'
-import { createReplayMetadataResolver } from './replay-metadata.mjs'
+import { createReplayMetadataResolver, replayAgeAction } from './replay-metadata.mjs'
 
 const base=process.env.REPLAY_INGEST_URL
 const token=process.env.REPLAY_INGEST_TOKEN
@@ -36,19 +36,20 @@ const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
 const scan=Math.max(max,Number(process.env.REPLAY_SCAN_LIMIT)||40)
 const candidates=matchIds.slice(0,scan)
 
-// Valve удаляет реплеи примерно через две недели, и для более старых матчей
-// адреса не существует уже ни у кого. Держать их в очереди незачем: каждый
-// запуск они занимали место и заставляли спрашивать координатор про сорок игр,
-// из которых разобрать можно было от силы пять. Именно это Valve и притормозил.
+// Valve удаляет реплеи через несколько недель, и для более старых матчей адреса
+// не существует уже ни у кого. Держать их в очереди незачем: каждый запуск они
+// занимали место в окне скана, которое нужно свежим играм.
 const retentionMs=Math.max(1,Number(process.env.REPLAY_RETENTION_DAYS)||21)*86_400_000
 // Наш собственный сеанс в координаторе Valve отвечает за секунды, но он же и
 // самый хрупкий: Valve ограничивает аккаунт, который спрашивает про всё подряд.
-// Поэтому туда идут только игры, которым адрес нужен прямо сейчас.
-const gcMaxAgeMs=Math.max(1,Number(process.env.REPLAY_GC_MAX_AGE_HOURS)||6)*3_600_000
+// Поэтому туда идут только те игры, которые сыграны только что.
+const gcMaxAgeMs=Math.max(1,Number(process.env.REPLAY_GC_MAX_AGE_HOURS)||24)*3_600_000
 const gcLookups=Math.max(0,Number(process.env.REPLAY_GC_LOOKUPS)||4)
-// Свежий матч OpenDota разбирает по запросу: её бот сам забирает адрес в
-// координаторе и публикует его примерно через минуту.
-const requestMaxAgeMs=Math.max(1,Number(process.env.REPLAY_REQUEST_MAX_AGE_HOURS)||3)*3_600_000
+// Остальное разбирает OpenDota по запросу: её бот сам забирает адрес в
+// координаторе и публикует его за секунды — замерено на матче пятидневной
+// давности. Спрашивать имеет смысл всё, что ещё не просрочено, а не только
+// считанные часы: очередь из суточных матчей стояла в WAIT, пока запуск за
+// запуском перечитывал одни и те же сорок записей без адреса.
 const requestLimit=Math.max(0,Number(process.env.REPLAY_REQUEST_LIMIT)||10)
 const requestWaitMs=Math.max(0,Number(process.env.REPLAY_REQUEST_WAIT_SECONDS)||120)*1000
 const requestPollMs=Math.max(1,Number(process.env.REPLAY_REQUEST_POLL_SECONDS)||10)*1000
@@ -91,14 +92,16 @@ try {
       const answer=await metadata.lookup(id,{allowGc:false})
       if(answer.endedAt) ended.set(id,answer.endedAt)
       if(answer.address) { resolved.set(id,answer.address); continue }
-      const age=ageMs(id)
-      if(age!=null&&age>retentionMs) {
+      if(replayAgeAction(ageMs(id),retentionMs)==='expired') {
         expired++
-        console.log(`EXPIRED ${id}: Valve keeps replays for about two weeks`)
+        console.log(`EXPIRED ${id}: the replay is older than anyone keeps`)
         await note(id,'expired')
         continue
       }
-      if(age!=null&&age<=requestMaxAgeMs&&asked<requestLimit) {
+      // Запуск разбирает столько игр, сколько успевает, поэтому и спрашиваем
+      // ровно про столько: у OpenDota каждый запрос — это её парсер, а здесь
+      // ещё и ожидание ответа.
+      if(paused.length<max&&asked<requestLimit) {
         await metadata.request(id)
         asked++
         paused.push(id)
@@ -146,7 +149,10 @@ try {
     if(completed>=max||gcUsed>=gcLookups) break
     if(resolved.has(id)) continue
     const age=ageMs(id)
-    if(age==null||age>gcMaxAgeMs) continue
+    // Игру, которую никто не смог датировать, спрашиваем у Valve: именно она
+    // скорее всего сыграна только что, а координатор отвечает про неё быстрее
+    // остальных источников.
+    if(age!=null&&age>gcMaxAgeMs) continue
     gcUsed++
     const meta=await metadata.lookup(id,{allowGc:true}).then(answer=>answer.address).catch(error=>{
       failures++

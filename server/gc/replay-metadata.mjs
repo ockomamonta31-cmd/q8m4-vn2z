@@ -21,6 +21,20 @@ export function replayEndedAt(start, duration) {
   return Math.round(from + (Number.isFinite(length) && length > 0 ? length : 0))
 }
 
+/**
+ * Whether a match is still worth asking a provider about. Valve keeps a replay
+ * for a few weeks at most, so an older match has no address left to find: those
+ * only burn the scan window that fresh games need.
+ * An unknown age counts as fresh. Providers answer nothing at all about a match
+ * they have never seen, and a game nobody can date is far more likely to be one
+ * that was just played than one from last month.
+ */
+export function replayAgeAction(ageMs, retentionMs) {
+  const age = Number(ageMs)
+  if (ageMs == null || !Number.isFinite(age)) return 'ask'
+  return age > Number(retentionMs) ? 'expired' : 'ask'
+}
+
 export function createReplayMetadataResolver({ env = process.env, fetcher = fetch,
   gc = createReplayGc({ env }), timeoutMs = 8_000, log = console.warn } = {}) {
   // An unavailable provider gets one attempt per batch, rather than stalling
