@@ -24,11 +24,19 @@ async function cachedPrevious<T>(env: Env, key: string): Promise<T | null> {
 async function save(env: Env, key: string, value: unknown) {
   await env.DB.prepare('INSERT OR REPLACE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(key, JSON.stringify(value), Date.now()).run()
 }
+const pendingLoads = new WeakMap<Env, Map<string, Promise<any>>>()
+function singleFlight<T>(env: Env, key: string, load: () => Promise<T>): Promise<T> {
+  let pending = pendingLoads.get(env)
+  if (!pending) { pending = new Map(); pendingLoads.set(env, pending) }
+  if (!pending.has(key)) pending.set(key, load().finally(() => pending!.delete(key)))
+  return pending.get(key)!
+}
 const rankResolvers = new WeakMap<Env, ReturnType<typeof createRankResolver>>()
 function rankResolver(env: Env) {
   let resolver = rankResolvers.get(env)
   if (!resolver) {
     resolver = createRankResolver({
+      cacheOnly: true,
       read: async (id: number | string) => {
         const value = await cachedPrevious<any>(env, 'rank:v1:' + id)
         const missing = rankCacheNeedsRefresh(id, value)
@@ -45,30 +53,34 @@ function rankResolver(env: Env) {
 }
 const ranks = (env: Env, ids: number[]) => rankResolver(env)(ids)
 const rankedMatch = (env: Env, value: any) => rankResolver(env).forMatch(value)
-async function steam(env: Env, endpoint: string, params: Record<string, string | number>) {
+async function steam(env: Env, endpoint: string, params: Record<string, string | number>, signal = AbortSignal.timeout(8000)) {
   if (!env.STEAM_WEB_API_KEY) throw new Response(JSON.stringify({error:'Добавь STEAM_WEB_API_KEY в Worker secrets'}), {status:503})
   const url = new URL(`https://api.steampowered.com/${endpoint}`)
   url.searchParams.set('key', env.STEAM_WEB_API_KEY)
   for (const [k,v] of Object.entries(params)) url.searchParams.set(k, String(v))
-  const res = await fetch(url)
+  const res = await fetch(url, { signal })
   if (!res.ok) throw new Response(JSON.stringify({error:`Steam API HTTP ${res.status}`}), {status:res.status === 401 ? 401 : 502})
   return res.json<any>()
 }
-async function history(env: Env, account: number) {
+async function history(env: Env, account: number, ctx?: ExecutionContext) {
   const key=`history:${account}`
   const hit = await cached<{rows:{id:number;seq:number}[];total:number}>(env,key,300_000)
   if (hit) return hit
-  const previous=await cachedPrevious<{rows:{id:number;seq:number}[]}>(env,key)
+  const previous=await cachedPrevious<{rows:{id:number;seq:number}[];total:number}>(env,key)
+  const refresh = singleFlight(env, key, async () => {
   const known=new Set(previous?.rows.map(x=>x.id)??[])
+  const signal=AbortSignal.timeout(10_000)
   const rows:{id:number;seq:number}[]=[]; let cursor=0; let total=0
   for(let page=0;page<5;page++) {
     const p:Record<string,string|number>={account_id:account,matches_requested:100}
     if(cursor) p.start_at_match_id=cursor
-    const data=await steam(env,'IDOTA2Match_570/GetMatchHistory/v1/',p)
+    let data:any
+    try { data=await steam(env,'IDOTA2Match_570/GetMatchHistory/v1/',p,signal) }
+    catch(e) { if(rows.length) break; throw e }
     const result=data.result??{}; total=result.total_results??rows.length
     const batch=result.matches??[]
     for(const m of batch) rows.push({id:m.match_id,seq:m.match_seq_num})
-    if(batch.length<100 || !batch.length) break
+    if(batch.length<100 || !batch.length || batch.some((m:any)=>known.has(m.match_id)) && (previous?.rows.length??0)>=Math.min(total,500)) break
     cursor=batch[batch.length-1].match_id
   }
   // Histories overlap almost completely between refreshes. Keep the stable
@@ -76,7 +88,14 @@ async function history(env: Env, account: number) {
   // rows on every five-minute cache expiry.
   const fresh=rows.filter(x=>x.seq&&!known.has(x.id))
   if(fresh.length) await env.DB.batch(fresh.map(x=>env.DB.prepare('INSERT OR IGNORE INTO cache(key,value,updated_at) VALUES(?,?,?)').bind(`seq:${x.id}`,JSON.stringify(x.seq),Date.now())))
-  const out={rows,total:total||rows.length}; await save(env,key,out); return out
+  const merged=[...new Map([...rows,...(previous?.rows??[])].map(row=>[row.id,row])).values()].sort((a,b)=>b.id-a.id).slice(0,500)
+  const out={rows:merged,total:total||merged.length}; await save(env,key,out); return out
+  })
+  if(previous && ctx) {
+    ctx.waitUntil(refresh.catch(e=>console.warn('History refresh failed:',e instanceof Error?e.message:'unknown')))
+    return previous
+  }
+  try { return await refresh } catch(e) { if(previous) return previous; throw e }
 }
 function normalize(raw:any) {
   const dur=Math.max((raw.duration??0)/60,1)
@@ -93,6 +112,7 @@ function withPositionEstimates(players:any[]) {
   return players.map((p:any)=>p.positionSource==='replay'?p:{...p,position:0,positionSource:undefined,lane:undefined})
 }
 async function match(env:Env,id:number,seq?:number) {
+  return singleFlight(env, `match:${id}`, async () => {
   const hit=await cached<any>(env,`match:${id}`); if(hit) return {...hit,players:withPositionEstimates(hit.players??[])}
   const matchSeq=seq??await cached<number>(env,`seq:${id}`)
   if(!matchSeq) throw new Response(JSON.stringify({error:`Матч ${id}: сначала открой его из истории игрока`}),{status:404})
@@ -100,6 +120,7 @@ async function match(env:Env,id:number,seq?:number) {
   const raw=(data.result?.matches??[]).find((m:any)=>Number(m.match_id)===id)
   if(!raw) throw new Response(JSON.stringify({error:`Матч ${id} недоступен в Steam`}),{status:404})
   const out=normalize(raw); await save(env,`match:${id}`,out); return out
+  })
 }
 async function purchaseEvents(env:Env,id:number):Promise<Record<string,{time:number;itemId:number}[]>|null> {
   if (!env.STRATZ_API_TOKEN) return null
@@ -107,7 +128,7 @@ async function purchaseEvents(env:Env,id:number):Promise<Record<string,{time:num
   const hit=await cached<Record<string,{time:number;itemId:number}[]>>(env,key)
   if(hit) return hit
   try {
-    const res=await fetch('https://api.stratz.com/graphql',{method:'POST',headers:{Authorization:`Bearer ${env.STRATZ_API_TOKEN}`,'Content-Type':'application/json','User-Agent':'STRATZ_API'},body:JSON.stringify({query:`query { match(id: ${id}) { players { isRadiant heroId playbackData { purchaseEvents { time itemId } } } } }`})})
+    const res=await fetch('https://api.stratz.com/graphql',{signal:AbortSignal.timeout(2000),method:'POST',headers:{Authorization:`Bearer ${env.STRATZ_API_TOKEN}`,'Content-Type':'application/json','User-Agent':'STRATZ_API'},body:JSON.stringify({query:`query { match(id: ${id}) { players { isRadiant heroId playbackData { purchaseEvents { time itemId } } } } }`})})
     if(!res.ok) { console.error('STRATZ purchase query HTTP',res.status); return null }
     const data=await res.json<any>()
     const players=data.data?.match?.players
@@ -139,7 +160,7 @@ async function matchDraft(env:Env,id:number):Promise<StratzDraft|null> {
   if(await cached<{missing:1}>(env,`match-draft:missing:${id}`,7*24*3600_000)) return null
   if (!env.STRATZ_API_TOKEN) return null
   try {
-    const res=await fetch('https://api.stratz.com/graphql',{method:'POST',headers:{Authorization:`Bearer ${env.STRATZ_API_TOKEN}`,'Content-Type':'application/json','User-Agent':'STRATZ_API'},body:JSON.stringify({query:`query { match(id: ${id}) { pickBans { isPick order heroId bannedHeroId isRadiant } players { isRadiant heroId lane position } } }`})})
+    const res=await fetch('https://api.stratz.com/graphql',{signal:AbortSignal.timeout(2000),method:'POST',headers:{Authorization:`Bearer ${env.STRATZ_API_TOKEN}`,'Content-Type':'application/json','User-Agent':'STRATZ_API'},body:JSON.stringify({query:`query { match(id: ${id}) { pickBans { isPick order heroId bannedHeroId isRadiant } players { isRadiant heroId lane position } } }`})})
     if(!res.ok) { console.error('STRATZ draft query HTTP',res.status); return null }
     const data=await res.json<any>()
     const m=data.data?.match
@@ -216,12 +237,19 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
   }
   return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))
 }
-async function profiles(env:Env,ids:number[]) {
+async function profiles(env:Env,ids:number[],ctx?:ExecutionContext) {
   const out=new Map<number,{name:string|null;avatar:string|null}>(), missing:number[]=[]
-  for(const id of [...new Set(ids)].filter(Boolean)) { const hit=await cached<any>(env,`profile:${id}`,600_000); if(hit) out.set(id,hit); else missing.push(id) }
+  for(const id of [...new Set(ids)].filter(Boolean)) { const hit=await cached<any>(env,`profile:${id}`,600_000); if(hit) out.set(id,hit); else { missing.push(id); const stale=await cachedPrevious<any>(env,`profile:${id}`); if(stale) out.set(id,stale) } }
   for(let i=0;i<missing.length;i+=100) {
-    const data=await steam(env,'ISteamUser/GetPlayerSummaries/v2/',{steamids:missing.slice(i,i+100).map(id=>String(BigInt(id)+76561197960265728n)).join(',')})
-    for(const p of data.response?.players??[]) { const id=Number(BigInt(p.steamid)-76561197960265728n), v={name:p.personaname??null,avatar:p.avatarfull??p.avatarmedium??p.avatar??null};out.set(id,v);await save(env,`profile:${id}`,v) }
+    const chunk=missing.slice(i,i+100)
+    const refresh=singleFlight(env,'profiles:'+chunk.slice().sort((a,b)=>a-b).join(','),async()=>{
+      const data=await steam(env,'ISteamUser/GetPlayerSummaries/v2/',{steamids:chunk.map(id=>String(BigInt(id)+76561197960265728n)).join(',')})
+      const found=new Map<number,{name:string|null;avatar:string|null}>()
+      for(const p of data.response?.players??[]) { const id=Number(BigInt(p.steamid)-76561197960265728n), v={name:p.personaname??null,avatar:p.avatarfull??p.avatarmedium??p.avatar??null};found.set(id,v);await save(env,`profile:${id}`,v) }
+      return found
+    })
+    if(ctx && chunk.every(id=>out.has(id))) ctx.waitUntil(refresh.catch(e=>console.warn('Names refresh failed:',e instanceof Error?e.message:'unknown')))
+    else try { for(const [id,value] of await refresh) out.set(id,value) } catch(e) { console.warn('Names lookup failed:',e instanceof Error?e.message:'unknown') }
   }
   return out
 }
@@ -240,7 +268,11 @@ async function steamFriends(env:Env, account:number):Promise<Set<number>> {
 }
 async function getMatches(env:Env,account:number,rows:{id:number;seq:number}[],skip:number,take:number) {
   const all=[]
-  for(const r of rows.slice(skip,skip+take)) { try { const m=await match(env,r.id,r.seq); if(m.players.some((p:any)=>p.steamAccountId===account)) all.push(m) } catch(e) { if(!(e instanceof Response)&&e instanceof Error) throw e } }
+  const selected=rows.slice(skip,skip+take)
+  for(let i=0;i<selected.length;i+=5) {
+    const batch=await Promise.all(selected.slice(i,i+5).map(async r=>{try{return await match(env,r.id,r.seq)}catch(e){if(!(e instanceof Response)&&e instanceof Error)throw e;return null}}))
+    all.push(...batch.filter(m=>m?.players.some((p:any)=>p.steamAccountId===account)))
+  }
   return all
 }
 const json=(data:unknown,status=200)=>new Response(JSON.stringify(data),{status,headers:{'content-type':'application/json; charset=utf-8','cache-control':'no-store'}})
@@ -322,7 +354,7 @@ export default {
     })
     if (res.status !== 204) console.error('cron: repository_dispatch failed', res.status, (await res.text()).slice(0, 300))
   },
-  async fetch(request:Request,env:Env):Promise<Response> {
+  async fetch(request:Request,env:Env,ctx?:ExecutionContext):Promise<Response> {
   const url=new URL(request.url), p=url.pathname
   if(!p.startsWith('/api/')) return env.ASSETS.fetch(request)
   if(p.startsWith('/api/auth/')) { try { return (await steamAuth(request,env))??json({error:'Not found'},404) } catch(e) { console.error('Steam auth failed',e instanceof Error?e.message:'unknown'); return json({error:'Steam login failed'},502) } }
@@ -430,14 +462,15 @@ export default {
     if(p==='/api/constants/heroes') return json(heroes)
     if(p==='/api/constants/items') return json(items)
     let m=p.match(/^\/api\/profile\/(\d+)$/)
-    if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h,rs]=await Promise.all([profiles(env,[id]),history(env,id),ranks(env,[id])]); const info=ps.get(id), rank=rs.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:rank?.tier??null,rankSource:rank?.source??null,rankScope:rank?.scope??null,rankFetchedAt:rank?.fetchedAt??null,rankIsCore:null}) }
+    if(m) { const id=Number(m[1]); if(!id) return json({error:'Некорректный Steam ID'},400); const [ps,h,rs]=await Promise.all([profiles(env,[id],ctx),history(env,id,ctx),ranks(env,[id])]); const info=ps.get(id), rank=rs.get(id); return json({steamAccountId:id,name:info?.name??`#${id}`,avatar:info?.avatar??null,matchCount:h.total,winCount:null,rank:rank?.tier??null,rankSource:rank?.source??null,rankScope:rank?.scope??null,rankFetchedAt:rank?.fetchedAt??null,rankIsCore:null}) }
     m=p.match(/^\/api\/player\/(\d+)\/matches$/)
-    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id),list=await getMatches(env,id,h.rows,skip,take),rank=(await ranks(env,[id])).get(id);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),replay=await replayData(env,x.id),role=replay?.[String(slot)],order={r:0,d:0},laners=x.players.map((p:any)=>({...p,...replay?.[String(p.isRadiant?order.r++:128+order.d++)]}));return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,laneOutcome:laneOutcome(laners,laners.find((p:any)=>p.steamAccountId===id),x.durationSeconds),position:role?.position??0,positionSource:role?.positionSource,lane:role?.lane,evidence:role?.evidence,mapPlays:role?.mapPlays,impactPhases:role?.impactPhases,purchaseEvents:role?.purchaseEvents,teamKills:team.reduce((n:number,p:any)=>n+p.kills,0),teamDamage:team.reduce((n:number,p:any)=>n+p.heroDamage,0),...rankFields(me,rank),isVictory:me.isVictory,imp:null}}}))) }
+    if(m) { const id=Number(m[1]),take=Math.min(Number(url.searchParams.get('take'))||25,100),skip=Math.max(Number(url.searchParams.get('skip'))||0,0),h=await history(env,id,ctx),list=await getMatches(env,id,h.rows,skip,take),rank=(await ranks(env,[id])).get(id);return json(await Promise.all(list.map(async(x:any)=>{const me=x.players.find((p:any)=>p.steamAccountId===id),team=x.players.filter((p:any)=>p.isRadiant===me.isRadiant),slot=(me.isRadiant?0:128)+team.indexOf(me),replay=await replayData(env,x.id),role=replay?.[String(slot)],order={r:0,d:0},laners=x.players.map((p:any)=>({...p,...replay?.[String(p.isRadiant?order.r++:128+order.d++)]}));return {id:x.id,startDateTime:x.startDateTime,durationSeconds:x.durationSeconds,gameMode:x.gameMode,lobbyType:x.lobbyType,player:{steamAccountId:id,heroId:me.heroId,kills:me.kills,deaths:me.deaths,assists:me.assists,goldPerMinute:me.goldPerMinute,experiencePerMinute:me.experiencePerMinute,numLastHits:me.numLastHits,numDenies:me.numDenies,networth:me.networth,level:me.level,heroDamage:me.heroDamage,towerDamage:me.towerDamage,heroHealing:me.heroHealing,laneOutcome:laneOutcome(laners,laners.find((p:any)=>p.steamAccountId===id),x.durationSeconds),position:role?.position??0,positionSource:role?.positionSource,lane:role?.lane,evidence:role?.evidence,mapPlays:role?.mapPlays,impactPhases:role?.impactPhases,purchaseEvents:role?.purchaseEvents,teamKills:team.reduce((n:number,p:any)=>n+p.kills,0),teamDamage:team.reduce((n:number,p:any)=>n+p.heroDamage,0),...rankFields(me,rank),isVictory:me.isVictory,imp:null}}}))) }
     m=p.match(/^\/api\/matches\/(\d+)$/)
     if(m) {
       const id=Number(m[1]),x=await rankedMatch(env,await match(env,id))
-      const [ps,replay,draft]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId)),replayData(env,id),matchDraft(env,id)])
-      const purchases=replay?null:await purchaseEvents(env,id),teamOrd={r:0,d:0}
+      const replay=await replayData(env,id)
+      const [ps,draft,purchases]=await Promise.all([profiles(env,x.players.map((p:any)=>p.steamAccountId),ctx),matchDraft(env,id),replay?Promise.resolve(null):purchaseEvents(env,id)])
+      const teamOrd={r:0,d:0}
       const players=x.players.map((p:any)=>{const team=(p.isRadiant?'r':'d') as 'r'|'d',slot=p.isRadiant?teamOrd.r++:128+teamOrd.d++,parsed=replay?.[String(slot)],sr=stratzRole(draft,team,p.heroId),role=parsed?.position?{position:parsed.position,positionSource:parsed.positionSource,lane:parsed.lane}:parsed?.position===undefined&&sr?sr:{};return {...p,...role,name:ps.get(p.steamAccountId)?.name??p.name??null,purchaseEvents:parsed?.purchaseEvents??purchases?.[`${team}:${p.heroId}`]??null,abilityUpgrades:parsed?.abilityUpgrades?.length?parsed.abilityUpgrades:p.abilityUpgrades,startingLane:parsed?.startingLane,impactPhases:parsed?.impactPhases,evidence:parsed?.evidence,mapPlays:parsed?.mapPlays}})
       return json(withDraft({...x,players:players.map((p:any)=>({...p,laneOutcome:laneOutcome(players,p,x.durationSeconds)}))},draft))
     }
@@ -452,9 +485,9 @@ export default {
       return json(status?.state==='ready'?{state:'queued'}:status??{state:'queued'})
     }
     m=p.match(/^\/api\/player\/(\d+)\/heroes$/)
-    if(m) {const id=Number(m[1]),h=await history(env,id),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,{heroId:number;matchCount:number;winCount:number}>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id),a=agg.get(me.heroId)??{heroId:me.heroId,matchCount:0,winCount:0};a.matchCount++;if(me.isVictory)a.winCount++;agg.set(me.heroId,a)}return json([...agg.values()].sort((a,b)=>b.matchCount-a.matchCount).slice(0,Math.min(Number(url.searchParams.get('take'))||100,100)))}
+    if(m) {const id=Number(m[1]),h=await history(env,id,ctx),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,{heroId:number;matchCount:number;winCount:number}>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id),a=agg.get(me.heroId)??{heroId:me.heroId,matchCount:0,winCount:0};a.matchCount++;if(me.isVictory)a.winCount++;agg.set(me.heroId,a)}return json([...agg.values()].sort((a,b)=>b.matchCount-a.matchCount).slice(0,Math.min(Number(url.searchParams.get('take'))||100,100)))}
     m=p.match(/^\/api\/player\/(\d+)\/peers$/)
-    if(m) {const id=Number(m[1]),[h,friends]=await Promise.all([history(env,id),steamFriends(env,id)]),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,any>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id);for(const q of x.players){if(!q.steamAccountId||q.steamAccountId===id||!friends.has(q.steamAccountId)||q.isRadiant!==me.isRadiant)continue;const a=agg.get(q.steamAccountId)??{steamAccountId:q.steamAccountId,withMatchCount:0,withWinCount:0,againstMatchCount:0,againstWinCount:0};a.withMatchCount++;if(me.isVictory)a.withWinCount++;agg.set(q.steamAccountId,a)}}const top=[...agg.values()].sort((a,b)=>b.withMatchCount-a.withMatchCount),ps=await profiles(env,top.map(x=>x.steamAccountId));return json(top.map(x=>({...x,name:ps.get(x.steamAccountId)?.name??`#${x.steamAccountId}`,avatar:ps.get(x.steamAccountId)?.avatar??null})))}
+    if(m) {const id=Number(m[1]),[h,friends]=await Promise.all([history(env,id,ctx),steamFriends(env,id)]),all=await getMatches(env,id,h.rows,0,100),agg=new Map<number,any>();for(const x of all){const me=x.players.find((p:any)=>p.steamAccountId===id);for(const q of x.players){if(!q.steamAccountId||q.steamAccountId===id||!friends.has(q.steamAccountId)||q.isRadiant!==me.isRadiant)continue;const a=agg.get(q.steamAccountId)??{steamAccountId:q.steamAccountId,withMatchCount:0,withWinCount:0,againstMatchCount:0,againstWinCount:0};a.withMatchCount++;if(me.isVictory)a.withWinCount++;agg.set(q.steamAccountId,a)}}const top=[...agg.values()].sort((a,b)=>b.withMatchCount-a.withMatchCount),ps=await profiles(env,top.map(x=>x.steamAccountId),ctx);return json(top.map(x=>({...x,name:ps.get(x.steamAccountId)?.name??`#${x.steamAccountId}`,avatar:ps.get(x.steamAccountId)?.avatar??null})))}
     return json({error:'Неизвестный эндпоинт'},404)
   } catch(e) { if(e instanceof Response)return e; return json({error:e instanceof Error?e.message:'Internal error'},500) }
 } }

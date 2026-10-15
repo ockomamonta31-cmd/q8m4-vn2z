@@ -20,15 +20,17 @@ import { demoHeroStats, demoMatches, demoPeers, demoProfile } from './mock'
 
 async function ownApi<T>(path: string): Promise<T> {
   let res: Response
+  const signal = AbortSignal.timeout(20_000)
   try {
-    res = await fetch(`/api${path}`)
+    res = await fetch(`/api${path}`, { signal })
   } catch (e) {
-    throw new ApiError('network', `Сервер недоступен: ${(e as Error).message}`)
+    throw new ApiError('network', signal.aborted ? 'Сервер долго не отвечает. Попробуй ещё раз.' : `Сервер недоступен: ${(e as Error).message}`)
   }
   let json: { error?: string } & Record<string, unknown> | null = null
   try {
     json = (await res.json()) as { error?: string } & Record<string, unknown>
   } catch {
+    if (signal.aborted) throw new ApiError('network', 'Сервер долго не отвечает. Попробуй ещё раз.')
     throw new ApiError('http', `Свой API вернул HTTP ${res.status}`)
   }
   if (!res.ok || json?.error) {
@@ -105,23 +107,7 @@ export async function fetchMatch(id: number): Promise<MatchDetails> {
     p.teamKills=team.reduce((n,q)=>n+q.kills,0)
     p.teamDamage=team.reduce((n,q)=>n+q.heroDamage,0)
   }
-  // Steam omits player IDs on private matches. OpenDota sometimes has the
-  // replay-derived identity; use it only as a name/ID fallback, never match stats.
-  if (m.players.some((p) => !p.steamAccountId)) {
-    try {
-      const res = await fetch(`https://api.opendota.com/api/matches/${id}`)
-      if (res.ok) {
-        const data = (await res.json()) as { players?: { player_slot: number; hero_id: number; account_id?: number; personaname?: string | null }[] }
-        const identities = new Map((data.players ?? []).map((p) => [`${p.player_slot < 128 ? 'r' : 'd'}:${p.hero_id}`, p]))
-        for (const p of m.players) {
-          const identity = identities.get(`${p.isRadiant ? 'r' : 'd'}:${p.heroId}`)
-          if (!identity) continue
-          if (!p.steamAccountId && identity.account_id) p.steamAccountId = identity.account_id
-          if (!p.name && identity.personaname) p.name = identity.personaname
-        }
-      }
-    } catch { /* preserve the Valve response when the identity lookup is unavailable */ }
-  }
+  // IDs and names are enriched by our server's background rank runner.
   return m
 }
 

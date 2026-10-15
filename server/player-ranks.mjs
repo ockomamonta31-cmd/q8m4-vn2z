@@ -19,7 +19,7 @@ export function rankCacheNeedsRefresh(key, value, time = Date.now()) {
     (value.tier ? 24 * 3600_000 : 3600_000)
 }
 
-export function createRankResolver({ read, write, fetcher = fetch, now = Date.now }) {
+export function createRankResolver({ read, write, fetcher = fetch, now = Date.now, cacheOnly = false }) {
   const pending = new Map()
   let cooldownUntil = 0
   async function one(id) {
@@ -27,6 +27,7 @@ export function createRankResolver({ read, write, fetcher = fetch, now = Date.no
     const tier = validRank(stored?.tier) ? stored.tier : 0
     const usable = tier && now() - stored.fetchedAt <= 7 * 86400_000
     const fallback = usable ? stored : null
+    if (cacheOnly) return fallback
     if (tier && now() - stored.fetchedAt < 24 * 3600_000) return fallback
     if (!tier && stored && now() - stored.checkedAt < 3600_000) return null
     if (stored?.retryAt > now()) return fallback
@@ -73,7 +74,7 @@ export function createRankResolver({ read, write, fetcher = fetch, now = Date.no
   resolve.forMatch = async (match) => {
     const key = 'match-' + match.id
     let snapshot = await read(key)
-    if (rankCacheNeedsRefresh(key, snapshot, now())) {
+    if (!cacheOnly && rankCacheNeedsRefresh(key, snapshot, now())) {
       try {
         const response = await fetcher('https://api.opendota.com/api/matches/' + match.id, { signal: AbortSignal.timeout(4000) })
         if (response.status === 429) cooldownUntil = now() + 60_000
@@ -92,7 +93,7 @@ export function createRankResolver({ read, write, fetcher = fetch, now = Date.no
       }
     }
     const players = await Promise.all(match.players.map(async (player) => {
-      const publicPlayer = snapshot.players.find((p) => p.hero_id === player.heroId && (p.player_slot < 128) === player.isRadiant)
+      const publicPlayer = snapshot?.players.find((p) => p.hero_id === player.heroId && (p.player_slot < 128) === player.isRadiant)
       if (!publicPlayer || (player.steamAccountId && publicPlayer.account_id !== player.steamAccountId)) return player
       const id = publicPlayer.account_id
       if (!(Number.isInteger(id) && id > 0 && id < 0xffffffff)) return player
