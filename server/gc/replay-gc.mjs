@@ -17,59 +17,99 @@ message Response { optional uint32 result = 1; optional Match match = 2; }
 export const gcRequest = proto.lookupType('Request')
 export const gcResponse = proto.lookupType('Response')
 
-// One lazy, sequential GC session per ingest batch. A failed session stays
-// failed for this batch so forty candidates cannot trigger forty Steam logins.
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+/**
+ * Valve's game coordinator is the only source that answers for a match whose
+ * replay has just been written, and it is the flakiest one: a session may never
+ * finish the clientHello handshake, and a match request is either answered in
+ * about two seconds or dropped without a reply. Neither of those is per-match
+ * either, so the same question can fail and then succeed a minute later.
+ *
+ * Two rules follow, and they are the difference between a queue that drains and
+ * one that reports forty matches as addressless without asking anything:
+ *
+ * - One dropped request never ends the batch. The previous version latched the
+ *   first failure into a batch-wide `failure`, so a single lost packet made
+ *   every later candidate answer "no replay address" instantly.
+ * - The coordinator is not a bulk service. Valve throttles an account that asks
+ *   about forty games every ten minutes, which is exactly what filled this
+ *   queue with games old enough that the replay no longer exists. `sessions`
+ *   and `budgetMs` bound one run; the caller is expected to bring only fresh
+ *   matches here and to let OpenDota publish addresses for everything else.
+ */
 export function createReplayGc({ env = process.env, Steam = SteamUser,
-  connectMs = 35_000, requestMs = 10_000, onRefreshToken = () => {} } = {}) {
+  connectMs = 20_000, requestMs = 8_000, attempts = 3, retryMs = 1_000,
+  sessions = 4, budgetMs = 120_000, onRefreshToken = () => {} } = {}) {
   const configured = Boolean(env.STEAM_REFRESH_TOKEN || (env.STEAM_ACCOUNT && env.STEAM_PASSWORD))
-  let steam, connecting, ready = false, closed = false, failure, pending, hello, deadline
-  let accept, refuse
-  function stop(error) {
-    failure ??= error
-    ready = false
-    clearInterval(hello)
-    clearTimeout(deadline)
-    refuse?.(failure)
-    if (pending) { clearTimeout(pending.timer); pending.reject(failure); pending = undefined }
-    steam?.logOff()
+  const startedAt = Date.now()
+  let state, opened = 0, fatal, closed = false
+
+  const spent = () => Date.now() - startedAt > budgetMs
+
+  function endSession(error) {
+    const current = state
+    state = undefined
+    if (!current) return
+    clearInterval(current.hello)
+    clearTimeout(current.deadline)
+    const job = current.pending
+    current.pending = undefined
+    if (job) { clearTimeout(job.timer); job.reject(error ?? job.error) }
+    try { current.steam.logOff() } catch {}
   }
-  function connect() {
-    connecting = new Promise((resolve, reject) => {
-      accept = resolve; refuse = reject
-      steam = new Steam({
+
+  function open() {
+    return new Promise((resolve, reject) => {
+      const next = { steam: undefined, hello: undefined, deadline: undefined, pending: undefined, ready: false }
+      state = next
+      opened++
+      let settled = false
+      const settle = error => { if (settled) return; settled = true; if (error) reject(error); else resolve(next) }
+      // A login or handshake failure is batch-fatal: forty candidates must not
+      // trigger forty Steam logins against an account Valve already distrusts.
+      // A dropped match request is not fatal, so it is retried instead.
+      const fail = error => { fatal ??= error; if (state === next) endSession(error); settle(error) }
+      next.steam = new Steam({
         dataDirectory: join(dirname(fileURLToPath(import.meta.url)), 'steam-data'),
         autoRelogin: false, promptForCode: false,
       })
-      deadline = setTimeout(() => stop(new Error('Valve GC connection timed out')), connectMs)
-      steam.on('error', error => stop(new Error(`Steam login/connection failed (${error.eresult ?? 'network'})`)))
-      steam.on('disconnected', () => {
-        if (!closed && !failure) stop(new Error('Steam disconnected'))
-      })
-      steam.on('steamGuard', () => stop(new Error('Steam Guard required; renew the bot refresh token locally')))
-      steam.on('refreshToken', onRefreshToken)
-      steam.on('loggedOn', () => { if (!closed && !failure) steam.gamesPlayed(570, true) })
-      steam.on('appLaunched', app => {
-        if (app !== 570 || closed || failure || ready || hello) return
+      next.deadline = setTimeout(() => fail(new Error('Valve GC connection timed out')), connectMs)
+      next.steam.on('error', error => fail(new Error(`Steam login/connection failed (${error.eresult ?? 'network'})`)))
+      next.steam.on('disconnected', () => { if (!closed && state === next) fail(new Error('Steam disconnected')) })
+      next.steam.on('steamGuard', () => fail(new Error('Steam Guard required; renew the bot refresh token locally')))
+      next.steam.on('refreshToken', onRefreshToken)
+      next.steam.on('loggedOn', () => { if (!fatal && !closed) next.steam.gamesPlayed(570, true) })
+      next.steam.on('appLaunched', app => {
+        if (app !== 570 || settled || closed || state !== next || next.hello) return
         const sendHello = () => {
-          try { steam.sendToGC(570, 4006, {}, Buffer.alloc(0)) }
-          catch { stop(new Error('Valve GC handshake failed')) }
+          try { next.steam.sendToGC(570, 4006, {}, Buffer.alloc(0)) }
+          catch { fail(new Error('Valve GC handshake failed')) }
         }
-        hello = setInterval(sendHello, 5_000)
+        next.hello = setInterval(sendHello, 5_000)
         sendHello()
       })
-      steam.on('receivedFromGC', (app, type, body) => {
-        if (app !== 570 || closed || failure) return
+      next.steam.on('receivedFromGC', (app, type, body) => {
+        // Only the live session may answer: a torn-down one is retried, and its
+        // late reply must not be credited to the request in flight now.
+        if (app !== 570 || closed || state !== next) return
         if (type === 4004) {
-          ready = true; clearInterval(hello); clearTimeout(deadline); accept(); return
+          next.ready = true
+          clearInterval(next.hello); next.hello = undefined
+          clearTimeout(next.deadline); next.deadline = undefined
+          settle()
+          return
         }
-        if (type !== 7096 || !pending) return
+        if (type !== 7096 || !next.pending) return
         let response
         try { response = gcResponse.decode(body) }
-        catch { stop(new Error('Invalid Valve GC match response')); return }
+        catch { endSession(new Error('Invalid Valve GC match response')); return }
+        const job = next.pending
         const id = Number(response.match?.matchId ?? 0)
         // Error replies can omit match_id. Only one request is in flight.
-        if (id && id !== pending.id) return
-        const job = pending; pending = undefined; clearTimeout(job.timer)
+        if (id && id !== job.id) return
+        next.pending = undefined
+        clearTimeout(job.timer)
         if (response.result !== 1) job.reject(new Error(`Valve GC match request failed (${response.result})`))
         else if (id !== job.id) job.reject(new Error('Valve GC returned the wrong match'))
         else job.resolve(response.match)
@@ -78,26 +118,57 @@ export function createReplayGc({ env = process.env, Steam = SteamUser,
         accountName: env.STEAM_ACCOUNT, password: env.STEAM_PASSWORD,
         ...(env.STEAM_MACHINE_AUTH_TOKEN ? { machineAuthToken: env.STEAM_MACHINE_AUTH_TOKEN } : {}),
       }
-      try { steam.logOn(login) }
-      catch { stop(new Error('Steam login could not start')) }
+      try { next.steam.logOn(login) }
+      catch { fail(new Error('Steam login could not start')) }
     })
-    return connecting
   }
+
+  function ask(id) {
+    const current = state
+    if (!current?.ready) return Promise.reject(new Error('Valve GC session is not ready'))
+    return new Promise((resolve, reject) => {
+      const job = { id: Number(id), resolve, reject, error: undefined, timer: undefined }
+      job.timer = setTimeout(() => {
+        if (current.pending !== job) return
+        current.pending = undefined
+        job.error = new Error('Valve GC match request timed out')
+        job.reject(job.error)
+      }, requestMs)
+      current.pending = job
+      try { current.steam.sendToGC(570, 7095, {}, gcRequest.encode({ matchId: job.id }).finish()) }
+      catch { clearTimeout(job.timer); current.pending = undefined; job.reject(new Error('Valve GC match request could not be sent')) }
+    })
+  }
+
   return {
     configured,
     async lookup(id) {
       if (!configured) throw new Error('Valve GC bot is not configured')
       if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) throw new Error('Invalid match ID')
-      if (closed || failure) throw failure ?? new Error('Valve GC session is closed')
-      await (connecting ?? connect())
-      if (pending) throw new Error('Valve GC requests must be sequential')
-      return new Promise((resolve, reject) => {
-        pending = { id: Number(id), resolve, reject,
-          timer: setTimeout(() => stop(new Error('Valve GC match request timed out')), requestMs) }
-        try { steam.sendToGC(570, 7095, {}, gcRequest.encode({ matchId: Number(id) }).finish()) }
-        catch { stop(new Error('Valve GC match request could not be sent')) }
-      })
+      if (closed) throw new Error('Valve GC session is closed')
+      if (fatal) throw fatal
+      if (spent()) throw (fatal = new Error('Valve GC time budget for this run is spent'))
+      let last
+      for (let attempt = 1; attempt <= attempts; attempt++) {
+        try {
+          if (!state?.ready) {
+            if (opened >= sessions) throw (fatal = new Error('Valve GC session limit for this run is reached'))
+            endSession()
+            await open()
+          }
+          return await ask(id)
+        } catch (error) {
+          last = error
+          // A dropped request may belong to a session that will never answer
+          // again, so the retry starts from a fresh login rather than resending
+          // into the same silence.
+          endSession()
+          if (closed || fatal || spent() || attempt === attempts) break
+          await delay(retryMs * attempt)
+        }
+      }
+      throw fatal ?? last
     },
-    close() { if (!closed) { closed = true; stop(new Error('Valve GC session closed')) } },
+    close() { closed = true; endSession(); fatal ??= new Error('Valve GC session closed') },
   }
 }

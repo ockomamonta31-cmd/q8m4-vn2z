@@ -10,6 +10,17 @@ export function replayMetadata(id, matchId, cluster, salt, source) {
   return { cluster: Number(cluster), replay_salt: Number(salt), source }
 }
 
+/**
+ * When a match ended, in seconds since the epoch. Providers report the start,
+ * and a game can run for over an hour, so ageing a match by its start would
+ * call a two-hour-old replay stale.
+ */
+export function replayEndedAt(start, duration) {
+  const from = Number(start), length = Number(duration)
+  if (!Number.isFinite(from) || from <= 0) return null
+  return Math.round(from + (Number.isFinite(length) && length > 0 ? length : 0))
+}
+
 export function createReplayMetadataResolver({ env = process.env, fetcher = fetch,
   gc = createReplayGc({ env }), timeoutMs = 8_000, log = console.warn } = {}) {
   // An unavailable provider gets one attempt per batch, rather than stalling
@@ -21,63 +32,82 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
     if (!response.ok) { await response.body?.cancel(); throw new Error(`HTTP ${response.status}`) }
     return response.json()
   }
+  const validId = id => /^\d+$/.test(String(id)) && Number.isSafeInteger(Number(id)) && Number(id) > 0
   return {
-    async lookup(id) {
-      if (!/^\d+$/.test(String(id)) || !Number.isSafeInteger(Number(id)) || Number(id) <= 0) throw new Error('Invalid match ID')
+    /**
+     * Ask OpenDota to crawl one match. Their own coordinator session publishes
+     * the replay address about a minute later, and their API is built for many
+     * callers, unlike asking Valve about every queued game ourselves.
+     */
+    async request(id) {
+      if (!validId(id)) throw new Error('Invalid match ID')
       const controller = new AbortController()
       const timer = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        await json(`https://api.opendota.com/api/request/${id}`, { method: 'POST' }, controller.signal, true)
+        return true
+      } finally { clearTimeout(timer) }
+    },
+    /**
+     * Resolve one match. An answer without an address is still an answer: it
+     * tells the caller the match is real and when it ended, which is what
+     * decides whether asking Valve about it is worth a request.
+     */
+    async lookup(id, { allowGc = true } = {}) {
+      if (!validId(id)) throw new Error('Invalid match ID')
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), timeoutMs)
+      // STRATZ used to be asked here too. Its public `replaySalt` came back null
+      // for every match we checked, including ones whose address Valve had
+      // already handed us, so it spent a request per candidate and never helped.
       const providers = [{ name: 'OpenDota', read: async () => {
         const value = await json(`https://api.opendota.com/api/matches/${id}`, {}, controller.signal, true)
         // An empty body means the provider has no metadata yet; only a body
         // naming a different match is a real error.
         if (!value || value.match_id == null) return null
-        return replayMetadata(id, value.match_id, value.cluster, value.replay_salt, 'OpenDota')
+        return {
+          address: replayMetadata(id, value.match_id, value.cluster, value.replay_salt, 'OpenDota'),
+          endedAt: replayEndedAt(value.start_time, value.duration),
+        }
       } }]
-      const stratzToken = env.STRATZ_API_TOKEN || env.VITE_STRATZ_TOKEN
-      if (stratzToken) providers.push({ name: 'STRATZ', read: async () => {
-        const result = await json('https://api.stratz.com/graphql', {
-          method: 'POST', headers: { authorization: `Bearer ${stratzToken}`, 'content-type': 'application/json', 'user-agent': 'STRATZ_API' },
-          body: JSON.stringify({ query: 'query Replay($id:Long!){match(id:$id){id clusterId replaySalt}}', variables: { id: Number(id) } }),
-        }, controller.signal)
-        if (result.errors?.length) throw new Error('GraphQL request failed')
-        const value = result.data?.match
-        if (value === null) return null
-        if (!value) throw new Error('Invalid GraphQL response')
-        return replayMetadata(id, value.id, value.clusterId, value.replaySalt, 'STRATZ')
-      } })
-      let answered = false, found = false
+      let address = null, endedAt = null, answered = false
       const errors = []
       try {
-        const requests = providers.map(async provider => {
+        for (const provider of providers) {
           try {
             if (failed.has(provider.name)) throw failed.get(provider.name)
             const value = await provider.read()
             answered = true
-            if (!value) throw null
-            return value
+            if (!value) continue
+            address = value.address
+            endedAt = value.endedAt
           } catch (error) {
-            if (error && !found) {
-              errors.push(`${provider.name}: ${error.message}`)
-              if (!failed.has(provider.name) && !controller.signal.aborted) log(`Replay metadata ${provider.name}: ${error.message}`)
+            // A provider that answered without metadata is not broken.
+            if (!error) continue
+            errors.push(`${provider.name}: ${error.message}`)
+            if (!failed.has(provider.name) && !controller.signal.aborted) {
+              log(`Replay metadata ${provider.name}: ${error.message}`)
               failed.set(provider.name, error)
             }
-            throw error
           }
-        })
-        try { const value = await Promise.any(requests); found = true; return value }
-        catch { /* All HTTP sources answered without metadata or failed. */ }
+        }
       } finally { clearTimeout(timer); controller.abort() }
-      if (gc.configured) {
+      if (!address && allowGc && gc.configured) {
         try {
           const value = await gc.lookup(Number(id))
           answered = true
-          if (value.replayState === 1 || value.replayState === 2) return null
-          return replayMetadata(id, Number(value.matchId), value.cluster, value.replaySalt, 'Valve GC')
+          // The coordinator reports deleted and expired replays as a state
+          // instead of an address, and only an address can be downloaded.
+          if (value && value.replayState !== 1 && value.replayState !== 2) {
+            address = replayMetadata(id, Number(value.matchId), value.cluster, value.replaySalt, 'Valve GC')
+          }
         } catch (error) { errors.push(`Valve GC: ${error.message}`); log(`Replay metadata Valve GC: ${error.message}`) }
       }
-      if (answered) return null
-      throw new Error(`Replay metadata sources unavailable: ${errors.join('; ')}`)
+      if (!answered && errors.length) throw new Error(`Replay metadata sources unavailable: ${errors.join('; ')}`)
+      return { address, endedAt, source: address?.source ?? null }
     },
+    // The caller decides whether asking Valve is worth a request at all.
+    gcConfigured: gc.configured,
     close() { gc.close() },
   }
 }

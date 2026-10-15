@@ -14,6 +14,7 @@ const root=dirname(dirname(fileURLToPath(import.meta.url)))
 const data=join(root,'data')
 const headers={authorization:`Bearer ${token}`}
 const get=path=>replayJson(new URL(path,base),{headers})
+const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms))
 const run=(file,...args)=>new Promise((resolve,reject)=>{
   const child=spawn(process.execPath,[join(root,'gc',file),...args],{stdio:'inherit',env:process.env})
   child.once('error',reject)
@@ -34,31 +35,126 @@ const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
 // том, чтобы разобрать то, что человек только что сыграл.
 const scan=Math.max(max,Number(process.env.REPLAY_SCAN_LIMIT)||40)
 const candidates=matchIds.slice(0,scan)
-let completed=0, noReplay=0, failures=0
+
+// Valve удаляет реплеи примерно через две недели, и для более старых матчей
+// адреса не существует уже ни у кого. Держать их в очереди незачем: каждый
+// запуск они занимали место и заставляли спрашивать координатор про сорок игр,
+// из которых разобрать можно было от силы пять. Именно это Valve и притормозил.
+const retentionMs=Math.max(1,Number(process.env.REPLAY_RETENTION_DAYS)||21)*86_400_000
+// Наш собственный сеанс в координаторе Valve отвечает за секунды, но он же и
+// самый хрупкий: Valve ограничивает аккаунт, который спрашивает про всё подряд.
+// Поэтому туда идут только игры, которым адрес нужен прямо сейчас.
+const gcMaxAgeMs=Math.max(1,Number(process.env.REPLAY_GC_MAX_AGE_HOURS)||6)*3_600_000
+const gcLookups=Math.max(0,Number(process.env.REPLAY_GC_LOOKUPS)||4)
+// Свежий матч OpenDota разбирает по запросу: её бот сам забирает адрес в
+// координаторе и публикует его примерно через минуту.
+const requestMaxAgeMs=Math.max(1,Number(process.env.REPLAY_REQUEST_MAX_AGE_HOURS)||3)*3_600_000
+const requestLimit=Math.max(0,Number(process.env.REPLAY_REQUEST_LIMIT)||10)
+const requestWaitMs=Math.max(0,Number(process.env.REPLAY_REQUEST_WAIT_SECONDS)||120)*1000
+const requestPollMs=Math.max(1,Number(process.env.REPLAY_REQUEST_POLL_SECONDS)||10)*1000
+
+const resolved=new Map(), ended=new Map(), paused=[]
+let completed=0,noReplay=0,failures=0,expired=0,asked=0,gcUsed=0
+const ageMs=id=>{const at=ended.get(id);return at==null?null:Date.now()-at*1000}
 const metadata=createReplayMetadataResolver()
-try {
-for(const id of candidates) {
-  if(completed>=max) break
-  try {
-    const meta=await metadata.lookup(id)
-    if(!meta){noReplay++;await status(id,'waiting');console.log(`WAIT ${id}: no replay address from available sources`);continue}
-    console.log(`REPLAY ${id}: metadata from ${meta.source}`)
-    const match=await get(`/api/internal/replay/match/${id}`)
-    if(match.players?.length!==10) throw new Error('Expected ten match players')
-    await status(id,'parsing')
-    await mkdir(join(data,'matches'),{recursive:true})
-    await writeFile(join(data,'matches',`${id}.json`),JSON.stringify(match))
-    await run('parse-replay.mjs',String(id),String(meta.cluster),String(meta.replay_salt))
-    await run('normalize-replay.mjs',String(id))
-    await status(id,'ready')
-    completed++
-    console.log(`READY ${id}`)
-  } catch(error) {
+const note=async(id,state)=>{ await status(id,state).catch(error=>console.error(`STATUS ${id}: ${error.message}`)) }
+
+async function ingest(id,meta) {
+  console.log(`REPLAY ${id}: metadata from ${meta.source}`)
+  const match=await get(`/api/internal/replay/match/${id}`)
+  if(match.players?.length!==10) throw new Error('Expected ten match players')
+  await status(id,'parsing')
+  await mkdir(join(data,'matches'),{recursive:true})
+  await writeFile(join(data,'matches',`${id}.json`),JSON.stringify(match))
+  await run('parse-replay.mjs',String(id),String(meta.cluster),String(meta.replay_salt))
+  await run('normalize-replay.mjs',String(id))
+  await status(id,'ready')
+  completed++
+  console.log(`READY ${id}`)
+}
+async function parse(id,meta) {
+  try { await ingest(id,meta) }
+  catch(error) {
     failures++
     console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
-    await status(id,'retry').catch(error=>console.error(`STATUS ${id}: ${error.message}`))
+    await note(id,'retry')
   }
 }
+
+try {
+  // Первый проход: адреса спрашивает только HTTP. Координатор Valve стоит
+  // заметно дороже для аккаунта, поэтому вопрос ему задаётся позже и только про
+  // те игры, которые всё ещё лежат на его серверах.
+  for(const id of candidates) {
+    if(resolved.size>=max) break
+    try {
+      const answer=await metadata.lookup(id,{allowGc:false})
+      if(answer.endedAt) ended.set(id,answer.endedAt)
+      if(answer.address) { resolved.set(id,answer.address); continue }
+      const age=ageMs(id)
+      if(age!=null&&age>retentionMs) {
+        expired++
+        console.log(`EXPIRED ${id}: Valve keeps replays for about two weeks`)
+        await note(id,'expired')
+        continue
+      }
+      if(age!=null&&age<=requestMaxAgeMs&&asked<requestLimit) {
+        await metadata.request(id)
+        asked++
+        paused.push(id)
+        console.log(`REQUEST ${id}: asked OpenDota to publish the replay address`)
+        continue
+      }
+      noReplay++
+      console.log(`WAIT ${id}: no replay address from available sources`)
+      await note(id,'waiting')
+    } catch(error) {
+      failures++
+      console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
+      await note(id,'retry')
+    }
+  }
+  // Второй проход: свежие матчи, которым OpenDota уже ищет реплей. Ждём их
+  // здесь, а не в следующем запуске, потому что это игры, которые человек
+  // сыграл только что и разбора которых он ждёт сейчас.
+  const waitingFor=paused.slice(0,Math.max(0,max-resolved.size))
+  const deadline=Date.now()+requestWaitMs
+  while(waitingFor.length&&resolved.size<max&&Date.now()<deadline) {
+    let published=false
+    for(const id of waitingFor) {
+      if(resolved.has(id)) continue
+      const answer=await metadata.lookup(id,{allowGc:false})
+      if(answer.endedAt) ended.set(id,answer.endedAt)
+      if(answer.address) { resolved.set(id,answer.address); published=true; console.log(`PUBLISHED ${id}: OpenDota released the replay address`) }
+    }
+    if(!published&&Date.now()<deadline) await delay(requestPollMs)
+  }
+  for(const id of paused) {
+    if(resolved.has(id)) continue
+    noReplay++
+    console.log(`WAIT ${id}: OpenDota has not published the replay address yet`)
+    await note(id,'waiting')
+  }
+  // Третий проход: разбор всего, для чего адрес уже есть. Координатор Valve
+  // оставлен напоследок: у него есть собственный бюджет на запуск, и он не
+  // должен задерживать игры, которые можно разобрать и без него.
+  for(const [id,meta] of resolved) {
+    if(completed>=max) break
+    await parse(id,meta)
+  }
+  if(completed<max&&metadata.gcConfigured) for(const id of candidates) {
+    if(completed>=max||gcUsed>=gcLookups) break
+    if(resolved.has(id)) continue
+    const age=ageMs(id)
+    if(age==null||age>gcMaxAgeMs) continue
+    gcUsed++
+    const meta=await metadata.lookup(id,{allowGc:true}).then(answer=>answer.address).catch(error=>{
+      failures++
+      console.error(`RETRY ${id}: ${error instanceof Error?error.message:'unknown error'}`)
+      return null
+    })
+    if(meta) await parse(id,meta)
+  }
 } finally { metadata.close() }
-console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; ошибок=${failures}; всего в очереди=${matchIds.length}`)
+console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; всего в очереди=${matchIds.length}`)
 if(failures)process.exitCode=1

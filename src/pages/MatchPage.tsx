@@ -28,6 +28,9 @@ import { CompareBars, MomentumChart, PlayerBars } from '../components/match/Char
 
 type TabId = 'overview' | 'roster' | 'charts' | 'timeline' | 'draft' | 'builds' | 'edik'
 const TABS: TabId[] = ['overview', 'roster', 'charts', 'timeline', 'draft', 'builds', 'edik']
+// Valve хранит реплеи около двух недель: у более старой игры адреса уже нет ни
+// у одного источника, и обещать на её странице скорый разбор нельзя.
+const REPLAY_RETENTION_SECONDS = 21 * 24 * 60 * 60
 const NO_PLAYERS: MatchPlayer[] = []
 
 export default function MatchPage() {
@@ -82,8 +85,11 @@ export default function MatchPage() {
   }, [matchId, attempt])
 
   const replayComplete = Boolean(timeline && match?.players.length === 10 && match.players.every(p=>p.evidence?.microVersion===1&&p.mapPlays?.structures?.length))
+  const replayExpired = Boolean(match && !replayComplete && (replayStatus?.state === 'expired' || Date.now() / 1000 - (match?.startDateTime ?? 0) > REPLAY_RETENTION_SECONDS))
+  const replayTitle = replayExpired ? 'Реплей этой игры уже не появится' : replayError ? 'Статус реплея временно недоступен' : replayStatus?.state === 'waiting' ? 'Ждём адрес реплея' : replayStatus?.state === 'parsing' ? 'Разбираем реплей' : replayStatus?.state === 'retry' ? 'Разбор реплея прервался' : 'Реплей в очереди на разбор'
+  const replayBody = replayExpired ? 'Valve хранит реплеи около двух недель, поэтому адреса этой игры больше нет ни у одного источника. Подробный разбор, графики и данные для Эдика по ней недоступны.' : replayError ? 'Не удалось связаться с сервером. Повторим проверку автоматически.' : replayStatus?.state === 'waiting' ? 'Источник пока не отдаёт адрес реплея. Когда он появится, разбор запустится автоматически.' : replayStatus?.state === 'parsing' ? 'Реплей найден. Загружаем события, маршруты и данные для Эдика.' : replayStatus?.state === 'retry' ? 'При загрузке или обработке произошла ошибка. Система повторит попытку в следующем фоновом запуске.' : 'Основная статистика уже доступна. События, графики и подробный разбор Эдика появятся после обработки реплея.'
   useEffect(() => {
-    if(loading||error||!match||replayComplete)return
+    if(loading||error||!match||replayComplete||replayExpired)return
     let alive=true,timer:ReturnType<typeof setTimeout>
     const controller=new AbortController()
     const check=async()=>{
@@ -103,7 +109,7 @@ export default function MatchPage() {
     }
     void check()
     return ()=>{alive=false;controller.abort();clearTimeout(timer)}
-  },[matchId,attempt,replayCheck,loading,error,replayComplete])
+  },[matchId,attempt,replayCheck,loading,error,replayComplete,replayExpired])
 
   const board = useMemo(
     () => (match ? buildBoard(match, (p) => {
@@ -183,9 +189,9 @@ export default function MatchPage() {
       </div>
 
       <div className="mbody">
-      {!replayComplete && <Notice kind={replayStatus?.state==='retry'||replayError?'error':'info'} title={replayError?'Статус реплея временно недоступен':replayStatus?.state==='waiting'?'Ждём адрес реплея':replayStatus?.state==='parsing'?'Разбираем реплей':replayStatus?.state==='retry'?'Разбор реплея прервался':'Реплей в очереди на разбор'}>
-        <p>{replayError?'Не удалось связаться с сервером. Повторим проверку автоматически.':replayStatus?.state==='waiting'?'Источник пока не отдаёт адрес реплея. Когда он появится, разбор запустится автоматически.':replayStatus?.state==='parsing'?'Реплей найден. Загружаем события, маршруты и данные для Эдика.':replayStatus?.state==='retry'?'При загрузке или обработке произошла ошибка. Система повторит попытку в следующем фоновом запуске.':'Основная статистика уже доступна. События, графики и подробный разбор Эдика появятся после обработки реплея.'} Страница проверяет готовность каждые 30 секунд.</p>
-        <button type="button" className="btn btn-q" disabled={checkingReplay} onClick={()=>setReplayCheck(n=>n+1)}>{checkingReplay?'Проверяем…':'Проверить сейчас'}</button>
+      {!replayComplete && <Notice kind={replayStatus?.state==='retry'||replayError?'error':'info'} title={replayTitle}>
+        <p>{replayBody}{replayExpired ? '' : ' Страница проверяет готовность каждые 30 секунд.'}</p>
+        {!replayExpired && <button type="button" className="btn btn-q" disabled={checkingReplay} onClick={()=>setReplayCheck(n=>n+1)}>{checkingReplay?'Проверяем…':'Проверить сейчас'}</button>}
       </Notice>}
       {tab === 'overview' && (
         <div role="tabpanel" id="panel-overview" aria-labelledby="tab-overview">

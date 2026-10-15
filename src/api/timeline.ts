@@ -81,7 +81,7 @@ export async function fetchTimeline(id: number): Promise<MatchTimeline | null> {
 }
 
 export interface ReplayStatus {
-  state: 'queued' | 'waiting' | 'parsing' | 'retry' | 'ready'
+  state: 'queued' | 'waiting' | 'parsing' | 'retry' | 'ready' | 'expired'
   updatedAt?: number
 }
 export async function fetchReplayStatus(id: number, signal?: AbortSignal): Promise<ReplayStatus> {

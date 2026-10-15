@@ -17,7 +17,7 @@ assert(!validEvidence({...evidence,uses:Array(16001).fill(evidence.uses[0])}))
 const bundle=buildSync({entryPoints:['cloudflare/worker.ts'],bundle:true,platform:'node',format:'esm',write:false})
 const {default:worker}=await import('data:text/javascript;base64,'+Buffer.from(bundle.outputFiles[0].text).toString('base64'))
 let queueSQL
-const rows=new Map(),env={REPLAY_INGEST_TOKEN:'test',DB:{prepare(sql){if(sql.includes('json_each(cache.value)'))queueSQL=sql;return {args:[],bind(...args){this.args=args;return this},async first(){return rows.get(this.args[0])??null},async all(){return {results:[...rows].filter(([key])=>sql.includes("'history:*'")?key.startsWith('history:'):sql.includes("'match:*'")?key.startsWith('match:'):this.args.includes(key)).map(([key,r])=>{
+const rows=new Map(),env={REPLAY_INGEST_TOKEN:'test',DB:{prepare(sql){if(sql.includes('json_each(cache.value)'))queueSQL=sql;return {args:[],bind(...args){this.args=args;return this},async first(){return rows.get(this.args[0])??null},async all(){return {results:[...rows].filter(([key])=>sql.includes("'history:*'")?key.startsWith('history:'):sql.includes("'match:*'")?key.startsWith('match:'):sql.includes("'replay-status:v1:*'")?key.startsWith('replay-status:'):this.args.includes(key)).map(([key,r])=>{
     if(!sql.includes("json_each(cache.value)"))return {key,...r}
     const data=JSON.parse(r.value),entries=Object.values(data)
     const flags=key.startsWith('replay-data:')?{
@@ -50,6 +50,11 @@ assert.equal((await (await request('/api/matches/43/replay-status')).json()).sta
 rows.set('match:42',{value:'{}',updated_at:Date.now()});rows.set('match:43',{value:'{}',updated_at:Date.now()})
 const pending=await (await request('/api/internal/replay/pending')).json()
 assert.deepEqual(pending.matchIds,[43],'directly opened matches enter the queue and complete matches leave it')
+// A replay Valve has already deleted never gets an address. The ingest marks
+// those matches xpired, and the queue must stop handing them back.
+rows.set('match:44',{value:'{}',updated_at:Date.now()})
+rows.set('replay-status:v1:44',{value:JSON.stringify({state:'expired'}),updated_at:Date.now()})
+assert.deepEqual((await (await request('/api/internal/replay/pending')).json()).matchIds,[43],'an expired match leaves the queue for good')
 // Execute the production SQL, not just the mock projection: megabyte replay
 // rows must never be returned to the Worker while checking readiness.
 const db = new DatabaseSync(':memory:')

@@ -251,7 +251,13 @@ async function pendingMatchIds(env:Env,limit:number):Promise<number[]> {
       if(timeline?.enriched&&replay?.complete&&(!recent.has(id)||replay.decision)) done.add(id)
     }
   }
-  return ids.filter(id=>!done.has(id)).slice(0,Math.min(100,Math.max(1,limit)))
+  // Реплеи Valve хранит около двух недель: матч старше этого срока адреса уже
+  // не получит ни от кого. Парсер помечает такие записи `expired`, иначе они
+  // возвращались в очередь на каждом запуске и забивали всё окно скана.
+  const parked=await env.DB.prepare("SELECT key, value FROM cache WHERE key GLOB 'replay-status:v1:*'").all<{key:string;value:string}>()
+  const expired=new Set<number>()
+  for(const row of parked.results) { try { if(JSON.parse(row.value).state==='expired') expired.add(Number(row.key.replace('replay-status:v1:',''))) } catch {} }
+  return ids.filter(id=>!done.has(id)&&!expired.has(id)).slice(0,Math.min(100,Math.max(1,limit)))
 }
 async function profiles(env:Env,ids:number[],ctx?:ExecutionContext) {
   const out=new Map<number,{name:string|null;avatar:string|null}>(), missing:number[]=[]
@@ -420,7 +426,7 @@ export default {
       if(request.method!=='POST')return json({error:'Method not allowed'},405)
       const raw=await request.text();if(raw.length>2000)return json({error:'Payload too large'},413)
       let data:any;try{data=JSON.parse(raw)}catch{return json({error:'Invalid JSON'},400)}
-      if(!['waiting','parsing','retry','ready'].includes(data?.state))return json({error:'Invalid replay state'},400)
+      if(!['waiting','parsing','retry','ready','expired'].includes(data?.state))return json({error:'Invalid replay state'},400)
       await save(env,`replay-status:v1:${replayStatusUpdate[1]}`,{state:data.state,updatedAt:Date.now()})
       return json({ok:true})
     }
