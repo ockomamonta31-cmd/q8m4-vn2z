@@ -52,7 +52,10 @@ const gcLookups=Math.max(0,Number(process.env.REPLAY_GC_LOOKUPS)||4)
 // запуском перечитывал одни и те же сорок записей без адреса.
 const requestLimit=Math.max(0,Number(process.env.REPLAY_REQUEST_LIMIT)||10)
 const requestWaitMs=Math.max(0,Number(process.env.REPLAY_REQUEST_WAIT_SECONDS)||120)*1000
-const requestPollMs=Math.max(1,Number(process.env.REPLAY_REQUEST_POLL_SECONDS)||10)*1000
+// Каждый опрос — это запрос к OpenDota, а её квота общая на адрес раннера.
+// Адрес реплея публикуется примерно через минуту и ждать его чаще, чем раз в
+// двадцать секунд, нечего.
+const requestPollMs=Math.max(1,Number(process.env.REPLAY_REQUEST_POLL_SECONDS)||20)*1000
 
 const resolved=new Map(), ended=new Map(), paused=[]
 let completed=0,noReplay=0,failures=0,expired=0,asked=0,gcUsed=0
@@ -86,18 +89,29 @@ try {
   // Первый проход: адреса спрашивает только HTTP. Координатор Valve стоит
   // заметно дороже для аккаунта, поэтому вопрос ему задаётся позже и только про
   // те игры, которые всё ещё лежат на его серверах.
+  // Возраст кандидатов приходит из нашего кэша одним запросом: у OpenDota это
+  // её квота, а очередь наполовину состоит из матчей, чьи реплеи Valve уже
+  // удалил. Просроченное отсекаем по своему кэшу, не спрашивая провайдеров.
+  const ages=await get(`/api/internal/replay/ages?ids=${candidates.join(',')}`).then(x=>x.ages??{}).catch(()=>({}))
+  for(const [id,at] of Object.entries(ages)) ended.set(Number(id),Number(at))
+  // Спрашиваем провайдеров ровно про столько игр, сколько запуск разберёт:
+  // адрес остальных понадобится в следующем запуске, когда они поднимутся к
+  // голове очереди, а запрос сейчас только жжёт общую квоту адреса раннера.
+  let probed=0
   for(const id of candidates) {
     if(resolved.size>=max) break
+    if(replayAgeAction(ageMs(id),retentionMs)==='expired') {
+      expired++
+      console.log(`EXPIRED ${id}: the replay is older than anyone keeps`)
+      await note(id,'expired')
+      continue
+    }
+    if(probed>=max) continue
+    probed++
     try {
       const answer=await metadata.lookup(id,{allowGc:false})
       if(answer.endedAt) ended.set(id,answer.endedAt)
       if(answer.address) { resolved.set(id,answer.address); continue }
-      if(replayAgeAction(ageMs(id),retentionMs)==='expired') {
-        expired++
-        console.log(`EXPIRED ${id}: the replay is older than anyone keeps`)
-        await note(id,'expired')
-        continue
-      }
       // Запуск разбирает столько игр, сколько успевает, поэтому и спрашиваем
       // ровно про столько: у OpenDota каждый запрос — это её парсер, а здесь
       // ещё и ожидание ответа.
@@ -172,5 +186,5 @@ try {
     if(meta) await parse(id,meta)
   }
 } finally { metadata.close() }
-console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; всего в очереди=${matchIds.length}`)
+console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; всего в очереди=${matchIds.length}; квота OpenDota=${metadata.remainingQuota()??'неизвестна'}`)
 if(failures)process.exitCode=1

@@ -40,8 +40,15 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
   // An unavailable provider gets one attempt per batch, rather than stalling
   // every queued match. The next scheduled batch tries it again.
   const failed = new Map()
+  // OpenDota reports what is left of the caller's quota in headers. The runner
+  // shares its address with every other project on GitHub's pool, so without
+  // this number a batch that spent the day's limit looks exactly like a provider
+  // that is down.
+  let remainingDay = null
   async function json(url, options, signal, allow404 = false) {
     const response = await fetcher(url, { ...options, signal })
+    const left = response.headers?.get?.('x-rate-limit-remaining-day')
+    if (left != null) { const value = Number(left); if (Number.isFinite(value)) remainingDay = value }
     if (allow404 && response.status === 404) { await response.body?.cancel(); return null }
     if (!response.ok) { await response.body?.cancel(); throw new Error(`HTTP ${response.status}`) }
     return response.json()
@@ -127,6 +134,9 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
     },
     // The caller decides whether asking Valve is worth a request at all.
     gcConfigured: gc.configured,
+    // Quota left for the address this run was given, or null if no provider
+    // answered with a header yet.
+    remainingQuota: () => remainingDay,
     close() { gc.close() },
   }
 }
