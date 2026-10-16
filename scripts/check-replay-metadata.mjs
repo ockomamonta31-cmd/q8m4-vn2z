@@ -46,7 +46,8 @@ function fakeSteam(script) {
   const match = await gc.lookup(9046298688)
   assert.equal(match.cluster, 183)
   assert.equal(match.replaySalt, 932364230)
-  assert.equal(created.length, 3, 'a dropped request is retried instead of ending the batch')
+  assert.equal(created.length, 1, 'the same session is asked again before paying for a new Steam login')
+  assert.equal(created[0].asks, 3, 'the dropped requests were really resent inside that session')
   gc.close()
 }
 
@@ -134,6 +135,26 @@ const unreachable = createReplayMetadataResolver({ env: {}, fetcher: async () =>
 await assert.rejects(() => unreachable.lookup(1), /sources unavailable/, 'nothing answered is a retry, not a waiting match')
 await assert.rejects(() => resolver.request('abc'), /Invalid match ID/)
 const missing = createReplayMetadataResolver({ env: {}, fetcher: async () => json({}, 404), gc: { configured: false, lookup: async () => null, close() {} } })
-assert.deepEqual(await missing.lookup(9046298688), { address: null, endedAt: null, source: null })
+assert.deepEqual(await missing.lookup(9046298688), { address: null, endedAt: null, source: null, gcError: null, gcState: null })
+
+// Valve's own enum is 0 = REPLAY_AVAILABLE, 1 = NOT_RECORDED, 2 = EXPIRED, and
+// the batch never reported which of the three it was told. A coordinator that
+// stays silent is a third case again: it is not an answer about the replay, and
+// treating it as one is how a dead branch looked healthy for twenty runs.
+const told = replayState => createReplayMetadataResolver({
+  env: {}, fetcher: async () => json({}, 404),
+  gc: { configured: true, close() {}, lookup: async () => ({ matchId: 9046298688, cluster: 183, replaySalt: 932364230, replayState }) },
+})
+assert.equal((await told(0).lookup(9046298688)).address.source, 'Valve GC', 'REPLAY_AVAILABLE is an address')
+assert.equal((await told(1).lookup(9046298688)).address, null, 'REPLAY_NOT_RECORDED is not an address')
+assert.equal((await told(2).lookup(9046298688)).address, null, 'REPLAY_EXPIRED is not an address')
+
+const silent = createReplayMetadataResolver({
+  env: {}, fetcher: async () => json({}, 404),
+  gc: { configured: true, close() {}, lookup: async () => { throw new Error('Valve GC match request timed out after 1 asks') } },
+})
+const silence = await silent.lookup(9046298688)
+assert.equal(silence.address, null)
+assert.match(silence.gcError, /timed out/, 'a coordinator that never answers is reported, not swallowed')
 
 console.log('check-replay-metadata: ok')

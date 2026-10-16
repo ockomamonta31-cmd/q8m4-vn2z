@@ -25,6 +25,15 @@ const status=async(id,state)=>{
 }
 
 const numeric=value=>String(value).trim().match(/^\d+$/)?.[0]
+// `Number(x)||default` превращает явный ноль в дефолт, а ноль здесь и есть
+// главный переключатель: выключить запросы к OpenDota или к координатору.
+// Проверено на живом запуске — REPLAY_REQUEST_LIMIT=0 всё равно ходил в провайдер.
+const num=(name,def,min=0)=>{
+  const raw=process.env[name]
+  if(raw===undefined||String(raw).trim()==='') return def
+  const value=Number(raw)
+  return Number.isFinite(value)?Math.max(min,value):def
+}
 const requestedId=process.env.REPLAY_MATCH_ID
 // Ручной dispatch умеет список: "123,456". Всё, что не чистые цифры, отбрасываем,
 // чтобы в аргументы парсера не попало ничего кроме ID матча.
@@ -37,11 +46,11 @@ const dispatched=(()=>{
   catch { return String(raw??'').split(',') }
 })()
 const pinned=[...new Set([...requested,...dispatched.map(numeric).filter(Boolean)])]
-const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
+const max=num('REPLAY_MATCHES_PER_RUN',5,1)
 // Смотрим только на свежие кандидаты. Valve публикует replay_salt не сразу, и
 // без окна батч доедал бы очередь до матчей недельной давности, хотя смысл в
 // том, чтобы разобрать то, что человек только что сыграл.
-const scan=Math.max(max,Number(process.env.REPLAY_SCAN_LIMIT)||40)
+const scan=Math.max(max,num('REPLAY_SCAN_LIMIT',40,1))
 const {matchIds:queued=[]}=requested.length?{matchIds:[]}:await get('/api/internal/replay/pending?limit=200')
 // Названный матч идёт в голове, а очередь — сразу за ним: адреса у названного
 // ещё может не быть, и тогда запуск разбирает то, что уже опубликовано, вместо
@@ -51,33 +60,33 @@ const candidates=[...new Set([...pinned,...queued])].slice(0,Math.max(scan,pinne
 // Valve удаляет реплеи через несколько недель, и для более старых матчей адреса
 // не существует уже ни у кого. Держать их в очереди незачем: каждый запуск они
 // занимали место в окне скана, которое нужно свежим играм.
-const retentionMs=Math.max(1,Number(process.env.REPLAY_RETENTION_DAYS)||21)*86_400_000
+const retentionMs=num('REPLAY_RETENTION_DAYS',21,1)*86_400_000
 // Наш собственный сеанс в координаторе Valve отвечает за секунды, но он же и
 // самый хрупкий: Valve ограничивает аккаунт, который спрашивает про всё подряд.
 // Поэтому туда идут только те игры, которые сыграны только что.
-const gcMaxAgeMs=Math.max(1,Number(process.env.REPLAY_GC_MAX_AGE_HOURS)||24)*3_600_000
-const gcLookups=Math.max(0,Number(process.env.REPLAY_GC_LOOKUPS)||4)
+const gcMaxAgeMs=num('REPLAY_GC_MAX_AGE_HOURS',24,1)*3_600_000
+const gcLookups=num('REPLAY_GC_LOOKUPS',4)
 // Остальное разбирает OpenDota по запросу: её бот сам забирает адрес в
 // координаторе и публикует его за секунды — замерено на матче пятидневной
 // давности. Спрашивать имеет смысл всё, что ещё не просрочено, а не только
 // считанные часы: очередь из суточных матчей стояла в WAIT, пока запуск за
 // запуском перечитывал одни и те же сорок записей без адреса.
-const requestLimit=Math.max(0,Number(process.env.REPLAY_REQUEST_LIMIT)||10)
-const requestWaitMs=Math.max(0,Number(process.env.REPLAY_REQUEST_WAIT_SECONDS)||120)*1000
+const requestLimit=num('REPLAY_REQUEST_LIMIT',10)
+const requestWaitMs=num('REPLAY_REQUEST_WAIT_SECONDS',120)*1000
 // Каждый опрос — это запрос к OpenDota, а её квота общая на адрес раннера.
 // Адрес реплея публикуется примерно через минуту и ждать его чаще, чем раз в
 // двадцать секунд, нечего.
-const requestPollMs=Math.max(1,Number(process.env.REPLAY_REQUEST_POLL_SECONDS)||20)*1000
+const requestPollMs=num('REPLAY_REQUEST_POLL_SECONDS',20,1)*1000
 // Опрашивать ровно столько игр, сколько запуск разберёт, — значит разбирать
 // одну: из сорока просмотренных адрес обычно есть у единицы, а остальные сорок
 // батч уже не смотрит. Опрос стоит один запрос OpenDota, чья суточная квота
 // видна в заголовках, поэтому бюджет проб привязываем к квоте, а не к лимиту
 // разбора.
-const probeBudget=Math.max(max,Number(process.env.REPLAY_PROBE_BUDGET)||max*3)
-const quotaFloor=Math.max(0,Number(process.env.REPLAY_QUOTA_FLOOR)||150)
+const probeBudget=Math.max(max,num('REPLAY_PROBE_BUDGET',max*3,1))
+const quotaFloor=num('REPLAY_QUOTA_FLOOR',150)
 
 const resolved=new Map(), ended=new Map(), paused=[]
-let completed=0,noReplay=0,failures=0,throttled=0,expired=0,asked=0,gcUsed=0,probed=0
+let completed=0,noReplay=0,failures=0,throttled=0,expired=0,asked=0,gcUsed=0,gcSilent=0,probed=0
 const queuedCount=queued.length
 const ageMs=id=>{const at=ended.get(id);return at==null?null:Date.now()-at*1000}
 const metadata=createReplayMetadataResolver()
@@ -207,12 +216,18 @@ try {
     // остальных источников.
     if(age!=null&&age>gcMaxAgeMs) continue
     gcUsed++
-    const meta=await metadata.lookup(id,{allowGc:true}).then(answer=>answer.address).catch(error=>{
+    const answer=await metadata.lookup(id,{allowGc:true}).catch(error=>{
       report(id,error)
       return null
     })
+    // Молчание координатора — не «реплея нет», а «мы не спросили». Разница
+    // стоит того, чтобы быть в сводке: без неё мёртвая ветка выглядела
+    // отвечавшей.
+    if(answer?.gcError) { gcSilent++; console.error(`GC ${id}: ${answer.gcError}`) }
+    else if(answer && !answer.address) console.log(`GC ${id}: state=${answer.gcState??'неизвестен'}, адреса нет`)
+    const meta=answer?.address??null
     if(meta) await parse(id,meta)
   }
 } finally { metadata.close() }
-console.log(`INGEST ${completed}/${candidates.length}; опрос=${probed}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; приторможено=${throttled}; всего в очереди=${queuedCount}; квота OpenDota=${metadata.remainingQuota()??'неизвестна'}`)
+console.log(`INGEST ${completed}/${candidates.length}; опрос=${probed}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; без ответа Valve GC=${gcSilent}; ошибок=${failures}; приторможено=${throttled}; всего в очереди=${queuedCount}; квота OpenDota=${metadata.remainingQuota()??'неизвестна'}`)
 if(failures)process.exitCode=1

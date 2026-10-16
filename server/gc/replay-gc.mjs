@@ -42,6 +42,12 @@ export function createReplayGc({ env = process.env, Steam = SteamUser,
   connectMs = 20_000, requestMs = 8_000, asks = 3, attempts = 3, retryMs = 1_000,
   sessions = 4, budgetMs = 180_000, onRefreshToken = () => {} } = {}) {
   const configured = Boolean(env.STEAM_REFRESH_TOKEN || (env.STEAM_ACCOUNT && env.STEAM_PASSWORD))
+  // Координатор умеет молчать весь запуск, и молчание не должно стоить трети
+  // ранна: цена одного вопроса — requestMs, помноженные на повторы внутри
+  // сеанса и на число новых сеансов. Замерено: 101 секунда на матч, когда
+  // ответов нет вообще.
+  const askLimit = Math.max(1, Number(env.REPLAY_GC_ASKS) || asks)
+  const attemptLimit = Math.max(1, Number(env.REPLAY_GC_ATTEMPTS) || attempts)
   // The budget bounds the asking, not the batch. Measured from process start it
   // was already gone by the time the coordinator pass ran — the OpenDota pass
   // ahead of it alone outlasts it — so every question answered "budget spent"
@@ -143,7 +149,7 @@ export function createReplayGc({ env = process.env, Steam = SteamUser,
       const wait = () => {
         job.timer = setTimeout(() => {
           if (current.pending !== job) return
-          if (job.sent < asks) { wait(); send(); return }
+          if (job.sent < askLimit) { wait(); send(); return }
           current.pending = undefined
           job.error = new Error(`Valve GC match request timed out after ${job.sent} asks`)
           job.reject(job.error)
@@ -165,7 +171,7 @@ export function createReplayGc({ env = process.env, Steam = SteamUser,
       startedAt ??= Date.now()
       if (spent()) throw (fatal = new Error('Valve GC time budget for this run is spent'))
       let last
-      for (let attempt = 1; attempt <= attempts; attempt++) {
+      for (let attempt = 1; attempt <= attemptLimit; attempt++) {
         try {
           if (!state?.ready) {
             if (opened >= sessions) throw (fatal = new Error('Valve GC session limit for this run is reached'))

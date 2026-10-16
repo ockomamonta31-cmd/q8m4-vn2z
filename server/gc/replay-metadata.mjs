@@ -157,17 +157,23 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
           }
         }
       } finally { clearTimeout(timer); controller.abort() }
+      let gcError = null, gcState = null
       if (!address && allowGc && gc.configured) {
         try {
           const value = await gc.lookup(Number(id))
           answered = true
+          gcState = value?.replayState ?? null
           // The coordinator reports deleted and expired replays as a state
           // instead of an address, and only an address can be downloaded.
+          // Valve's own enum: 0 = REPLAY_AVAILABLE, 1 = NOT_RECORDED, 2 = EXPIRED.
           if (value && value.replayState !== 1 && value.replayState !== 2) {
             address = replayMetadata(id, Number(value.matchId), value.cluster, value.replaySalt, 'Valve GC')
           }
         } catch (error) {
           errors.push({ provider: 'Valve GC', error })
+          // Не только в warn: молчание координатора уже проходило мимо сводки,
+          // потому что 404 от OpenDota выставлял answered и глушил бросок.
+          gcError = error.message
           log(`Replay metadata Valve GC: ${error.message}`)
         }
       }
@@ -178,7 +184,7 @@ export function createReplayMetadataResolver({ env = process.env, fetcher = fetc
         error.throttled = errors.every(entry => isThrottled(entry.error))
         throw error
       }
-      return { address, endedAt, source: address?.source ?? null }
+      return { address, endedAt, source: address?.source ?? null, gcError, gcState }
     },
     // The caller decides whether asking Valve is worth a request at all.
     gcConfigured: gc.configured,

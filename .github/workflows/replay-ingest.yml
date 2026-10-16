@@ -41,6 +41,13 @@ jobs:
       # /^\d+$/ — payload считает данными, которыми может управлять чужой код.
       REPLAY_DISPATCH_MATCH_IDS: ${{ toJSON(github.event.client_payload.matchIds) }}
       REPLAY_SCAN_LIMIT: 40
+      # Координатор Valve не ответил ни разу за 20+ запусков, а один вопрос ему
+      # стоил ранна 101 секунду (3 повтора × 3 новых сеанса × 8 с ожидания).
+      # Бюджет урезан до одного дешёвого вопроса: ветка остаётся под наблюдением,
+      # но перестаёт съедать треть времени, которое можно отдать на разбор.
+      REPLAY_GC_LOOKUPS: '1'
+      REPLAY_GC_ASKS: '1'
+      REPLAY_GC_ATTEMPTS: '1'
       REPLAY_MATCH_ID: ${{ inputs.match_id }}
       DOTA_PARSER_URL: http://127.0.0.1:5600
       REPLAY_SPATIAL_CONTAINER: replay-parser
