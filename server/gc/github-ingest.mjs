@@ -24,17 +24,29 @@ const status=async(id,state)=>{
   await replayJson(new URL(`/api/internal/replay/${id}/status`,base),{method:'POST',headers:{...headers,'content-type':'application/json'},body:JSON.stringify({state})})
 }
 
+const numeric=value=>String(value).trim().match(/^\d+$/)?.[0]
 const requestedId=process.env.REPLAY_MATCH_ID
 // Ручной dispatch умеет список: "123,456". Всё, что не чистые цифры, отбрасываем,
 // чтобы в аргументы парсера не попало ничего кроме ID матча.
-const requested=(requestedId??'').split(',').map((x)=>x.trim()).filter((x)=>/^\d+$/.test(x))
-const {matchIds=[]}=requested.length?{matchIds:requested}:await get('/api/internal/replay/pending?limit=100')
+const requested=(requestedId??'').split(',').map(numeric).filter(Boolean)
+// Будильник от открытой страницы тоже указывает матч: без него запуск, который
+// разбудил человек, уходит разбирать голову очереди, а не его игру.
+const dispatched=(()=>{
+  const raw=process.env.REPLAY_DISPATCH_MATCH_IDS
+  try { const value=JSON.parse(raw??'[]'); return Array.isArray(value)?value:[] }
+  catch { return String(raw??'').split(',') }
+})()
+const pinned=[...new Set([...requested,...dispatched.map(numeric).filter(Boolean)])]
 const max=Math.max(1,Number(process.env.REPLAY_MATCHES_PER_RUN)||5)
 // Смотрим только на свежие кандидаты. Valve публикует replay_salt не сразу, и
 // без окна батч доедал бы очередь до матчей недельной давности, хотя смысл в
 // том, чтобы разобрать то, что человек только что сыграл.
 const scan=Math.max(max,Number(process.env.REPLAY_SCAN_LIMIT)||40)
-const candidates=matchIds.slice(0,scan)
+const {matchIds:queued=[]}=requested.length?{matchIds:[]}:await get('/api/internal/replay/pending?limit=200')
+// Названный матч идёт в голове, а очередь — сразу за ним: адреса у названного
+// ещё может не быть, и тогда запуск разбирает то, что уже опубликовано, вместо
+// того чтобы просто выдохнуть окно ожидания.
+const candidates=[...new Set([...pinned,...queued])].slice(0,Math.max(scan,pinned.length))
 
 // Valve удаляет реплеи через несколько недель, и для более старых матчей адреса
 // не существует уже ни у кого. Держать их в очереди незачем: каждый запуск они
@@ -56,9 +68,17 @@ const requestWaitMs=Math.max(0,Number(process.env.REPLAY_REQUEST_WAIT_SECONDS)||
 // Адрес реплея публикуется примерно через минуту и ждать его чаще, чем раз в
 // двадцать секунд, нечего.
 const requestPollMs=Math.max(1,Number(process.env.REPLAY_REQUEST_POLL_SECONDS)||20)*1000
+// Опрашивать ровно столько игр, сколько запуск разберёт, — значит разбирать
+// одну: из сорока просмотренных адрес обычно есть у единицы, а остальные сорок
+// батч уже не смотрит. Опрос стоит один запрос OpenDota, чья суточная квота
+// видна в заголовках, поэтому бюджет проб привязываем к квоте, а не к лимиту
+// разбора.
+const probeBudget=Math.max(max,Number(process.env.REPLAY_PROBE_BUDGET)||max*3)
+const quotaFloor=Math.max(0,Number(process.env.REPLAY_QUOTA_FLOOR)||150)
 
 const resolved=new Map(), ended=new Map(), paused=[]
-let completed=0,noReplay=0,failures=0,throttled=0,expired=0,asked=0,gcUsed=0
+let completed=0,noReplay=0,failures=0,throttled=0,expired=0,asked=0,gcUsed=0,probed=0
+const queuedCount=queued.length
 const ageMs=id=>{const at=ended.get(id);return at==null?null:Date.now()-at*1000}
 const metadata=createReplayMetadataResolver()
 const note=async(id,state)=>{ await status(id,state).catch(error=>console.error(`STATUS ${id}: ${error.message}`)) }
@@ -104,10 +124,9 @@ try {
   // удалил. Просроченное отсекаем по своему кэшу, не спрашивая провайдеров.
   const ages=await get(`/api/internal/replay/ages?ids=${candidates.join(',')}`).then(x=>x.ages??{}).catch(()=>({}))
   for(const [id,at] of Object.entries(ages)) ended.set(Number(id),Number(at))
-  // Спрашиваем провайдеров ровно про столько игр, сколько запуск разберёт:
-  // адрес остальных понадобится в следующем запуске, когда они поднимутся к
-  // голове очереди, а запрос сейчас только жжёт общую квоту адреса раннера.
-  let probed=0
+  // Провайдеров опрашиваем с запасом против лимита разбора: адрес из очереди
+  // обычно есть у одной игры из сорока, и батч, который смотрит ровно столько,
+  // сколько разбирает, разбирает одну.
   for(const id of candidates) {
     if(resolved.size>=max) break
     if(replayAgeAction(ageMs(id),retentionMs)==='expired') {
@@ -116,7 +135,7 @@ try {
       await note(id,'expired')
       continue
     }
-    if(probed>=max) continue
+    if(probed>=probeBudget||metadata.remainingQuota()!==null&&metadata.remainingQuota()<=quotaFloor) continue
     probed++
     try {
       const answer=await metadata.lookup(id,{allowGc:false})
@@ -195,5 +214,5 @@ try {
     if(meta) await parse(id,meta)
   }
 } finally { metadata.close() }
-console.log(`INGEST ${completed}/${candidates.length}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; приторможено=${throttled}; всего в очереди=${matchIds.length}; квота OpenDota=${metadata.remainingQuota()??'неизвестна'}`)
+console.log(`INGEST ${completed}/${candidates.length}; опрос=${probed}; без адреса реплея=${noReplay}; запрошено у OpenDota=${asked}; просрочено=${expired}; вопросов к Valve GC=${gcUsed}; ошибок=${failures}; приторможено=${throttled}; всего в очереди=${queuedCount}; квота OpenDota=${metadata.remainingQuota()??'неизвестна'}`)
 if(failures)process.exitCode=1

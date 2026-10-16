@@ -30,10 +30,16 @@ jobs:
       REPLAY_INGEST_TOKEN: ${{ secrets.REPLAY_INGEST_TOKEN }}
       STRATZ_API_TOKEN: ${{ secrets.STRATZ_API_TOKEN }}
       STEAM_REFRESH_TOKEN: ${{ secrets.STEAM_REFRESH_TOKEN }}
-      # Из repository_dispatch берём только числовой лимит и проходим его через
-      # env: payload GitHub считает данными, которыми теоретически может
-      # управлять чужой код. Список матчей раннер читает сам из своего API.
+      # Из repository_dispatch берём только числовой лимит и список ID матчей, и
+      # то и другое проходит через env: payload GitHub считает данными, которыми
+      # теоретически может управлять чужой код. Оба значения раннер фильтрует по
+      # /^\d+$/ и передаёт в spawn без оболочки.
       REPLAY_MATCHES_PER_RUN: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.limit || '5' }}
+      # Матч, ради которого нас разбудили. toJSON, а не join: у join'а свои
+      # правила для отсутствующих полей, а здесь null должен приехать в раннер
+      # пустым значением, а не падать. Дальше список всё равно фильтруется по
+      # /^\d+$/ — payload считает данными, которыми может управлять чужой код.
+      REPLAY_DISPATCH_MATCH_IDS: ${{ toJSON(github.event.client_payload.matchIds) }}
       REPLAY_SCAN_LIMIT: 40
       REPLAY_MATCH_ID: ${{ inputs.match_id }}
       DOTA_PARSER_URL: http://127.0.0.1:5600
